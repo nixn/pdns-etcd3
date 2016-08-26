@@ -7,6 +7,7 @@ import (
   "os"
   "encoding/json"
   "strings"
+  "regexp"
   // "golang.org/x/net/context"
   "github.com/coreos/etcd/clientv3"
 )
@@ -18,6 +19,9 @@ type PdnsRequest struct {
 
 const DefaultDialTimeout = 2 * time.Second
 
+var cli *clientv3.Client
+var prefix = ""
+
 func main() {
   dec := json.NewDecoder(os.Stdin)
   enc := json.NewEncoder(os.Stdout)
@@ -28,7 +32,19 @@ func main() {
   if request.Method != "initialize" {
     log.Fatalln("Waited for 'initialize', got:", request.Method)
   }
-  var cli *clientv3.Client
+  if pfx, ok := request.Parameters["prefix"]; ok {
+    if pfx, ok := pfx.(string); ok {
+      if len(pfx) > 0 && !strings.HasPrefix(pfx, "/") {
+        fatal(enc, "parameters.prefix does not start with a slash (\"/\")")
+      }
+      pfx = strings.TrimRight(pfx, "/")
+      re := regexp.MustCompile("//+")
+      prefix = re.ReplaceAllString(pfx, "/")
+    } else {
+      fatal(enc, "parameters.prefix is not a string")
+    }
+  }
+  log.Println("prefix:", prefix)
   if configFile, ok := request.Parameters["configFile"]; ok {
     if configFile, ok := configFile.(string); ok {
       if client, err := clientv3.NewFromConfigFile(configFile); err == nil {
@@ -75,7 +91,7 @@ func main() {
         fatal(enc, "parameters.endpoints is not a string")
       }
     } else {
-      fatal(enc, "No endpoints defined")
+      fatal(enc, "Missing parameters.endpoints")
     }
   }
 }
