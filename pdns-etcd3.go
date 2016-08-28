@@ -10,7 +10,6 @@ import (
   "encoding/json"
   "strings"
   "regexp"
-  "strconv"
   "golang.org/x/net/context"
   "github.com/coreos/etcd/clientv3"
 )
@@ -28,6 +27,12 @@ var (
   cli *clientv3.Client
   timeout = 2 * time.Second
   prefix = ""
+)
+
+var (
+  zone2id = map[string]int32{}
+  id2zone = map[int32]string{}
+  nextZoneId int32 = 1
 )
 
 func main() {
@@ -150,48 +155,79 @@ func fatal(enc *json.Encoder, msg string) {
   log.Fatalln("Fatal error:", msg)
 }
 
+func extractSubdomain(domain, zone string) string {
+  subdomain := strings.TrimSuffix(domain, zone)
+  subdomain = strings.TrimSuffix(subdomain, ".")
+  return subdomain
+}
+
 func lookup(params map[string]interface{}) (interface{}, error) {
   qname := params["qname"].(string)
   qtype := params["qtype"].(string)
-  key := prefix + "/" + qname + "/"
-  defaultsKey := key + "-defaults"
-  ttlKey := key + "-default-ttl"
-  key += qtype
+  zoneId := int32(params["zone-id"].(float64)) // note: documenation says 'zone_id', but it's 'zone-id'! further it is called 'domain_id' in responses (what a mess)
+  var zone string
+  var isNewZone bool
+  if z, ok := id2zone[zoneId]; ok {
+    zone = z
+    isNewZone = false
+  } else {
+    zone = qname
+    isNewZone = true
+  }
+  zoneKey := prefix + "/" + zone
+  subdomain := extractSubdomain(qname, zone)
+  if len(subdomain) == 0 { subdomain = "@" }
+  subdomainKey := zoneKey + "/" + subdomain
+  recordKey := subdomainKey
+  isANY := qtype == "ANY"
+  if !isANY { recordKey += "/" + qtype }
   opts := []clientv3.OpOption{}
-  if qtype != "SOA" {
-    key += "/"
+  isSOA := qtype == "SOA"
+  if !isSOA {
+    recordKey += "/"
     opts = append(opts, clientv3.WithPrefix())
   }
   var response *clientv3.GetResponse
   var err error
   ctx, cancel := context.WithTimeout(context.Background(), timeout)
   defer cancel()
-  response, err = cli.Get(ctx, ttlKey)
-  if err != nil { return false, err }
-  var defaultTTL int32 = -1
-  if response.Count > 0 {
-    ttl, err := strconv.ParseInt(string(response.Kvs[0].Value), 0, 32)
-    if err != nil { return false, err }
-    defaultTTL = int32(ttl)
-  }
+  // TODO lazy loading of defaults
   defaults := map[string]interface{}{}
-  response, err = cli.Get(ctx, defaultsKey)
+  response, err = cli.Get(ctx, zoneKey + "/-defaults")
   if err != nil { return false, err }
   if response.Count > 0 {
     err = json.Unmarshal(response.Kvs[0].Value, &defaults)
     if err != nil { return false, err }
   }
-  response, err = cli.Get(ctx, defaultsKey + "/" + qtype)
-  if response.Count > 0 {
-    err = json.Unmarshal(response.Kvs[0].Value, &defaults)
-    if err != nil { return false, err }
+  // TODO load defaults for subdomain
+  if !isSOA && !isANY {
+    response, err = cli.Get(ctx, recordKey + "-defaults")
+    if response.Count > 0 {
+      err = json.Unmarshal(response.Kvs[0].Value, &defaults)
+      if err != nil { return false, err }
+    }
   }
-  response, err = cli.Get(ctx, key, opts...) // TODO set quorum option. not in API, perhaps default now (in v3)?
+  log.Println("lookup at", recordKey)
+  response, err = cli.Get(ctx, recordKey, opts...) // TODO set quorum option. not in API, perhaps default now (in v3)?
   if err != nil { return false, err }
+  if isSOA && isNewZone && response.Count > 0 {
+    zoneId = nextZoneId
+    nextZoneId++
+    zone2id[zone] = zoneId
+    id2zone[zoneId] = zone
+  }
   result := []map[string]interface{}{}
   for _, item := range response.Kvs {
+    itemKey := string(item.Key)
+    if strings.HasSuffix(itemKey, "-defaults") { continue }
+    qtype := qtype // create a copy
+    if isANY {
+      qtype = strings.TrimPrefix(itemKey, recordKey)
+      idx := strings.Index(qtype, "/")
+      if idx >= 0 { qtype = qtype[0:idx] }
+    }
     var content string
-    var ttl int32 = defaultTTL
+    var ttl int32 = -1
     ttlIsSet := false
     if len(item.Value) == 0 { return false, errors.New("empty value") }
     if item.Value[0] == '{' {
@@ -200,12 +236,15 @@ func lookup(params map[string]interface{}) (interface{}, error) {
       if err != nil { return false, err }
       err = nil
       switch qtype {
-        case "SOA": content, ttl, err = soa(obj, defaults, qname, response.Header.Revision)
-        default: return false, errors.New("unknown/unimplemented qtype '" + qtype + "', but have (JSON) object data for it")
+        case "SOA": content, ttl, err = soa(obj, defaults, zone, response.Header.Revision)
+        case "NS": content, ttl, err = ns(obj, defaults, zone)
+        // TODO more qtypes
+        default: return false, errors.New("unknown/unimplemented qtype '" + qtype + "', but have (JSON) object data for it (" + recordKey + ")")
       }
       if err != nil { return false, err }
     } else {
       content = string(item.Value)
+      ttl, err = getInt32("ttl", defaults)
     }
     if ttl < 0 {
       if ttlIsSet {
@@ -214,17 +253,19 @@ func lookup(params map[string]interface{}) (interface{}, error) {
         return false, errors.New("TTL not set")
       }
     }
-    result = append(result, makeResultItem(qname, qtype, content, ttl))
+    result = append(result, makeResultItem(zoneId, qname, qtype, content, ttl, zoneId > 0))
   }
   return result, nil
 }
 
-func makeResultItem(qname, qtype, content string, ttl int32) map[string]interface{} {
+func makeResultItem(zoneId int32, qname, qtype, content string, ttl int32, auth bool) map[string]interface{} {
   return map[string]interface{}{
+    "domain_id": zoneId,
     "qname": qname,
     "qtype": qtype,
     "content": content,
     "ttl": ttl,
+    "auth": auth,
   }
 }
 
@@ -249,74 +290,83 @@ func findValue(name string, maps ...map[string]interface{}) (interface{}, bool) 
   return nil, false
 }
 
-func soa(record, defaults map[string]interface{}, qname string, revision int64) (string, int32, error) {
+func getInt32(name string, maps ...map[string]interface{}) (int32, error) {
+  if v, ok := findValue(name, maps...); ok {
+    if v, ok := v.(float64); ok {
+      if v < 0 {
+        return 0, errors.New("'" + name + "' may not be negative")
+      }
+      return int32(v), nil
+    } else {
+      return 0, errors.New("'" + name + "' is not a number")
+    }
+  } else {
+    return 0, errors.New("missing '" + name + "'")
+  }
+}
+
+func getString(name string, maps ...map[string]interface{}) (string, error) {
+  if v, ok := findValue(name, maps...); ok {
+    if v, ok := v.(string); ok {
+      return v, nil
+    } else {
+      return "", errors.New("'" + name + "' is not a string")
+    }
+  } else {
+    return "", errors.New("missing '" + name + "'")
+  }
+}
+
+func soa(record, defaults map[string]interface{}, zone string, revision int64) (string, int32, error) {
   // primary
-  var primary string
-  if v, ok := findValue("primary", record, defaults); ok {
-    if v, ok := v.(string); ok {
-      primary = v
-    } else {
-      return "", 0, errors.New("'primary' is not a string")
-    }
-  } else {
-    return "", 0, errors.New("missing 'primary'")
-  }
-  primary = fqdn(strings.TrimSpace(primary), qname)
+  primary, err := getString("primary", record, defaults)
+  if err != nil { return "", 0, err }
+  primary = strings.TrimSpace(primary)
+  primary = fqdn(primary, zone)
   // mail
-  var mail string
-  if v, ok := findValue("mail", record, defaults); ok {
-    if v, ok := v.(string); ok {
-      mail = v
-    } else {
-      return "", 0, errors.New("'mail' is not a string")
-    }
-  } else if v, ok := defaults["mail"].(string); ok {
-    mail = v
-  } else {
-    return "", 0, errors.New("missing 'mail'")
-  }
+  mail, err := getString("mail", record, defaults)
+  if err != nil { return "", 0, err }
   mail = strings.TrimSpace(mail)
   atIndex := strings.Index(mail, "@")
-  if atIndex < 0 { atIndex = len(mail) }
-  if atIndex > 0 {
+  if atIndex < 0 {
+    mail = strings.Replace(mail, ".", "\\.", -1)
+  } else {
     localpart := mail[0:atIndex]
+    domain := ""
+    if atIndex + 1 < len(mail) { domain = mail[atIndex+1:] }
     localpart = strings.Replace(localpart, ".", "\\.", -1)
-    mail = localpart + mail[atIndex:]
+    mail = localpart + "." + domain
   }
-  mail = fqdn(mail, qname)
+  mail = fqdn(mail, zone)
   // serial
   serial := revision
-  // (helper for following)
-  getInt32 := func(name string) (int32, error) {
-    if v, ok := findValue(name, record, defaults); ok {
-      if v, ok := v.(float64); ok {
-        if v < 0 {
-          return 0, errors.New("'" + name + "' may not be negative")
-        }
-        return int32(v), nil
-      } else {
-        return 0, errors.New("'" + name + "' is not a number")
-      }
-    } else {
-      return 0, errors.New("missing '" + name + "'")
-    }
-  }
   // refresh
-  refresh, err := getInt32("refresh")
+  refresh, err := getInt32("refresh", record, defaults)
   if err != nil { return "", 0, err }
   // retry
-  retry, err := getInt32("retry")
+  retry, err := getInt32("retry", record, defaults)
   if err != nil { return "", 0, err }
   // expire
-  expire, err := getInt32("expire")
+  expire, err := getInt32("expire", record, defaults)
   if err != nil { return "", 0, err }
   // negative ttl
-  negativeTTL, err := getInt32("neg-ttl")
+  negativeTTL, err := getInt32("neg-ttl", record, defaults)
   if err != nil { return "", 0, err }
   // ttl
-  ttl, err := getInt32("ttl")
+  ttl, err := getInt32("ttl", record, defaults)
   if err != nil { return "", 0, err }
   // (done)
   var content string = fmt.Sprintf("%s %s %d %d %d %d %d", primary, mail, serial, refresh, retry, expire, negativeTTL)
+  return content, ttl, nil
+}
+
+func ns(record, defaults map[string]interface{}, zone string) (string, int32, error) {
+  hostname, err := getString("hostname", record, defaults)
+  if err != nil { return "", 0, err }
+  hostname = strings.TrimSpace(hostname)
+  hostname = fqdn(hostname, zone)
+  ttl, err := getInt32("ttl", record, defaults)
+  if err != nil { return "", 0, err }
+  content := fmt.Sprintf("%s", hostname)
   return content, ttl, nil
 }
