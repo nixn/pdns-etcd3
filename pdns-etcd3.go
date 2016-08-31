@@ -113,6 +113,7 @@ func main() {
     }
   }
   defer cli.Close()
+  // TODO check storage version
   respond(enc, true, logMessages...)
   log.Println("initialized.", strings.Join(logMessages, ". "))
   // main loop
@@ -236,6 +237,7 @@ func lookup(params map[string]interface{}) (interface{}, error) {
   if err != nil { return false, err }
   // defaults
   if defaults.revision != response.Header.Revision {
+    // TODO recheck version
     log.Println("clearing defaults cache. old revision:", defaults.revision, ", new revision:", response.Header.Revision)
     defaults.revision = response.Header.Revision
     defaults.what2values = map[string]map[string]interface{}{}
@@ -265,8 +267,7 @@ func lookup(params map[string]interface{}) (interface{}, error) {
       if idx >= 0 { qp.qtype = qp.qtype[0:idx] }
     }
     var content string
-    var ttl int32 = -1
-    ttlIsSet := false // TODO use or delete
+    var ttl time.Duration
     err = ensureDefaults(ctx, qp.zoneQtypeDefaultsKey())
     if err != nil { return false, err }
     err = ensureDefaults(ctx, qp.zoneSubdomainQtypeDefaultsKey())
@@ -282,36 +283,32 @@ func lookup(params map[string]interface{}) (interface{}, error) {
       err = json.Unmarshal(item.Value, &obj)
       if err != nil { return false, err }
       err = nil
+      valuesChain := []map[string]interface{}{obj}
+      valuesChain = append(valuesChain, defaultsChain...)
       switch qp.qtype {
-        case "SOA": content, ttl, err = soa(obj, defaultsChain, &qp, response.Header.Revision)
-        case "NS": content, ttl, err = ns(obj, defaultsChain, &qp)
+        case "SOA": content, ttl, err = soa(valuesChain, &qp, response.Header.Revision)
+        case "NS": content, ttl, err = ns(valuesChain, &qp)
         // TODO more qtypes
         default: return false, errors.New("unknown/unimplemented qtype '" + qp.qtype + "', but have (JSON) object data for it (" + qp.recordKey() + ")")
       }
       if err != nil { return false, err }
     } else {
       content = string(item.Value)
-      ttl, err = getInt32("ttl", defaultsChain...)
-    }
-    if ttl < 0 {
-      if ttlIsSet {
-        return false, errors.New("TTL must not be negative")
-      } else {
-        return false, errors.New("TTL not set")
-      }
+      ttl, err = getDuration("ttl", defaultsChain...)
+      if err != nil { return false, err }
     }
     result = append(result, makeResultItem(&qp, content, ttl))
   }
   return result, nil
 }
 
-func makeResultItem(qp *QueryParts, content string, ttl int32) map[string]interface{} {
+func makeResultItem(qp *QueryParts, content string, ttl time.Duration) map[string]interface{} {
   return map[string]interface{}{
     "domain_id": qp.zoneId,
     "qname": qp.qname,
     "qtype": qp.qtype,
     "content": content,
-    "ttl": ttl,
+    "ttl": seconds(ttl),
     "auth": true,
   }
 }
@@ -364,11 +361,35 @@ func getString(name string, maps ...map[string]interface{}) (string, error) {
   }
 }
 
-func soa(record map[string]interface{}, defaultsChain []map[string]interface{}, qp *QueryParts, revision int64) (string, int32, error) {
-  valuesChain := []map[string]interface{}{record}
-  for _, v := range defaultsChain {
-    valuesChain = append(valuesChain, v)
+func getDuration(name string, maps ...map[string]interface{}) (time.Duration, error) {
+  if v, ok := findValue(name, maps...); ok {
+    var dur time.Duration
+    switch v.(type) {
+      case float64:
+        dur = time.Duration(int64(v.(float64))) * time.Second
+      case string:
+        if v, err := time.ParseDuration(v.(string)); err == nil {
+        dur = v
+      } else {
+        return 0, errors.New("'" + name + "' parse error: " + err.Error())
+      }
+      default:
+        return 0, errors.New("'" + name + "' is neither a number nor a string")
+    }
+    if dur < time.Second {
+      return dur, errors.New("'" + name + "' must be positive")
+    }
+    return dur, nil
+  } else {
+    return 0, errors.New("missing '" + name + "'")
   }
+}
+
+func seconds(dur time.Duration) int64 {
+  return int64(dur.Seconds())
+}
+
+func soa(valuesChain []map[string]interface{}, qp *QueryParts, revision int64) (string, time.Duration, error) {
   // primary
   primary, err := getString("primary", valuesChain...)
   if err != nil { return "", 0, err }
@@ -392,35 +413,31 @@ func soa(record map[string]interface{}, defaultsChain []map[string]interface{}, 
   // serial
   serial := revision
   // refresh
-  refresh, err := getInt32("refresh", valuesChain...)
+  refresh, err := getDuration("refresh", valuesChain...)
   if err != nil { return "", 0, err }
   // retry
-  retry, err := getInt32("retry", valuesChain...)
+  retry, err := getDuration("retry", valuesChain...)
   if err != nil { return "", 0, err }
   // expire
-  expire, err := getInt32("expire", valuesChain...)
+  expire, err := getDuration("expire", valuesChain...)
   if err != nil { return "", 0, err }
   // negative ttl
-  negativeTTL, err := getInt32("neg-ttl", valuesChain...)
+  negativeTTL, err := getDuration("neg-ttl", valuesChain...)
   if err != nil { return "", 0, err }
   // ttl
-  ttl, err := getInt32("ttl", valuesChain...)
+  ttl, err := getDuration("ttl", valuesChain...)
   if err != nil { return "", 0, err }
   // (done)
-  var content string = fmt.Sprintf("%s %s %d %d %d %d %d", primary, mail, serial, refresh, retry, expire, negativeTTL)
+  var content string = fmt.Sprintf("%s %s %d %d %d %d %d", primary, mail, serial, seconds(refresh), seconds(retry), seconds(expire), seconds(negativeTTL))
   return content, ttl, nil
 }
 
-func ns(record map[string]interface{}, defaultsChain []map[string]interface{}, qp *QueryParts) (string, int32, error) {
-  valuesChain := []map[string]interface{}{record}
-  for _, v := range defaultsChain {
-    valuesChain = append(valuesChain, v)
-  }
+func ns(valuesChain []map[string]interface{}, qp *QueryParts) (string, time.Duration, error) {
   hostname, err := getString("hostname", valuesChain...)
   if err != nil { return "", 0, err }
   hostname = strings.TrimSpace(hostname)
   hostname = fqdn(hostname, qp.zone)
-  ttl, err := getInt32("ttl", valuesChain...)
+  ttl, err := getDuration("ttl", valuesChain...)
   if err != nil { return "", 0, err }
   content := fmt.Sprintf("%s", hostname)
   return content, ttl, nil
