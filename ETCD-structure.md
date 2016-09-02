@@ -116,6 +116,25 @@ name is not appended, otherwise it is. This is naturally only possible for JSON-
 
 Values must be positive (that is >= 1 second).
 
+###### "IPv4 address"
+* string
+  * `"192.168.1.2"`
+  * `"::ffff:192.168.1.2"`
+  * `"::ffff:c0a8:0102"`
+  * `"c0a80102"`
+* array of bytes or number strings, length 4
+  * `[192, "168", 1, 2]`
+
+###### "IPv6 address"
+* string
+  * `"2001:0db8::1"`
+  * `"2001:db8:0:0:0000:0:0:1"`
+  * `"20010db8000000000000000000000001"`
+* array of uint16 or number strings, length 8
+  * `[8193, 3512, "0", 0, 0, 0, 0, 1]`
+* array of bytes or number strings, length 16
+  * `[32, 1, 53, "0xb8", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]`
+
 ### QTYPEs
 
 #### `SOA`
@@ -133,7 +152,14 @@ This way the operator does not have to increase it manually each time he/she cha
 #### `NS`
 * `hostname`: domain name
 
+#### `A`
+* `ip`: IPv4 address
 
+#### `AAAA`
+* `ip`: IPv6 address
+
+#### `PTR`
+* `hostname`: domain name
 
 ## Example
 

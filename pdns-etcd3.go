@@ -23,7 +23,9 @@ import (
   "io"
   "encoding/json"
   "strings"
+  "strconv"
   "regexp"
+  "net"
   "golang.org/x/net/context"
   "github.com/coreos/etcd/clientv3"
 )
@@ -302,6 +304,9 @@ func lookup(params map[string]interface{}) (interface{}, error) {
       switch qp.qtype {
         case "SOA": content, ttl, err = soa(valuesChain, &qp, response.Header.Revision)
         case "NS": content, ttl, err = ns(valuesChain, &qp)
+        case "A": content, ttl, err = a(valuesChain, &qp)
+        case "AAAA": content, ttl, err = aaaa(valuesChain, &qp)
+        case "PTR": content, ttl, err = ptr(valuesChain, &qp)
         // TODO more qtypes
         default: return false, errors.New("unknown/unimplemented qtype '" + qp.qtype + "', but have (JSON) object data for it (" + qp.recordKey() + ")")
       }
@@ -447,6 +452,132 @@ func soa(valuesChain []map[string]interface{}, qp *QueryParts, revision int64) (
 }
 
 func ns(valuesChain []map[string]interface{}, qp *QueryParts) (string, time.Duration, error) {
+  hostname, err := getString("hostname", valuesChain...)
+  if err != nil { return "", 0, err }
+  hostname = strings.TrimSpace(hostname)
+  hostname = fqdn(hostname, qp.zone)
+  ttl, err := getDuration("ttl", valuesChain...)
+  if err != nil { return "", 0, err }
+  content := fmt.Sprintf("%s", hostname)
+  return content, ttl, nil
+}
+
+func a(valuesChain []map[string]interface{}, qp *QueryParts) (string, time.Duration, error) {
+  var ip net.IP
+  v, ok := findValue("ip", valuesChain...)
+  if !ok { return "", 0, errors.New("'ip' not set") }
+  switch v.(type) {
+    case string:
+      v := v.(string)
+      ipv4_hex_re := regexp.MustCompile("^([0-9a-fA-F]{2}){4}$")
+      if ipv4_hex_re.MatchString(v) {
+        ip = net.IP{0, 0, 0, 0}
+        for i := 0; i < 4; i++ {
+          v, err := strconv.ParseUint(v[i * 2:i * 2 + 2], 16, 8)
+          if err != nil { return "", 0, err }
+          ip[i] = byte(v)
+        }
+      } else {
+        ip = net.ParseIP(v)
+        if ip == nil { return "", 0, errors.New("invalid IPv4: failed to parse") }
+        ip = ip.To4()
+        if ip == nil { return "", 0, errors.New("invalid IPv4: parsed, but not as IPv4") }
+      }
+    case []interface{}:
+      v := v.([]interface{})
+      if len(v) != 4 { return "", 0, errors.New("invalid IPv4: array length not 4") }
+      ip = net.IP{0, 0, 0, 0}
+      for i, v := range v {
+        switch v.(type) {
+          case float64:
+            v := int64(v.(float64))
+            if v < 0 || v > 255 { return "", 0, errors.New(fmt.Sprintf("invalid IPv4: part %d out of range", i + 1)) }
+            ip[i] = byte(v)
+          case string:
+            v, err := strconv.ParseUint(v.(string), 0, 8)
+            if err != nil { return "", 0, err }
+            if v > 255 { return "", 0, errors.New(fmt.Sprintf("invalid IPv4: part %d out of range", i + 1))}
+            ip[i] = byte(v)
+          default:
+            return "", 0, errors.New("invalid IPv4: part neither number nor string")
+        }
+      }
+    default:
+      return "", 0, errors.New("invalid IPv4: not string or array")
+  }
+  ttl, err := getDuration("ttl", valuesChain...)
+  if err != nil { return "", 0, err }
+  content := ip.String()
+  return content, ttl, nil
+}
+
+func aaaa(valuesChain []map[string]interface{}, qp *QueryParts) (string, time.Duration, error) {
+  var ip net.IP
+  v, ok := findValue("ip", valuesChain...)
+  if !ok { return "", 0, errors.New("'ip' not set") }
+  switch v.(type) {
+    case string:
+      v := v.(string)
+      ipv6_hex_re := regexp.MustCompile("^([0-9a-fA-F]{2}){16}$")
+      if ipv6_hex_re.MatchString(v) {
+        ip = net.IP{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+        for i := 0; i < 16; i++ {
+          v, err := strconv.ParseUint(v[i * 2:i * 2 + 2], 16, 8)
+          if err != nil { return "", 0, err }
+          ip[i] = byte(v)
+        }
+      } else {
+        ip = net.ParseIP(v)
+        if ip == nil { return "", 0, errors.New("invalid IPv6: failed to parse") }
+        ip = ip.To16()
+        if ip == nil { return "", 0, errors.New("invalid IPv6: parsed, but no IPv6") }
+      }
+    case []interface{}:
+      v := v.([]interface{})
+      var bytesPerPart int
+      switch len(v) {
+        case 8:
+          bytesPerPart = 2
+        case 16:
+          bytesPerPart = 1
+        default:
+          return "", 0, errors.New("invalid IPv6: array length neither 8 nor 16")
+      }
+      bitSize := bytesPerPart * 8
+      maxVal := uint64(1 << uint(bitSize) - 1)
+      ip = net.IP{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+      setPart := func (i int, v uint64) {
+        for j := 0; j < bytesPerPart; j++ {
+          v := (v >> uint((bytesPerPart - 1 - j) * 8)) & 0xFF
+          ip[i * bytesPerPart + j] = byte(v)
+        }
+      }
+      for i, v := range v {
+        switch v.(type) {
+          case float64:
+            if v.(float64) < 0 { return "", 0, errors.New("invalid IPv6: part out of range") }
+            v := uint64(v.(float64))
+            if v > maxVal { return "", 0, errors.New("invalid IPv6: part out of range") }
+            setPart(i, v)
+          case string:
+            v, err := strconv.ParseUint(v.(string), 0, bitSize)
+            if err != nil { return "", 0, errors.New("invalid IPv6: " + err.Error()) }
+            if v > maxVal { return "", 0, errors.New("invalid IPv6: part out of range") }
+            setPart(i, v)
+          default:
+            return "", 0, errors.New("invalid IPv6: not string or number")
+        }
+      }
+    default:
+      return "", 0, errors.New("invalid IPv6: not string or array")
+  }
+  ttl, err := getDuration("ttl", valuesChain...)
+  if err != nil { return "", 0, err }
+  content := ip.String()
+  return content, ttl, nil
+}
+
+func ptr(valuesChain []map[string]interface{}, qp *QueryParts) (string, time.Duration, error) {
   hostname, err := getString("hostname", valuesChain...)
   if err != nil { return "", 0, err }
   hostname = strings.TrimSpace(hostname)
