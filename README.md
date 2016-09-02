@@ -38,7 +38,7 @@ launch+=remote,command=/path/to/pdns-etcd3[,<config>][,prefix=/DNS][,timeout=200
 
 TLS and authentication is only possible when using the configuration file.
 
-If `<config>` is not given, it defaults to `endpoints=127.0.0.1:2379`
+If `<config>` is not given, it defaults to `endpoints=[::1]:2379|127.0.0.1:2379`
 
 The configuration file is the one accepted by the official client
 (see [etcd/clientv3/config.go](https://github.com/coreos/etcd/blob/master/clientv3/config.go),

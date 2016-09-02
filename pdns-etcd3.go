@@ -125,7 +125,12 @@ func main() {
         fatal(enc, "parameters.endpoints is not a string")
       }
     } else {
-      fatal(enc, "Missing parameters.endpoints")
+      cfg.Endpoints = []string{"[::1]:2379", "127.0.0.1:2379"}
+      if client, err := clientv3.New(cfg); err == nil {
+        cli = client
+      } else {
+        fatal(enc, err.Error())
+      }
     }
   }
   defer cli.Close()
