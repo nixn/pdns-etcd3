@@ -11,7 +11,7 @@ the data. Only the DNS class `IN` is supported, but that's a limitation of Power
 
 * Automatic serial for SOA records (based on the cluster revision).
 * Replication is handled by the ETCD cluster, no additional configuration is needed for using multiple authoritative PowerDNS servers.
-* Multiple syntax possibilities for supported records
+* Multiple syntax possibilities for JSON-supported records
 
 #### Planned
 
@@ -38,14 +38,14 @@ launch+=remote,command=/path/to/pdns-etcd3[,<config>][,prefix=/DNS][,timeout=200
 
 TLS and authentication is only possible when using the configuration file.
 
-If `<config>` is not given, it defaults to `endpoints=[::1]:2379|127.0.0.1:2379`
-
 The configuration file is the one accepted by the official client
 (see [etcd/clientv3/config.go](https://github.com/coreos/etcd/blob/master/clientv3/config.go),
 TODO find documentation).
 
 `endpoints` accepts hostnames too, but be sure they are resolvable before PowerDNS
 has started. Same goes for `discovery-srv`; it is undecided yet if this config is needed.
+
+If `<config>` is not given, it defaults to `endpoints=[::1]:2379|127.0.0.1:2379`
 
 `prefix` is optional and must begin with `/` (if given).
 
