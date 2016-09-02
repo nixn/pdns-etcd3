@@ -36,7 +36,7 @@ If the QNAME is equal to the zone name, the subdomain is set to `@` for ETCD req
 
 ## Structure (Entries)
 
-`<prefix>` is the global prefix from configuration (see [README](README.md))
+`<prefix>` is the global prefix from configuration (see [README](README.md)).
 
 ### Version
 
@@ -81,43 +81,63 @@ There are four levels of default values, from most generic to most specific:
 Defaults-entries must be JSON objects, with any number of fields (including zero).
 Defaults-entries may be non-existent, which is equivalent to an empty object.
 
-Field names of defaults objects are the same as record field names. So there could
+Field names of defaults objects are the same as record field names. That means there could
 be an ambiguity in non-QTYPE defaults, if different record types define the same
-field name. The program only checks for value types, not content, so take care yourself.
+field name. The program only checks for the types of field values, not their content,
+so take care yourself.
 
 ## Supported records
 
 For each of the supported record types the entry values may be JSON objects. The recognized
 specific field names and syntax are given below for each entry.
 
-#### Notes
+All entries can have a `ttl` field, for the record TTL.
 
-* All entries can have a `ttl` field, for the record TTL.
+* All domain names (or host names) are undergoing a check
 
-* All domain names (or host names) are undergoing a check whether to append the zone name.
+### Syntax
+
+Headings denote the logical type, top level list values the JSON type, sublevels are examples.
+
+###### "domain name"
+* string
+  * `"www"`
+  * `"www.example.net."`
+
+Domain names undergo a check whether to append the zone name.
 The rule is the same as in [BIND][] zone files: if a name ends with a dot, the zone
 name is not appended, otherwise it is. This is naturally only possible for JSON-entries.
 
-* All durations are either integers, given in seconds, or [duration strings][tdur].
-All of them must be positive (that is >= 1 second).
+###### "duration"
+* integer (seconds)
+  * `3600`
+* string ([duration][tdur])
+  * `"1h"`
 
-### `SOA`
+Values must be positive (that is >= 1 second).
 
-* `primary`: a domain name.
-* `mail`: a mail address, in regular syntax (`mail@example.net`). The domain name undergoes the zone append check!
+### QTYPEs
+
+#### `SOA`
+
+* `primary`: domain name
+* `mail`: an e-mail address, in regular syntax (`mail@example.net.`), but the domain name undergoes the zone append check, as described in syntax for "domain name"!
 * `refresh`: duration
 * `retry`: duration
 * `expire`: duration
 * `neg-ttl`: duration
 
 There is no serial field, because the program takes the cluster revision as serial.
-This way the operator does not have to increase it each time he/she changes DNS data.
+This way the operator does not have to increase it manually each time he/she changes DNS data.
 
-### `NS`
+#### `NS`
+* `hostname`: domain name
 
-* `hostname`: a domain name.
+
 
 ## Example
+
+TODO
 
 [bind]: https://www.isc.org/downloads/bind/
 [tdur]: https://golang.org/pkg/time/#ParseDuration

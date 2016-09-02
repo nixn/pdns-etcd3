@@ -7,8 +7,15 @@ the data. Only the DNS class `IN` is supported, but that's a limitation of Power
 
 ## Features
 
+#### Already implemented
+
 * Automatic serial for SOA records (based on the cluster revision).
 * Replication is handled by the ETCD cluster, no additional configuration is needed for using multiple authoritative PowerDNS servers.
+* Multiple syntax possibilities for supported records
+
+#### Planned
+
+* Default prefix for IP addresses in a zone
 
 ## Installation
 
