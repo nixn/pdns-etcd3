@@ -5,17 +5,28 @@ It uses the [official client](https://github.com/coreos/etcd/tree/master/clientv
 to get the data from the cluster. Responses are authoritative for each zone found in
 the data. Only the DNS class `IN` is supported, but that's a limitation of PowerDNS.
 
+There is no stable release yet, even no beta. Any testing is appreciated.
+
+[pdns]: https://www.powerdns.com/
+[pdns-remote]: https://doc.powerdns.com/3/authoritative/backend-remote/
+[etcd]: https://github.com/coreos/etcd/
+
 ## Features
 
-#### Already implemented
-
-* Automatic serial for SOA records (based on the cluster revision).
+* Automatic serial for `SOA` records (based on the cluster revision).
 * Replication is handled by the ETCD cluster, no additional configuration is needed for using multiple authoritative PowerDNS servers.
 * Multiple syntax possibilities for JSON-supported records
+* Multi-level defaults, overridable
 
 #### Planned
 
-* Default prefix for IP addresses in a zone
+* Reduce redundancy in the data by automatically deriving corresponding data
+  * `A` ⇒ `PTR` (`in-addr.arpa`)
+  * `AAAA` ⇒ `PTR` (`ip6.arpa`)
+  * …
+* Default prefix for IP addresses
+* Override of domain name appended to unqualified names
+* Upgrade database structure (if needed for new program version) without interrupting service
 
 ## Installation
 
@@ -55,7 +66,7 @@ by [`time.ParseDuration`](https://golang.org/pkg/time/#ParseDuration), but only 
 
 ### ETCD structure
 
-See [ETCD-structure.md][ETCD-structure]. The structure lies beneath the `prefix`
+See [ETCD-structure][etcd-structure]. The structure lies beneath the `prefix`
 configured in PowerDNS (see above). For better performance/caching it is
 recommended to use a cluster for DNS exclusively:<br>
 pdns-etcd3 caches defaults, using the global cluster revision as expiry indicator.
@@ -63,18 +74,15 @@ So every time when changing the data in the cluster (that is: changing the revis
 the cached defaults are invalidated and must be loaded again, resulting in additional
 calls to the cluster, thus increasing the response latency.
 
+[etcd-structure]: ETCD-structure.md
+
 ## Compatibility
 
-pdns-etcd3 is tested on PowerDNS&nbsp;3.x and uses an ETCD&nbsp;v3 cluster. It
-may work on PowerDNS&nbsp;4.x, but is not tested, though it is planned to
+pdns-etcd3 is tested on PowerDNS 3.x and uses an ETCD v3 cluster. It
+may work on PowerDNS 4.x, but is not tested, though it is planned to
 support both eventually, or even only 4.x later. Issues regarding
-PowerDNS&nbsp;4.x are not handled yet.
+PowerDNS 4.x are not handled yet.
 
 ## Debugging
 
 For now, there is much logging, as the program is in alpha state.
-
-[pdns]: https://www.powerdns.com/
-[pdns-remote]: https://doc.powerdns.com/3/authoritative/backend-remote/
-[etcd]: https://github.com/coreos/etcd/
-[etcd-structure]: ETCD-structure.md

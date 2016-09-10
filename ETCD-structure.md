@@ -18,7 +18,7 @@ which are returned as-is, without an error, but also without defaults support (e
 This behaviour allows support for JSON-unsupported records.
 
 * Entry values store the *content* of a record, they do not include the domain name,
-the DNS class (`IN`), nor the entry type (`A`, `MX`, &hellip;), these values are
+the DNS class (`IN`) and the record type (`A`, `MX`, …), these values are
 in the key already. They may include a record-specific TTL value, see below rule for details.
 
 * The record TTL is a regular field in case of a JSON object entry (key `"ttl"`), but there
@@ -41,7 +41,14 @@ If the QNAME is equal to the zone name, the subdomain is set to `@` for ETCD req
 ### Version
 
 * Key: `<prefix>/version`
-* Value: must be the same as the major version of the program (e.g. `1` for `1.x[.y]`)
+* Value: `<major>[.<minor>]`
+  * `<major>` and `<minor>` must be non-negative integers
+
+`<major>` begins with `1`. Every time when a backward-incompatible change to the
+structure is introduced, `<major>` increases and `<minor>` resets to `0`.
+Otherwise a change increases only `<minor>`.
+
+Currently the version is `1` (or `1.0`). Version checking is not implemented yet.
 
 ### Records
 
@@ -51,7 +58,7 @@ Entries are as follows:
 * Key: `<prefix>/<zone>/<subdomain>/<QTYPE>/<id>`
   * `<zone>` is a domain name, e.g. `example.net`
   * `<subdomain>` is as described in the rules above
-  * `<QTYPE>` is the type of the resource resource, e.g. `A`, `MX`, &hellip;
+  * `<QTYPE>` is the type of the resource resource, e.g. `A`, `MX`, …
   * `<id>` is user-defined, it has no meaning in the program, it may even be empty
 * Value: `<JSON object>` or `<plain string>`
 
@@ -93,8 +100,6 @@ specific field names and syntax are given below for each entry.
 
 All entries can have a `ttl` field, for the record TTL.
 
-* All domain names (or host names) are undergoing a check
-
 ### Syntax
 
 Headings denote the logical type, top level list values the JSON type, sublevels are examples.
@@ -131,9 +136,9 @@ Values must be positive (that is >= 1 second).
   * `"2001:db8:0:0:0000:0:0:1"`
   * `"20010db8000000000000000000000001"`
 * array of uint16 or number strings, length 8
-  * `[8193, 3512, "0", 0, 0, 0, 0, 1]`
+  * `[8193, "0xdb8", "0", 0, 0, 0, 0, 1]`
 * array of bytes or number strings, length 16
-  * `[32, 1, 53, "0xb8", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]`
+  * `[32, 1, 13, "0xb8", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]`
 
 ### QTYPEs
 
@@ -163,7 +168,74 @@ This way the operator does not have to increase it manually each time he/she cha
 
 ## Example
 
-TODO
+*To be clear on the value, it's always enclosed in ' (single quotes).*
+
+Version:
+```
+/DNS/version ⇒ '1'
+```
+
+Forward zone:
+```
+/DNS/example.net/-defaults ⇒ '{"ttl": "1h"}'
+/DNS/example.net/@/SOA ⇒ '{"primary": "ns1", "mail": "horst.master", "refresh": "1h", "retry": "30m", "expire": 604800, "neg-ttl": "10m"}'
+/DNS/example.net/@/NS/first ⇒ '{"hostname": "ns1"}'
+/DNS/example.net/@/NS/second ⇒ '{"hostname": "ns2"}'
+/DNS/example.net/ns1/A/1 ⇒ '{"ip": [192, 0, 2, 2]}'
+/DNS/example.net/ns1/AAAA/1 ⇒ '{"ip": "2001:db8::2"}'
+/DNS/example.net/ns2/A/1 ⇒ '{"ip": "192.0.2.3"}'
+/DNS/example.net/ns2/AAAA/1 ⇒ '{"ip": "2001:db8::3"}'
+/DNS/example.net/@/MX-defaults ⇒ '{"ttl": "2h"}'
+/DNS/example.net/@/MX/1 ⇒ '10 mail.example.net.'
+/DNS/example.net/mail/A/1 ⇒ '{"ip": [192,0,2,10]}'
+/DNS/example.net/mail/AAAA/1 ⇒ '2001:db8::10'
+/DNS/example.net/@/TXT/1 ⇒ 'v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all'
+/DNS/example.net/kerberos1/A/1 ⇒ '192.0.2.15'
+/DNS/example.net/kerberos1/AAAA/1 ⇒ '2001:db8::15'
+/DNS/example.net/kerberos2/A/1 ⇒ '192.0.2.25'
+/DNS/example.net/kerberos2/AAAA/1 ⇒ '2001:db8::25'
+/DNS/example.net/SRV-defaults ⇒ '{"priority": 0, "weight": 0}'
+/DNS/example.net/_kerberos._tcp/SRV-defaults ⇒ '{"port": 88}'
+/DNS/example.net/_kerberos._tcp/SRV/1 ⇒ '0 0 88 kerberos1.example.net.'
+/DNS/example.net/_kerberos._tcp/SRV/2 ⇒ '0 0 88 kerberos2.example.net.'
+/DNS/example.net/kerberos-master/CNAME/1 ⇒ 'kerberos1.example.net.'
+```
+
+Reverse zone for IPv4:
+```
+/DNS/2.0.192.in-addr.arpa/-defaults ⇒ '{"ttl": "1h"}'
+/DNS/2.0.192.in-addr.arpa/@/SOA ⇒ '{"primary": "ns1.example.net.", "mail": "horst.master@example.net.", "refresh": "1h", "retry": "30m", "expire": "168h", "neg-ttl": "10m"}'
+/DNS/2.0.192.in-addr.arpa/@/NS/a ⇒ '{"hostname": "ns1.example.net."}'
+/DNS/2.0.192.in-addr.arpa/@/NS/b ⇒ 'ns2.example.net.'
+/DNS/2.0.192.in-addr.arpa/2/PTR/1 ⇒ '{"hostname": "ns1.example.net."}'
+/DNS/2.0.192.in-addr.arpa/3/PTR/1 ⇒ 'ns2.example.net.'
+/DNS/2.0.192.in-addr.arpa/10/PTR/1 ⇒ '{"hostname": "mail.example.net."}'
+/DNS/2.0.192.in-addr.arpa/15/PTR/1 ⇒ 'kerberos1.example.net.'
+/DNS/2.0.192.in-addr.arpa/25/PTR/1 ⇒ 'kerberos2.example.net.'
+```
+
+Reverse zone for IPv6:
+```
+/DNS/8.b.d.0.1.0.0.2.ip6.arpa/-defaults ⇒ '{"ttl": 3600}'
+/DNS/8.b.d.0.1.0.0.2.ip6.arpa/@/SOA ⇒ '{"primary":"ns1.example.net.", "mail":"horst.master@example.net.", "refresh":"1h", "retry":"30m", "expire":"168h","neg-ttl":"10m"}'
+/DNS/8.b.d.0.1.0.0.2.ip6.arpa/@/NS/1 ⇒ 'ns1.example.net.'
+/DNS/8.b.d.0.1.0.0.2.ip6.arpa/@/NS/2 ⇒ 'ns2.example.net.'
+/DNS/8.b.d.0.1.0.0.2.ip6.arpa/2.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 ⇒ 'ns1.example.net.'
+/DNS/8.b.d.0.1.0.0.2.ip6.arpa/3.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 ⇒ 'ns2.example.net.'
+/DNS/8.b.d.0.1.0.0.2.ip6.arpa/0.1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 ⇒ 'mail.example.net.'
+/DNS/8.b.d.0.1.0.0.2.ip6.arpa/5.1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 ⇒ 'kerberos1.example.net.'
+/DNS/8.b.d.0.1.0.0.2.ip6.arpa/5.2.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 ⇒ 'kerberos2.example.net.'
+```
+
+Well ... "glue records":
+```
+/DNS/ns1.example.net/-defaults ⇒ '{"ttl":"1h"}'
+/DNS/ns1.example.net/A/1 ⇒ '192.0.2.2'
+/DNS/ns1.example.net/AAAA/1 ⇒ '2001:db8::2'
+/DNS/ns2.example.net/-defaults ⇒ '{"ttl":"1h"}'
+/DNS/ns2.example.net/A/1 ⇒ '192.0.2.3'
+/DNS/ns2.example.net/AAAA/1 ⇒ '2001:db8::3'
+```
 
 [bind]: https://www.isc.org/downloads/bind/
 [tdur]: https://golang.org/pkg/time/#ParseDuration
