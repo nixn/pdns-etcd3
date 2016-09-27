@@ -207,32 +207,32 @@ func ensureDefaults(ctx context.Context, key string) error {
   return nil
 }
 
-type QueryParts struct {
+type queryParts struct {
   zoneId int32
   qname, zone, subdomain, qtype string
 }
 
-func (qp *QueryParts) isANY() bool { return qp.qtype == "ANY" }
-func (qp *QueryParts) isSOA() bool { return qp.qtype == "SOA" }
+func (qp *queryParts) isANY() bool { return qp.qtype == "ANY" }
+func (qp *queryParts) isSOA() bool { return qp.qtype == "SOA" }
 
-func (qp *QueryParts) zoneKey() string { return prefix + "/" + qp.zone }
-func (qp *QueryParts) subdomainKey() string { return prefix + "/" + qp.zone + "/" + qp.subdomain }
-func (qp *QueryParts) recordKey() string {
+func (qp *queryParts) zoneKey() string { return prefix + "/" + qp.zone }
+func (qp *queryParts) subdomainKey() string { return prefix + "/" + qp.zone + "/" + qp.subdomain }
+func (qp *queryParts) recordKey() string {
   key := prefix + "/" + qp.zone + "/" + qp.subdomain
   if !qp.isANY() { key += "/" + qp.qtype }
   if !qp.isSOA() { key += "/" }
   return key
 }
 
-func (qp *QueryParts) zoneDefaultsKey() string { return prefix + "/" + qp.zone + "/-defaults" }
-func (qp *QueryParts) zoneSubdomainDefaultsKey() string { return prefix + "/" + qp.zone + "/" + qp.subdomain + "/-defaults" }
-func (qp *QueryParts) zoneQtypeDefaultsKey() string { return prefix + "/" + qp.zone + "/" + qp.qtype + "-defaults" }
-func (qp *QueryParts) zoneSubdomainQtypeDefaultsKey() string { return prefix + "/" + qp.zone + "/" + qp.subdomain + "/" + qp.qtype + "-defaults" }
+func (qp *queryParts) zoneDefaultsKey() string { return prefix + "/" + qp.zone + "/-defaults" }
+func (qp *queryParts) zoneSubdomainDefaultsKey() string { return prefix + "/" + qp.zone + "/" + qp.subdomain + "/-defaults" }
+func (qp *queryParts) zoneQtypeDefaultsKey() string { return prefix + "/" + qp.zone + "/" + qp.qtype + "-defaults" }
+func (qp *queryParts) zoneSubdomainQtypeDefaultsKey() string { return prefix + "/" + qp.zone + "/" + qp.subdomain + "/" + qp.qtype + "-defaults" }
 
 func lookup(params map[string]interface{}) (interface{}, error) {
-  qp := QueryParts{
+  qp := queryParts{
     qname: params["qname"].(string),
-    zoneId: int32(params["zone-id"].(float64)), // note: documenation says 'zone_id', but it's 'zone-id'! further it is called 'domain_id' in responses (what a mess)
+    zoneId: int32(params["zone-id"].(float64)), // note: documentation says 'zone_id', but it's 'zone-id'! further it is called 'domain_id' in responses (what a mess)
     qtype: params["qtype"].(string),
   }
   var isNewZone bool
@@ -326,7 +326,7 @@ func lookup(params map[string]interface{}) (interface{}, error) {
   return result, nil
 }
 
-func makeResultItem(qp *QueryParts, content string, ttl time.Duration) map[string]interface{} {
+func makeResultItem(qp *queryParts, content string, ttl time.Duration) map[string]interface{} {
   return map[string]interface{}{
     "domain_id": qp.zoneId,
     "qname": qp.qname,
@@ -365,12 +365,10 @@ func getInt32(name string, maps ...map[string]interface{}) (int32, error) {
         return 0, errors.New("'" + name + "' may not be negative")
       }
       return int32(v), nil
-    } else {
-      return 0, errors.New("'" + name + "' is not a number")
     }
-  } else {
-    return 0, errors.New("missing '" + name + "'")
+    return 0, errors.New("'" + name + "' is not a number")
   }
+  return 0, errors.New("missing '" + name + "'")
 }
 
 func getString(name string, maps ...map[string]interface{}) (string, error) {
@@ -413,7 +411,7 @@ func seconds(dur time.Duration) int64 {
   return int64(dur.Seconds())
 }
 
-func soa(valuesChain []map[string]interface{}, qp *QueryParts, revision int64) (string, time.Duration, error) {
+func soa(valuesChain []map[string]interface{}, qp *queryParts, revision int64) (string, time.Duration, error) {
   // primary
   primary, err := getString("primary", valuesChain...)
   if err != nil { return "", 0, err }
@@ -456,7 +454,7 @@ func soa(valuesChain []map[string]interface{}, qp *QueryParts, revision int64) (
   return content, ttl, nil
 }
 
-func ns(valuesChain []map[string]interface{}, qp *QueryParts) (string, time.Duration, error) {
+func ns(valuesChain []map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
   hostname, err := getString("hostname", valuesChain...)
   if err != nil { return "", 0, err }
   hostname = strings.TrimSpace(hostname)
@@ -467,15 +465,15 @@ func ns(valuesChain []map[string]interface{}, qp *QueryParts) (string, time.Dura
   return content, ttl, nil
 }
 
-func a(valuesChain []map[string]interface{}, qp *QueryParts) (string, time.Duration, error) {
+func a(valuesChain []map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
   var ip net.IP
   v, ok := findValue("ip", valuesChain...)
   if !ok { return "", 0, errors.New("'ip' not set") }
   switch v.(type) {
     case string:
       v := v.(string)
-      ipv4_hex_re := regexp.MustCompile("^([0-9a-fA-F]{2}){4}$")
-      if ipv4_hex_re.MatchString(v) {
+      ipv4HexRE := regexp.MustCompile("^([0-9a-fA-F]{2}){4}$")
+      if ipv4HexRE.MatchString(v) {
         ip = net.IP{0, 0, 0, 0}
         for i := 0; i < 4; i++ {
           v, err := strconv.ParseUint(v[i * 2:i * 2 + 2], 16, 8)
@@ -516,15 +514,15 @@ func a(valuesChain []map[string]interface{}, qp *QueryParts) (string, time.Durat
   return content, ttl, nil
 }
 
-func aaaa(valuesChain []map[string]interface{}, qp *QueryParts) (string, time.Duration, error) {
+func aaaa(valuesChain []map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
   var ip net.IP
   v, ok := findValue("ip", valuesChain...)
   if !ok { return "", 0, errors.New("'ip' not set") }
   switch v.(type) {
     case string:
       v := v.(string)
-      ipv6_hex_re := regexp.MustCompile("^([0-9a-fA-F]{2}){16}$")
-      if ipv6_hex_re.MatchString(v) {
+      ipv6HexRE := regexp.MustCompile("^([0-9a-fA-F]{2}){16}$")
+      if ipv6HexRE.MatchString(v) {
         ip = net.IP{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
         for i := 0; i < 16; i++ {
           v, err := strconv.ParseUint(v[i * 2:i * 2 + 2], 16, 8)
@@ -582,7 +580,7 @@ func aaaa(valuesChain []map[string]interface{}, qp *QueryParts) (string, time.Du
   return content, ttl, nil
 }
 
-func ptr(valuesChain []map[string]interface{}, qp *QueryParts) (string, time.Duration, error) {
+func ptr(valuesChain []map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
   hostname, err := getString("hostname", valuesChain...)
   if err != nil { return "", 0, err }
   hostname = strings.TrimSpace(hostname)

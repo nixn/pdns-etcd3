@@ -1,5 +1,7 @@
 # pdns-etcd3
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/nixn/pdns-etcd3)](https://goreportcard.com/report/github.com/nixn/pdns-etcd3)
+
 A [PowerDNS][pdns] [remote backend][pdns-remote] with [ETCD][etcd] v3 cluster as storage.
 It uses the [official client](https://github.com/coreos/etcd/tree/master/clientv3/)
 to get the data from the cluster. Responses are authoritative for each zone found in
