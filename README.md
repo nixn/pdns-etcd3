@@ -43,7 +43,7 @@ Of course you need an up and running ETCD v3 cluster and a PowerDNS installation
 ### PowerDNS configuration
 ```
 launch+=remote
-remote-connection-string=pipe:command=/path/to/pdns-etcd3[,<config>][,prefix=/DNS][,timeout=2000]
+remote-connection-string=pipe:command=/path/to/pdns-etcd3[,<config>][,prefix=anything][,timeout=2000]
 ```
 `<config>` is one of
 * `configFile=/path/to/etcd-config-file`
@@ -61,7 +61,7 @@ has started. Same goes for `discovery-srv`; it is undecided yet if this config i
 
 If `<config>` is not given, it defaults to `endpoints=[::1]:2379|127.0.0.1:2379`
 
-`prefix` is optional and must begin with `/` (if given).
+`prefix` is optional and is empty by default.
 
 `timeout` is optional and defaults to 2 seconds. The value can be anything parseable
 by [`time.ParseDuration`](https://golang.org/pkg/time/#ParseDuration), but only positive values.

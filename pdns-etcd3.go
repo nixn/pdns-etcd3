@@ -71,17 +71,12 @@ func main() {
   logMessages := []string{}
   if pfx, ok := request.Parameters["prefix"]; ok {
     if pfx, ok := pfx.(string); ok {
-      if len(pfx) > 0 && !strings.HasPrefix(pfx, "/") {
-        fatal(enc, "parameters.prefix does not start with a slash (\"/\")")
-      }
-      pfx = strings.TrimRight(pfx, "/")
-      re := regexp.MustCompile("//+")
-      prefix = re.ReplaceAllString(pfx, "/")
+      prefix = pfx
     } else {
       fatal(enc, "parameters.prefix is not a string")
     }
   }
-  logMessages = append(logMessages, fmt.Sprintf("prefix: %s", prefix))
+  logMessages = append(logMessages, fmt.Sprintf("prefix: '%s'", prefix))
   if configFile, ok := request.Parameters["configFile"]; ok {
     if configFile, ok := configFile.(string); ok {
       if client, err := clientv3.NewFromConfigFile(configFile); err == nil {
