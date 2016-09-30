@@ -53,7 +53,7 @@ var (
 
 var defaults struct {
   revision int64
-  what2values map[string]map[string]interface{} // what = "example.net" or "example.net/subdomain" or "example.net/[subdomain/]RR" => values
+  values map[string]map[string]interface{} // key = "example.net" or "example.net/subdomain" or "example.net/[subdomain/]RR"
 }
 
 func main() {
@@ -185,21 +185,58 @@ func extractSubdomain(domain, zone string) string {
   return subdomain
 }
 
-func ensureDefaults(ctx context.Context, key string) error {
-  if _, ok := defaults.what2values[key]; !ok {
-    log.Println("loading defaults:", key)
-    response, err := cli.Get(ctx, key)
-    if err != nil { return err }
-    defs := map[string]interface{}{}
-    if response.Count > 0 {
-      err := json.Unmarshal(response.Kvs[0].Value, &defs)
-      if err != nil { return err }
-    }
-    defaults.what2values[key] = defs
-  } else {
-    log.Println("reusing defaults:", key)
+type defaultsMessage struct {
+  key string
+  value map[string]interface{}
+  err error
+}
+
+func loadDefaults(key string, c chan defaultsMessage) {
+  ctx, cancel := context.WithTimeout(context.Background(), timeout)
+  response, err := cli.Get(ctx, key)
+  cancel()
+  if err != nil {
+    c <- defaultsMessage{ key, nil, err }
+    return
   }
-  return nil
+  defs := map[string]interface{}{}
+  if response.Count > 0 {
+    err := json.Unmarshal(response.Kvs[0].Value, &defs)
+    if err != nil {
+      c <- defaultsMessage{ key, nil, err }
+      return
+    }
+  }
+  c <- defaultsMessage{ key, defs, nil }
+}
+
+func ensureDefaults(qp *queryParts) error {
+  keys := []string{
+    qp.zoneDefaultsKey(),
+    qp.zoneQtypeDefaultsKey(),
+    qp.zoneSubdomainDefaultsKey(),
+    qp.zoneSubdomainQtypeDefaultsKey() }
+  c := make(chan defaultsMessage, len(keys))
+  n := 0
+  for _, key := range keys {
+    if _, ok := defaults.values[key]; !ok {
+      log.Println("loading defaults: ", key)
+      go loadDefaults(key, c)
+      n++
+    } else {
+      log.Println("reusing defaults:", key)
+    }
+  }
+  var err error
+  for i := 0; i < n; i++ {
+    msg := <- c
+    if msg.err == nil {
+      defaults.values[msg.key] = msg.value
+    } else {
+      if err == nil { err = msg.err }
+    }
+  }
+  return err
 }
 
 type queryParts struct {
@@ -223,6 +260,13 @@ func (qp *queryParts) zoneDefaultsKey() string { return prefix + "/" + qp.zone +
 func (qp *queryParts) zoneSubdomainDefaultsKey() string { return prefix + "/" + qp.zone + "/" + qp.subdomain + "/-defaults" }
 func (qp *queryParts) zoneQtypeDefaultsKey() string { return prefix + "/" + qp.zone + "/" + qp.qtype + "-defaults" }
 func (qp *queryParts) zoneSubdomainQtypeDefaultsKey() string { return prefix + "/" + qp.zone + "/" + qp.subdomain + "/" + qp.qtype + "-defaults" }
+func (qp *queryParts) isDefaultsKey(key string) bool {
+  if key == qp.zoneDefaultsKey() { return true; }
+  if key == qp.zoneSubdomainDefaultsKey() { return true; }
+  if key == qp.zoneQtypeDefaultsKey() { return true; }
+  if key == qp.zoneSubdomainQtypeDefaultsKey() { return true; }
+  return false;
+}
 
 func lookup(params map[string]interface{}) (interface{}, error) {
   qp := queryParts{
@@ -246,24 +290,19 @@ func lookup(params map[string]interface{}) (interface{}, error) {
   }
   var response *clientv3.GetResponse
   var err error
-  ctx, cancel := context.WithTimeout(context.Background(), timeout)
-  defer cancel()
-  log.Println("lookup at", qp.recordKey())
-  response, err = cli.Get(ctx, qp.recordKey(), opts...) // TODO set quorum option. not in API, perhaps default now (in v3)?
+  log.Println("lookup:", qp.recordKey())
+  {
+    ctx, cancel := context.WithTimeout(context.Background(), timeout)
+    response, err = cli.Get(ctx, qp.recordKey(), opts...) // TODO set quorum option. not in API, perhaps default now (in v3)?
+    cancel()
+  }
   if err != nil { return false, err }
   // defaults
   if defaults.revision != response.Header.Revision {
     // TODO recheck version
     log.Println("clearing defaults cache. old revision:", defaults.revision, ", new revision:", response.Header.Revision)
     defaults.revision = response.Header.Revision
-    defaults.what2values = map[string]map[string]interface{}{}
-  }
-  if response.Count > 0 {
-    // TODO *lazy* loading of defaults
-    err = ensureDefaults(ctx, qp.zoneDefaultsKey())
-    if err != nil { return false, err }
-    err = ensureDefaults(ctx, qp.zoneSubdomainDefaultsKey())
-    if err != nil { return false, err }
+    defaults.values = map[string]map[string]interface{}{}
   }
   if qp.isSOA() && isNewZone && response.Count > 0 {
     qp.zoneId = nextZoneId
@@ -274,7 +313,7 @@ func lookup(params map[string]interface{}) (interface{}, error) {
   result := []map[string]interface{}{}
   for _, item := range response.Kvs {
     itemKey := string(item.Key)
-    if strings.HasSuffix(itemKey, "-defaults") { continue }
+    if qp.isDefaultsKey(itemKey) { continue } // this is needed for 'ANY' requests
     if len(item.Value) == 0 { return false, errors.New("empty value") }
     qp := qp // clone
     if qp.isANY() {
@@ -284,36 +323,24 @@ func lookup(params map[string]interface{}) (interface{}, error) {
     }
     var content string
     var ttl time.Duration
-    err = ensureDefaults(ctx, qp.zoneQtypeDefaultsKey())
-    if err != nil { return false, err }
-    err = ensureDefaults(ctx, qp.zoneSubdomainQtypeDefaultsKey())
-    if err != nil { return false, err }
-    defaultsChain := []map[string]interface{}{
-      defaults.what2values[qp.zoneSubdomainQtypeDefaultsKey()],
-      defaults.what2values[qp.zoneSubdomainDefaultsKey()],
-      defaults.what2values[qp.zoneQtypeDefaultsKey()],
-      defaults.what2values[qp.zoneDefaultsKey()],
-    }
     if item.Value[0] == '{' {
       var obj map[string]interface{}
       err = json.Unmarshal(item.Value, &obj)
       if err != nil { return false, err }
       err = nil
-      valuesChain := []map[string]interface{}{obj}
-      valuesChain = append(valuesChain, defaultsChain...)
       switch qp.qtype {
-        case "SOA": content, ttl, err = soa(valuesChain, &qp, response.Header.Revision)
-        case "NS": content, ttl, err = ns(valuesChain, &qp)
-        case "A": content, ttl, err = a(valuesChain, &qp)
-        case "AAAA": content, ttl, err = aaaa(valuesChain, &qp)
-        case "PTR": content, ttl, err = ptr(valuesChain, &qp)
+        case "SOA": content, ttl, err = soa(obj, &qp, response.Header.Revision)
+        case "NS": content, ttl, err = ns(obj, &qp)
+        case "A": content, ttl, err = a(obj, &qp)
+        case "AAAA": content, ttl, err = aaaa(obj, &qp)
+        case "PTR": content, ttl, err = ptr(obj, &qp)
         // TODO more qtypes
         default: return false, errors.New("unknown/unimplemented qtype '" + qp.qtype + "', but have (JSON) object data for it (" + qp.recordKey() + ")")
       }
       if err != nil { return false, err }
     } else {
       content = string(item.Value)
-      ttl, err = getDuration("ttl", defaultsChain...)
+      ttl, err = getDuration("ttl", nil, &qp)
       if err != nil { return false, err }
     }
     result = append(result, makeResultItem(&qp, content, ttl))
@@ -344,17 +371,18 @@ func fqdn(domain, qname string) string {
   return domain
 }
 
-func findValue(name string, maps ...map[string]interface{}) (interface{}, bool) {
-  for _, m := range maps {
-    if v, ok := m[name]; ok {
-      return v, true
-    }
-  }
-  return nil, false
+func findValue(name string, obj map[string]interface{}, qp *queryParts) (interface{}, error) {
+  if v, ok := obj[name]; ok { return v, nil }
+  if err := ensureDefaults(qp); err != nil { return nil, err }
+  if v, ok := defaults.values[qp.zoneSubdomainQtypeDefaultsKey()][name]; ok { return v, nil }
+  if v, ok := defaults.values[qp.zoneSubdomainDefaultsKey()][name]; ok { return v, nil }
+  if v, ok := defaults.values[qp.zoneQtypeDefaultsKey()][name]; ok { return v, nil }
+  if v, ok := defaults.values[qp.zoneDefaultsKey()][name]; ok { return v, nil }
+  return nil, errors.New("missing '" + name + "'")
 }
 
-func getInt32(name string, maps ...map[string]interface{}) (int32, error) {
-  if v, ok := findValue(name, maps...); ok {
+func getInt32(name string, obj map[string]interface{}, qp *queryParts) (int32, error) {
+  if v, err := findValue(name, obj, qp); err == nil {
     if v, ok := v.(float64); ok {
       if v < 0 {
         return 0, errors.New("'" + name + "' may not be negative")
@@ -362,24 +390,25 @@ func getInt32(name string, maps ...map[string]interface{}) (int32, error) {
       return int32(v), nil
     }
     return 0, errors.New("'" + name + "' is not a number")
+  } else {
+    return 0, err
   }
-  return 0, errors.New("missing '" + name + "'")
 }
 
-func getString(name string, maps ...map[string]interface{}) (string, error) {
-  if v, ok := findValue(name, maps...); ok {
+func getString(name string, obj map[string]interface{}, qp *queryParts) (string, error) {
+  if v, err := findValue(name, obj, qp); err == nil {
     if v, ok := v.(string); ok {
       return v, nil
     } else {
       return "", errors.New("'" + name + "' is not a string")
     }
   } else {
-    return "", errors.New("missing '" + name + "'")
+    return "", err
   }
 }
 
-func getDuration(name string, maps ...map[string]interface{}) (time.Duration, error) {
-  if v, ok := findValue(name, maps...); ok {
+func getDuration(name string, obj map[string]interface{}, qp *queryParts) (time.Duration, error) {
+  if v, err := findValue(name, obj, qp); err == nil {
     var dur time.Duration
     switch v.(type) {
       case float64:
@@ -398,7 +427,7 @@ func getDuration(name string, maps ...map[string]interface{}) (time.Duration, er
     }
     return dur, nil
   } else {
-    return 0, errors.New("missing '" + name + "'")
+    return 0, err
   }
 }
 
@@ -406,14 +435,14 @@ func seconds(dur time.Duration) int64 {
   return int64(dur.Seconds())
 }
 
-func soa(valuesChain []map[string]interface{}, qp *queryParts, revision int64) (string, time.Duration, error) {
+func soa(obj map[string]interface{}, qp *queryParts, revision int64) (string, time.Duration, error) {
   // primary
-  primary, err := getString("primary", valuesChain...)
+  primary, err := getString("primary", obj, qp)
   if err != nil { return "", 0, err }
   primary = strings.TrimSpace(primary)
   primary = fqdn(primary, qp.zone)
   // mail
-  mail, err := getString("mail", valuesChain...)
+  mail, err := getString("mail", obj, qp)
   if err != nil { return "", 0, err }
   mail = strings.TrimSpace(mail)
   atIndex := strings.Index(mail, "@")
@@ -430,40 +459,40 @@ func soa(valuesChain []map[string]interface{}, qp *queryParts, revision int64) (
   // serial
   serial := revision
   // refresh
-  refresh, err := getDuration("refresh", valuesChain...)
+  refresh, err := getDuration("refresh", obj, qp)
   if err != nil { return "", 0, err }
   // retry
-  retry, err := getDuration("retry", valuesChain...)
+  retry, err := getDuration("retry", obj, qp)
   if err != nil { return "", 0, err }
   // expire
-  expire, err := getDuration("expire", valuesChain...)
+  expire, err := getDuration("expire", obj, qp)
   if err != nil { return "", 0, err }
   // negative ttl
-  negativeTTL, err := getDuration("neg-ttl", valuesChain...)
+  negativeTTL, err := getDuration("neg-ttl", obj, qp)
   if err != nil { return "", 0, err }
   // ttl
-  ttl, err := getDuration("ttl", valuesChain...)
+  ttl, err := getDuration("ttl", obj, qp)
   if err != nil { return "", 0, err }
   // (done)
   var content string = fmt.Sprintf("%s %s %d %d %d %d %d", primary, mail, serial, seconds(refresh), seconds(retry), seconds(expire), seconds(negativeTTL))
   return content, ttl, nil
 }
 
-func ns(valuesChain []map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
-  hostname, err := getString("hostname", valuesChain...)
+func ns(obj map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
+  hostname, err := getString("hostname", obj, qp)
   if err != nil { return "", 0, err }
   hostname = strings.TrimSpace(hostname)
   hostname = fqdn(hostname, qp.zone)
-  ttl, err := getDuration("ttl", valuesChain...)
+  ttl, err := getDuration("ttl", obj, qp)
   if err != nil { return "", 0, err }
   content := fmt.Sprintf("%s", hostname)
   return content, ttl, nil
 }
 
-func a(valuesChain []map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
+func a(obj map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
   var ip net.IP
-  v, ok := findValue("ip", valuesChain...)
-  if !ok { return "", 0, errors.New("'ip' not set") }
+  v, err := findValue("ip", obj, qp)
+  if err != nil { return "", 0, err }
   switch v.(type) {
     case string:
       v := v.(string)
@@ -503,16 +532,16 @@ func a(valuesChain []map[string]interface{}, qp *queryParts) (string, time.Durat
     default:
       return "", 0, errors.New("invalid IPv4: not string or array")
   }
-  ttl, err := getDuration("ttl", valuesChain...)
+  ttl, err := getDuration("ttl", obj, qp)
   if err != nil { return "", 0, err }
   content := ip.String()
   return content, ttl, nil
 }
 
-func aaaa(valuesChain []map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
+func aaaa(obj map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
   var ip net.IP
-  v, ok := findValue("ip", valuesChain...)
-  if !ok { return "", 0, errors.New("'ip' not set") }
+  v, err := findValue("ip", obj, qp)
+  if err != nil { return "", 0, err }
   switch v.(type) {
     case string:
       v := v.(string)
@@ -569,18 +598,18 @@ func aaaa(valuesChain []map[string]interface{}, qp *queryParts) (string, time.Du
     default:
       return "", 0, errors.New("invalid IPv6: not string or array")
   }
-  ttl, err := getDuration("ttl", valuesChain...)
+  ttl, err := getDuration("ttl", obj, qp)
   if err != nil { return "", 0, err }
   content := ip.String()
   return content, ttl, nil
 }
 
-func ptr(valuesChain []map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
-  hostname, err := getString("hostname", valuesChain...)
+func ptr(obj map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
+  hostname, err := getString("hostname", obj, qp)
   if err != nil { return "", 0, err }
   hostname = strings.TrimSpace(hostname)
   hostname = fqdn(hostname, qp.zone)
-  ttl, err := getDuration("ttl", valuesChain...)
+  ttl, err := getDuration("ttl", obj, qp)
   if err != nil { return "", 0, err }
   content := fmt.Sprintf("%s", hostname)
   return content, ttl, nil
