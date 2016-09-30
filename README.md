@@ -18,6 +18,7 @@ There is no stable release yet, even no beta. Any testing is appreciated.
 * Automatic serial for `SOA` records (based on the cluster revision).
 * Replication is handled by the ETCD cluster, no additional configuration is needed for using multiple authoritative PowerDNS servers.
 * Multiple syntax possibilities for JSON-supported records
+* Support for automatically appending zone name to unqualified domain names
 * Multi-level defaults, overridable
 
 #### Planned
@@ -27,8 +28,9 @@ There is no stable release yet, even no beta. Any testing is appreciated.
   * `AAAA` ⇒ `PTR` (`ip6.arpa`)
   * …
 * Default prefix for IP addresses
-* Override of domain name appended to unqualified names
-* Upgrade database structure (if needed for new program version) without interrupting service
+* Override of domain name appended to unqualified names (instead of zone name)
+  * useful for `PTR` records in reverse zones
+* Upgrade data structure (if needed for new program version) without interrupting service
 
 ## Installation
 

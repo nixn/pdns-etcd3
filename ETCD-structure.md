@@ -44,11 +44,25 @@ If the QNAME is equal to the zone name, the subdomain is set to `@` for ETCD req
 * Value: `<major>[.<minor>]`
   * `<major>` and `<minor>` must be non-negative integers
 
-`<major>` begins with `1`. Every time when a backward-incompatible change to the
+`<major>` begins with `1` (exception: pre-1.0 development, see below).
+Every time when a backward-incompatible change to the
 structure is introduced, `<major>` increases and `<minor>` resets to `0`.
-Otherwise a change increases only `<minor>`.
+Otherwise a change (which should be only additions) increases only `<minor>`.
 
-Currently the version is `1` (or `1.0`). Version checking is not implemented yet.
+During the development of first stable release (`1` or `1.0`) the `<major>` number
+is `0`, and the minor number starts with `1` and acts as the major number regarding
+changes. Therefore there may be another minor number (usually called *patch*),
+so that a development data version could be `0.3.2`.
+
+Version compatibility is as follows:
+* The program's version major number must be equal to the data version major number.
+  * Exception: Program version `1.0` (or `1.0.*`) supports data version `1.0` *and* `0.y.*`,
+  the last pre-1.0-development version (`y` is undetermined yet).
+* The program's version minor number must be equal to or greater than the data version minor number. Otherwise the program refuses to work.
+
+Version checking is not implemented yet.
+
+The version described here is `0.1`.
 
 ### Records
 
@@ -102,7 +116,7 @@ All entries can have a `ttl` field, for the record TTL.
 
 ### Syntax
 
-Headings denote the logical type, top level list values the JSON type, sublevels are examples.
+*Headings denote the logical type, top level list values the JSON type, sublevels are examples.*
 
 ###### "domain name"
 * string
@@ -113,13 +127,17 @@ Domain names undergo a check whether to append the zone name.
 The rule is the same as in [BIND][] zone files: if a name ends with a dot, the zone
 name is not appended, otherwise it is. This is naturally only possible for JSON-entries.
 
+[bind]: https://www.isc.org/downloads/bind/
+
 ###### "duration"
-* integer (seconds)
+* number (seconds, only integral part taken)
   * `3600`
 * string ([duration][tdur])
   * `"1h"`
 
 Values must be positive (that is >= 1 second).
+
+[tdur]: https://golang.org/pkg/time/#ParseDuration
 
 ###### "IPv4 address"
 * string
@@ -135,9 +153,9 @@ Values must be positive (that is >= 1 second).
   * `"2001:0db8::1"`
   * `"2001:db8:0:0:0000:0:0:1"`
   * `"20010db8000000000000000000000001"`
-* array of uint16 or number strings, length 8
+* array of numbers (uint16) or strings (of numbers), length 8
   * `[8193, "0xdb8", "0", 0, 0, 0, 0, 1]`
-* array of bytes or number strings, length 16
+* array of numbers (uint8) or strings (of numbers), length 16
   * `[32, 1, 13, "0xb8", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]`
 
 ### QTYPEs
@@ -172,7 +190,7 @@ This way the operator does not have to increase it manually each time he/she cha
 
 Version:
 ```
-/DNS/version ⇒ '1'
+/DNS/version ⇒ '0.1'
 ```
 
 Forward zone:
@@ -236,6 +254,3 @@ Well ... "glue records":
 /DNS/ns2.example.net/A/1 ⇒ '192.0.2.3'
 /DNS/ns2.example.net/AAAA/1 ⇒ '2001:db8::3'
 ```
-
-[bind]: https://www.isc.org/downloads/bind/
-[tdur]: https://golang.org/pkg/time/#ParseDuration
