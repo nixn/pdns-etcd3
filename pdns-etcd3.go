@@ -144,6 +144,7 @@ func main() {
       log.Fatalln("Failed to decode request:", err)
     }
     log.Println("request:", request)
+    since := time.Now()
     var result interface{}
     var err error
     switch request.Method {
@@ -157,6 +158,8 @@ func main() {
       log.Println("error:", err)
       respond(enc, result, err.Error())
     }
+    dur := time.Since(since)
+    log.Println("request dur:", dur)
   }
 }
 
@@ -193,9 +196,12 @@ type defaultsMessage struct {
 }
 
 func loadDefaults(key string, c chan defaultsMessage) {
+  since := time.Now()
   ctx, cancel := context.WithTimeout(context.Background(), timeout)
   response, err := cli.Get(ctx, key)
   cancel()
+  dur := time.Since(since)
+  log.Println("loaded", key, "in", dur)
   if err != nil {
     c <- defaultsMessage{ key, nil, err }
     return
@@ -219,6 +225,7 @@ func ensureDefaults(qp *queryParts) error {
     qp.zoneSubdomainQtypeDefaultsKey() }
   c := make(chan defaultsMessage, len(keys))
   n := 0
+  since := time.Now()
   for _, key := range keys {
     if _, ok := defaults.values[key]; !ok {
       log.Println("loading defaults: ", key)
@@ -237,6 +244,8 @@ func ensureDefaults(qp *queryParts) error {
       if err == nil { err = msg.err }
     }
   }
+  dur := time.Since(since)
+  log.Println("ensureDefaults dur:", dur)
   return err
 }
 
@@ -293,9 +302,12 @@ func lookup(params map[string]interface{}) (interface{}, error) {
   var err error
   log.Println("lookup:", qp.recordKey())
   {
+    since := time.Now()
     ctx, cancel := context.WithTimeout(context.Background(), timeout)
     response, err = cli.Get(ctx, qp.recordKey(), opts...) // TODO set quorum option. not in API, perhaps default now (in v3)?
     cancel()
+    dur := time.Since(since)
+    log.Println("lookup dur:", dur)
   }
   if err != nil { return false, err }
   // defaults
