@@ -92,20 +92,21 @@ func main() {
     // timeout
     if tmo, ok := request.Parameters["timeout"]; ok {
       if tmo, ok := tmo.(string); ok {
-        if tmo, err := time.ParseDuration(tmo); err == nil {
+        if tmo, err := strconv.ParseUint(tmo, 10, 32); err == nil {
           if tmo > 0 {
-            cfg.DialTimeout = tmo
-            timeout = tmo
+            timeout = time.Duration(tmo) * time.Millisecond
+            cfg.DialTimeout = timeout
           } else {
-            fatal(enc, "Non-positive timeout value")
+            fatal(enc, "Timeout may not be zero")
           }
         } else {
-          fatal(enc, "Failed to parse timeout value")
+          fatal(enc, fmt.Sprintf("Failed to parse timeout value: %s", err))
         }
       } else {
         fatal(enc, "parameters.timeout is not a string")
       }
     }
+    logMessages = append(logMessages, fmt.Sprintf("timeout: %s", timeout))
     // endpoints
     if endpoints, ok := request.Parameters["endpoints"]; ok {
       if endpoints, ok := endpoints.(string); ok {

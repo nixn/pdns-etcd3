@@ -65,8 +65,8 @@ If `<config>` is not given, it defaults to `endpoints=[::1]:2379|127.0.0.1:2379`
 
 `prefix` is optional and is empty by default.
 
-`timeout` is optional and defaults to 2 seconds. The value can be anything parseable
-by [`time.ParseDuration`](https://golang.org/pkg/time/#ParseDuration), but only positive values.
+`timeout` is optional and defaults to 2 seconds. The value must be a positive integer,
+given in milliseconds.
 
 ### ETCD structure
 
