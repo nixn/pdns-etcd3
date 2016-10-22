@@ -35,7 +35,7 @@ type pdnsRequest struct {
   Parameters map[string]interface{}
 }
 
-func (req *pdnsRequest) AsString() string {
+func (req *pdnsRequest) String() string {
   return fmt.Sprintf("%s: %+v", req.Method, req.Parameters)
 }
 
@@ -147,7 +147,7 @@ func main() {
     var err error
     switch request.Method {
       case "lookup": result, err = lookup(request.Parameters)
-      default: result, err = false, errors.New("unknown/unimplemented request: " + request.AsString())
+      default: result, err = false, fmt.Errorf("unknown/unimplemented request: %s", request)
     }
     if err == nil {
       log.Println("result:", result)
@@ -474,7 +474,7 @@ func soa(obj map[string]interface{}, qp *queryParts, revision int64) (string, ti
   ttl, err := getDuration("ttl", obj, qp)
   if err != nil { return "", 0, err }
   // (done)
-  var content string = fmt.Sprintf("%s %s %d %d %d %d %d", primary, mail, serial, seconds(refresh), seconds(retry), seconds(expire), seconds(negativeTTL))
+  var content = fmt.Sprintf("%s %s %d %d %d %d %d", primary, mail, serial, seconds(refresh), seconds(retry), seconds(expire), seconds(negativeTTL))
   return content, ttl, nil
 }
 
@@ -518,12 +518,12 @@ func a(obj map[string]interface{}, qp *queryParts) (string, time.Duration, error
         switch v.(type) {
           case float64:
             v := int64(v.(float64))
-            if v < 0 || v > 255 { return "", 0, errors.New(fmt.Sprintf("invalid IPv4: part %d out of range", i + 1)) }
+            if v < 0 || v > 255 { return "", 0, fmt.Errorf("invalid IPv4: part %d out of range", i + 1) }
             ip[i] = byte(v)
           case string:
             v, err := strconv.ParseUint(v.(string), 0, 8)
             if err != nil { return "", 0, err }
-            if v > 255 { return "", 0, errors.New(fmt.Sprintf("invalid IPv4: part %d out of range", i + 1))}
+            if v > 255 { return "", 0, fmt.Errorf("invalid IPv4: part %d out of range", i + 1) }
             ip[i] = byte(v)
           default:
             return "", 0, errors.New("invalid IPv4: part neither number nor string")
