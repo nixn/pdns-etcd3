@@ -257,19 +257,19 @@ type queryParts struct {
 func (qp *queryParts) isANY() bool { return qp.qtype == "ANY" }
 func (qp *queryParts) isSOA() bool { return qp.qtype == "SOA" }
 
-func (qp *queryParts) zoneKey() string { return prefix + "/" + qp.zone }
-func (qp *queryParts) subdomainKey() string { return prefix + "/" + qp.zone + "/" + qp.subdomain }
+func (qp *queryParts) zoneKey() string { return prefix + qp.zone }
+func (qp *queryParts) subdomainKey() string { return prefix + qp.zone + "/" + qp.subdomain }
 func (qp *queryParts) recordKey() string {
-  key := prefix + "/" + qp.zone + "/" + qp.subdomain
+  key := prefix + qp.zone + "/" + qp.subdomain
   if !qp.isANY() { key += "/" + qp.qtype }
   if !qp.isSOA() { key += "/" }
   return key
 }
 
-func (qp *queryParts) zoneDefaultsKey() string { return prefix + "/" + qp.zone + "/-defaults" }
-func (qp *queryParts) zoneSubdomainDefaultsKey() string { return prefix + "/" + qp.zone + "/" + qp.subdomain + "/-defaults" }
-func (qp *queryParts) zoneQtypeDefaultsKey() string { return prefix + "/" + qp.zone + "/" + qp.qtype + "-defaults" }
-func (qp *queryParts) zoneSubdomainQtypeDefaultsKey() string { return prefix + "/" + qp.zone + "/" + qp.subdomain + "/" + qp.qtype + "-defaults" }
+func (qp *queryParts) zoneDefaultsKey() string { return prefix + qp.zone + "/-defaults" }
+func (qp *queryParts) zoneSubdomainDefaultsKey() string { return prefix + qp.zone + "/" + qp.subdomain + "/-defaults" }
+func (qp *queryParts) zoneQtypeDefaultsKey() string { return prefix + qp.zone + "/" + qp.qtype + "-defaults" }
+func (qp *queryParts) zoneSubdomainQtypeDefaultsKey() string { return prefix + qp.zone + "/" + qp.subdomain + "/" + qp.qtype + "-defaults" }
 func (qp *queryParts) isDefaultsKey(key string) bool {
   if key == qp.zoneDefaultsKey() { return true; }
   if key == qp.zoneSubdomainDefaultsKey() { return true; }
@@ -370,6 +370,8 @@ func makeResultItem(qp *queryParts, content string, ttl time.Duration) map[strin
     "ttl": seconds(ttl),
     "auth": true,
   }
+  // TODO handle 'priority'. from remote backend docs:
+  // "Note: priority field is required before 4.0, after 4.0 priority is added to content. This applies to any resource record which uses priority, for example SRV or MX."
 }
 
 func fqdn(domain, qname string) string {

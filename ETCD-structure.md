@@ -40,7 +40,7 @@ If the QNAME is equal to the zone name, the subdomain is set to `@` for ETCD req
 
 ### Version
 
-* Key: `<prefix>/version`
+* Key: `<prefix>version`
 * Value: `<major>[.<minor>]`
   * `<major>` and `<minor>` must be non-negative integers
 
@@ -69,7 +69,7 @@ The version described here is `0.1`.
 Each resource record has at least one corresponding entry in the storage.
 Entries are as follows:
 
-* Key: `<prefix>/<zone>/<subdomain>/<QTYPE>/<id>`
+* Key: `<prefix><zone>/<subdomain>/<QTYPE>/<id>`
   * `<zone>` is a domain name, e.g. `example.net`
   * `<subdomain>` is as described in the rules above
   * `<QTYPE>` is the type of the resource resource, e.g. `A`, `MX`, …
@@ -81,7 +81,7 @@ but `SOA` may have multiple values.
 
 #### Exceptions
 
-* For the `SOA` record the entry key is `<prefix>/<zone>/@/SOA` (no `<id>`).
+* For the `SOA` record the entry key is `<prefix><zone>/@/SOA` (no `<id>`).
 It does not have multiple values.
 
 * The QTYPE `ANY` is not a real record, so nothing to store for it.
@@ -91,13 +91,13 @@ It does not have multiple values.
 There are four levels of default values, from most generic to most specific:
 
 1. zone
-  * Key: `<prefix>/<zone>/-defaults`
+  * Key: `<prefix><zone>/-defaults`
 2. zone + QTYPE
-  * Key: `<prefix>/<zone>/<QTYPE>-defaults`
+  * Key: `<prefix><zone>/<QTYPE>-defaults`
 3. zone + subdomain
-  * Key: `<prefix>/<zone>/<subdomain>/-defaults`
+  * Key: `<prefix><zone>/<subdomain>/-defaults`
 4. zone + subdomain + QTYPE
-  * Key: `<prefix>/<zone>/<subdomain>/<QTYPE>-defaults`
+  * Key: `<prefix><zone>/<subdomain>/<QTYPE>-defaults`
 
 Defaults-entries must be JSON objects, with any number of fields (including zero).
 Defaults-entries may be non-existent, which is equivalent to an empty object.
@@ -188,69 +188,71 @@ This way the operator does not have to increase it manually each time he/she cha
 
 *To be clear on the value, it's always enclosed in ' (single quotes).*
 
+Prefix: `DNS/` (note the trailing slash, it is part of the prefix, *not* inserted automatically)
+
 Version:
 ```
-/DNS/version ⇒ '0.1'
+DNS/version → '0.1'
 ```
 
 Forward zone:
 ```
-/DNS/example.net/-defaults ⇒ '{"ttl": "1h"}'
-/DNS/example.net/@/SOA ⇒ '{"primary": "ns1", "mail": "horst.master", "refresh": "1h", "retry": "30m", "expire": 604800, "neg-ttl": "10m"}'
-/DNS/example.net/@/NS/first ⇒ '{"hostname": "ns1"}'
-/DNS/example.net/@/NS/second ⇒ '{"hostname": "ns2"}'
-/DNS/example.net/ns1/A/1 ⇒ '{"ip": [192, 0, 2, 2]}'
-/DNS/example.net/ns1/AAAA/1 ⇒ '{"ip": "2001:db8::2"}'
-/DNS/example.net/ns2/A/1 ⇒ '{"ip": "192.0.2.3"}'
-/DNS/example.net/ns2/AAAA/1 ⇒ '{"ip": "2001:db8::3"}'
-/DNS/example.net/@/MX-defaults ⇒ '{"ttl": "2h"}'
-/DNS/example.net/@/MX/1 ⇒ '10 mail.example.net.'
-/DNS/example.net/mail/A/1 ⇒ '{"ip": [192,0,2,10]}'
-/DNS/example.net/mail/AAAA/1 ⇒ '2001:db8::10'
-/DNS/example.net/@/TXT/1 ⇒ 'v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all'
-/DNS/example.net/kerberos1/A/1 ⇒ '192.0.2.15'
-/DNS/example.net/kerberos1/AAAA/1 ⇒ '2001:db8::15'
-/DNS/example.net/kerberos2/A/1 ⇒ '192.0.2.25'
-/DNS/example.net/kerberos2/AAAA/1 ⇒ '2001:db8::25'
-/DNS/example.net/SRV-defaults ⇒ '{"priority": 0, "weight": 0}'
-/DNS/example.net/_kerberos._tcp/SRV-defaults ⇒ '{"port": 88}'
-/DNS/example.net/_kerberos._tcp/SRV/1 ⇒ '0 0 88 kerberos1.example.net.'
-/DNS/example.net/_kerberos._tcp/SRV/2 ⇒ '0 0 88 kerberos2.example.net.'
-/DNS/example.net/kerberos-master/CNAME/1 ⇒ 'kerberos1.example.net.'
+DNS/example.net/-defaults → '{"ttl": "1h"}'
+DNS/example.net/@/SOA → '{"primary": "ns1", "mail": "horst.master", "refresh": "1h", "retry": "30m", "expire": 604800, "neg-ttl": "10m"}'
+DNS/example.net/@/NS/first → '{"hostname": "ns1"}'
+DNS/example.net/@/NS/second → '{"hostname": "ns2"}'
+DNS/example.net/ns1/A/1 → '{"ip": [192, 0, 2, 2]}'
+DNS/example.net/ns1/AAAA/1 → '{"ip": "2001:db8::2"}'
+DNS/example.net/ns2/A/1 → '{"ip": "192.0.2.3"}'
+DNS/example.net/ns2/AAAA/1 → '{"ip": "2001:db8::3"}'
+DNS/example.net/@/MX-defaults → '{"ttl": "2h"}'
+DNS/example.net/@/MX/1 → '10 mail.example.net.'
+DNS/example.net/mail/A/1 → '{"ip": [192,0,2,10]}'
+DNS/example.net/mail/AAAA/1 → '2001:db8::10'
+DNS/example.net/@/TXT/1 → 'v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all'
+DNS/example.net/kerberos1/A/1 → '192.0.2.15'
+DNS/example.net/kerberos1/AAAA/1 → '2001:db8::15'
+DNS/example.net/kerberos2/A/1 → '192.0.2.25'
+DNS/example.net/kerberos2/AAAA/1 → '2001:db8::25'
+DNS/example.net/SRV-defaults → '{"priority": 0, "weight": 0}'
+DNS/example.net/_kerberos._tcp/SRV-defaults → '{"port": 88}'
+DNS/example.net/_kerberos._tcp/SRV/1 → '0 0 88 kerberos1.example.net.'
+DNS/example.net/_kerberos._tcp/SRV/2 → '0 0 88 kerberos2.example.net.'
+DNS/example.net/kerberos-master/CNAME/1 → 'kerberos1.example.net.'
 ```
 
 Reverse zone for IPv4:
 ```
-/DNS/2.0.192.in-addr.arpa/-defaults ⇒ '{"ttl": "1h"}'
-/DNS/2.0.192.in-addr.arpa/@/SOA ⇒ '{"primary": "ns1.example.net.", "mail": "horst.master@example.net.", "refresh": "1h", "retry": "30m", "expire": "168h", "neg-ttl": "10m"}'
-/DNS/2.0.192.in-addr.arpa/@/NS/a ⇒ '{"hostname": "ns1.example.net."}'
-/DNS/2.0.192.in-addr.arpa/@/NS/b ⇒ 'ns2.example.net.'
-/DNS/2.0.192.in-addr.arpa/2/PTR/1 ⇒ '{"hostname": "ns1.example.net."}'
-/DNS/2.0.192.in-addr.arpa/3/PTR/1 ⇒ 'ns2.example.net.'
-/DNS/2.0.192.in-addr.arpa/10/PTR/1 ⇒ '{"hostname": "mail.example.net."}'
-/DNS/2.0.192.in-addr.arpa/15/PTR/1 ⇒ 'kerberos1.example.net.'
-/DNS/2.0.192.in-addr.arpa/25/PTR/1 ⇒ 'kerberos2.example.net.'
+DNS/2.0.192.in-addr.arpa/-defaults → '{"ttl": "1h"}'
+DNS/2.0.192.in-addr.arpa/@/SOA → '{"primary": "ns1.example.net.", "mail": "horst.master@example.net.", "refresh": "1h", "retry": "30m", "expire": "168h", "neg-ttl": "10m"}'
+DNS/2.0.192.in-addr.arpa/@/NS/a → '{"hostname": "ns1.example.net."}'
+DNS/2.0.192.in-addr.arpa/@/NS/b → 'ns2.example.net.'
+DNS/2.0.192.in-addr.arpa/2/PTR/1 → '{"hostname": "ns1.example.net."}'
+DNS/2.0.192.in-addr.arpa/3/PTR/1 → 'ns2.example.net.'
+DNS/2.0.192.in-addr.arpa/10/PTR/1 → '{"hostname": "mail.example.net."}'
+DNS/2.0.192.in-addr.arpa/15/PTR/1 → 'kerberos1.example.net.'
+DNS/2.0.192.in-addr.arpa/25/PTR/1 → 'kerberos2.example.net.'
 ```
 
 Reverse zone for IPv6:
 ```
-/DNS/8.b.d.0.1.0.0.2.ip6.arpa/-defaults ⇒ '{"ttl": 3600}'
-/DNS/8.b.d.0.1.0.0.2.ip6.arpa/@/SOA ⇒ '{"primary":"ns1.example.net.", "mail":"horst.master@example.net.", "refresh":"1h", "retry":"30m", "expire":"168h","neg-ttl":"10m"}'
-/DNS/8.b.d.0.1.0.0.2.ip6.arpa/@/NS/1 ⇒ 'ns1.example.net.'
-/DNS/8.b.d.0.1.0.0.2.ip6.arpa/@/NS/2 ⇒ 'ns2.example.net.'
-/DNS/8.b.d.0.1.0.0.2.ip6.arpa/2.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 ⇒ 'ns1.example.net.'
-/DNS/8.b.d.0.1.0.0.2.ip6.arpa/3.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 ⇒ 'ns2.example.net.'
-/DNS/8.b.d.0.1.0.0.2.ip6.arpa/0.1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 ⇒ 'mail.example.net.'
-/DNS/8.b.d.0.1.0.0.2.ip6.arpa/5.1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 ⇒ 'kerberos1.example.net.'
-/DNS/8.b.d.0.1.0.0.2.ip6.arpa/5.2.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 ⇒ 'kerberos2.example.net.'
+DNS/8.b.d.0.1.0.0.2.ip6.arpa/-defaults → '{"ttl": 3600}'
+DNS/8.b.d.0.1.0.0.2.ip6.arpa/@/SOA → '{"primary":"ns1.example.net.", "mail":"horst.master@example.net.", "refresh":"1h", "retry":"30m", "expire":"168h","neg-ttl":"10m"}'
+DNS/8.b.d.0.1.0.0.2.ip6.arpa/@/NS/1 → 'ns1.example.net.'
+DNS/8.b.d.0.1.0.0.2.ip6.arpa/@/NS/2 → 'ns2.example.net.'
+DNS/8.b.d.0.1.0.0.2.ip6.arpa/2.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 → 'ns1.example.net.'
+DNS/8.b.d.0.1.0.0.2.ip6.arpa/3.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 → 'ns2.example.net.'
+DNS/8.b.d.0.1.0.0.2.ip6.arpa/0.1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 → 'mail.example.net.'
+DNS/8.b.d.0.1.0.0.2.ip6.arpa/5.1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 → 'kerberos1.example.net.'
+DNS/8.b.d.0.1.0.0.2.ip6.arpa/5.2.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 → 'kerberos2.example.net.'
 ```
 
-Well ... "glue records":
+Well … "glue records":
 ```
-/DNS/ns1.example.net/-defaults ⇒ '{"ttl":"1h"}'
-/DNS/ns1.example.net/A/1 ⇒ '192.0.2.2'
-/DNS/ns1.example.net/AAAA/1 ⇒ '2001:db8::2'
-/DNS/ns2.example.net/-defaults ⇒ '{"ttl":"1h"}'
-/DNS/ns2.example.net/A/1 ⇒ '192.0.2.3'
-/DNS/ns2.example.net/AAAA/1 ⇒ '2001:db8::3'
+DNS/ns1.example.net/-defaults → '{"ttl":"1h"}'
+DNS/ns1.example.net/A/1 → '192.0.2.2'
+DNS/ns1.example.net/AAAA/1 → '2001:db8::2'
+DNS/ns2.example.net/-defaults → '{"ttl":"1h"}'
+DNS/ns2.example.net/A/1 → '192.0.2.3'
+DNS/ns2.example.net/AAAA/1 → '2001:db8::3'
 ```
