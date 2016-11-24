@@ -189,6 +189,20 @@ func extractSubdomain(domain, zone string) string {
   return subdomain
 }
 
+func get(key string, multi bool) (*clientv3.GetResponse, error) {
+  log.Println("loading", key)
+  opts := []clientv3.OpOption{}
+  if multi { opts = append(opts, clientv3.WithPrefix()) }
+  ctx, cancel := context.WithTimeout(context.Background(), timeout)
+  since := time.Now()
+  response, err := cli.Get(ctx, key, opts...)
+  dur := time.Since(since)
+  cancel()
+  log.Println("loading", key, "dur:", dur)
+  if err != nil { return nil, err }
+  return response, nil
+}
+
 type defaultsMessage struct {
   key string
   value map[string]interface{}
@@ -196,12 +210,7 @@ type defaultsMessage struct {
 }
 
 func loadDefaults(key string, c chan defaultsMessage) {
-  since := time.Now()
-  ctx, cancel := context.WithTimeout(context.Background(), timeout)
-  response, err := cli.Get(ctx, key)
-  cancel()
-  dur := time.Since(since)
-  log.Println("loaded", key, "in", dur)
+  response, err := get(key, false)
   if err != nil {
     c <- defaultsMessage{ key, nil, err }
     return
@@ -228,7 +237,7 @@ func ensureDefaults(qp *queryParts) error {
   since := time.Now()
   for _, key := range keys {
     if _, ok := defaults.values[key]; !ok {
-      log.Println("loading defaults: ", key)
+      log.Println("loading defaults:", key)
       go loadDefaults(key, c)
       n++
     } else {
@@ -294,22 +303,8 @@ func lookup(params map[string]interface{}) (interface{}, error) {
   }
   qp.subdomain = extractSubdomain(qp.qname, qp.zone)
   if len(qp.subdomain) == 0 { qp.subdomain = "@" }
-  opts := []clientv3.OpOption{}
-  if !qp.isSOA() {
-    opts = append(opts, clientv3.WithPrefix())
-  }
-  var response *clientv3.GetResponse
-  var err error
-  log.Println("lookup:", qp.recordKey())
-  {
-    since := time.Now()
-    ctx, cancel := context.WithTimeout(context.Background(), timeout)
-    response, err = cli.Get(ctx, qp.recordKey(), opts...) // TODO set quorum option. not in API, perhaps default now (in v3)?
-    cancel()
-    dur := time.Since(since)
-    log.Println("lookup dur:", dur)
-  }
-  if err != nil { return false, err }
+  response, err := get(qp.recordKey(), !qp.isSOA())
+  if err != nil { return false, fmt.Errorf("failed to load %s: %s", qp.recordKey(), err) }
   // defaults
   if defaults.revision != response.Header.Revision {
     // TODO recheck version
