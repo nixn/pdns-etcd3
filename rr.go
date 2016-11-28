@@ -62,23 +62,25 @@ func getInt32(name string, obj map[string]interface{}, qp *queryParts) (int32, e
 		if v, ok := v.(float64); ok {
 			if v < 0 {
 				return 0, fmt.Errorf("'%s' may not be negative", name)
+			} else {
+				return int32(v), nil
 			}
-			return int32(v), nil
 		}
 		return 0, fmt.Errorf("'%s' is not a number", name)
+	} else {
+		return 0, err
 	}
-	return 0, err
 }
 
 func getString(name string, obj map[string]interface{}, qp *queryParts) (string, error) {
 	if v, err := findValue(name, obj, qp); err == nil {
 		if v, ok := v.(string); ok {
 			return v, nil
-		} else {
-			return "", fmt.Errorf("'%s' is not a string", name)
 		}
+		return "", fmt.Errorf("'%s' is not a string", name)
+	} else {
+		return "", err
 	}
-	return "", err
 }
 
 func getDuration(name string, obj map[string]interface{}, qp *queryParts) (time.Duration, error) {
@@ -100,8 +102,9 @@ func getDuration(name string, obj map[string]interface{}, qp *queryParts) (time.
 			return dur, fmt.Errorf("'%s' must be positive", name)
 		}
 		return dur, nil
+	} else {
+		return 0, err
 	}
-	return 0, err
 }
 
 func soa(obj map[string]interface{}, qp *queryParts, revision int64) (string, time.Duration, error) {
