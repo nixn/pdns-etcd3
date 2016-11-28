@@ -15,104 +15,106 @@ limitations under the License. */
 package main
 
 import (
-  "fmt"
-  "log"
-  "time"
-  "os"
-  "io"
-  "encoding/json"
-  "strings"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"strings"
+	"time"
 )
 
 type pdnsRequest struct {
-  Method string
-  Parameters map[string]interface{}
+	Method     string
+	Parameters map[string]interface{}
 }
 
 func (req *pdnsRequest) String() string {
-  return fmt.Sprintf("%s: %+v", req.Method, req.Parameters)
+	return fmt.Sprintf("%s: %+v", req.Method, req.Parameters)
 }
 
 var (
-  prefix = ""
+	prefix = ""
 )
 
 func main() {
-  log.SetPrefix(fmt.Sprintf("pdns-etcd3[%d]: ", os.Getpid()))
-  log.SetFlags(0)
-  dec := json.NewDecoder(os.Stdin)
-  enc := json.NewEncoder(os.Stdout)
-  var request pdnsRequest
-  if err := dec.Decode(&request); err != nil {
-    log.Fatalln("Failed to decode JSON:", err)
-  }
-  if request.Method != "initialize" {
-    log.Fatalln("Waited for 'initialize', got:", request.Method)
-  }
-  logMessages := []string{}
-  if pfx, ok := request.Parameters["prefix"]; ok {
-    if pfx, ok := pfx.(string); ok {
-      prefix = pfx
-    } else {
-      fatal(enc, "parameters.prefix is not a string")
-    }
-  }
-  logMessages = append(logMessages, fmt.Sprintf("prefix: '%s'", prefix))
-  if logMsgs, err := setupClient(request.Parameters); err != nil {
-    fatal(enc, err.Error())
-  } else {
-    logMessages = append(logMessages, logMsgs...)
-  }
-  defer closeClient()
-  // TODO check storage version
-  respond(enc, true, logMessages...)
-  log.Println("initialized.", strings.Join(logMessages, ". "))
-  // main loop
-  for {
-    request := pdnsRequest{}
-    if err := dec.Decode(&request); err != nil {
-      if err == io.EOF {
-        log.Println("EOF on input stream, terminating");
-        break
-      }
-      log.Fatalln("Failed to decode request:", err)
-    }
-    log.Println("request:", request)
-    since := time.Now()
-    var result interface{}
-    var err error
-    switch request.Method {
-      case "lookup": result, err = lookup(request.Parameters)
-      default: result, err = false, fmt.Errorf("unknown/unimplemented request: %s", request)
-    }
-    if err == nil {
-      log.Println("result:", result)
-      respond(enc, result)
-    } else {
-      log.Println("error:", err)
-      respond(enc, result, err.Error())
-    }
-    dur := time.Since(since)
-    log.Println("request dur:", dur)
-  }
+	log.SetPrefix(fmt.Sprintf("pdns-etcd3[%d]: ", os.Getpid()))
+	log.SetFlags(0)
+	dec := json.NewDecoder(os.Stdin)
+	enc := json.NewEncoder(os.Stdout)
+	var request pdnsRequest
+	if err := dec.Decode(&request); err != nil {
+		log.Fatalln("Failed to decode JSON:", err)
+	}
+	if request.Method != "initialize" {
+		log.Fatalln("Waited for 'initialize', got:", request.Method)
+	}
+	logMessages := []string{}
+	if pfx, ok := request.Parameters["prefix"]; ok {
+		if pfx, ok := pfx.(string); ok {
+			prefix = pfx
+		} else {
+			fatal(enc, "parameters.prefix is not a string")
+		}
+	}
+	logMessages = append(logMessages, fmt.Sprintf("prefix: '%s'", prefix))
+	if logMsgs, err := setupClient(request.Parameters); err != nil {
+		fatal(enc, err.Error())
+	} else {
+		logMessages = append(logMessages, logMsgs...)
+	}
+	defer closeClient()
+	// TODO check storage version
+	respond(enc, true, logMessages...)
+	log.Println("initialized.", strings.Join(logMessages, ". "))
+	// main loop
+	for {
+		request := pdnsRequest{}
+		if err := dec.Decode(&request); err != nil {
+			if err == io.EOF {
+				log.Println("EOF on input stream, terminating")
+				break
+			}
+			log.Fatalln("Failed to decode request:", err)
+		}
+		log.Println("request:", request)
+		since := time.Now()
+		var result interface{}
+		var err error
+		switch request.Method {
+		case "lookup":
+			result, err = lookup(request.Parameters)
+		default:
+			result, err = false, fmt.Errorf("unknown/unimplemented request: %s", request)
+		}
+		if err == nil {
+			log.Println("result:", result)
+			respond(enc, result)
+		} else {
+			log.Println("error:", err)
+			respond(enc, result, err.Error())
+		}
+		dur := time.Since(since)
+		log.Println("request dur:", dur)
+	}
 }
 
 func makeResponse(result interface{}, msg ...string) map[string]interface{} {
-  response := map[string]interface{}{"result":result}
-  if len(msg) > 0 {
-    response["log"] = msg
-  }
-  return response
+	response := map[string]interface{}{"result": result}
+	if len(msg) > 0 {
+		response["log"] = msg
+	}
+	return response
 }
 
 func respond(enc *json.Encoder, result interface{}, msg ...string) {
-  response := makeResponse(result, msg...)
-  if err := enc.Encode(&response); err != nil {
-    log.Fatalln("Failed to encode response", response, ":", err)
-  }
+	response := makeResponse(result, msg...)
+	if err := enc.Encode(&response); err != nil {
+		log.Fatalln("Failed to encode response", response, ":", err)
+	}
 }
 
 func fatal(enc *json.Encoder, msg string) {
-  respond(enc, false, msg)
-  log.Fatalln("Fatal error:", msg)
+	respond(enc, false, msg)
+	log.Fatalln("Fatal error:", msg)
 }
