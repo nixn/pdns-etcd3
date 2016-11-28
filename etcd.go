@@ -41,49 +41,48 @@ func setupClient(params map[string]interface{}) ([]string, error) {
 			return nil, fmt.Errorf("parameters.configFile is not a string")
 		}
 		return []string{}, nil
-	} else {
-		cfg := clientv3.Config{DialTimeout: timeout}
-		// timeout
-		if tmo, ok := params["timeout"]; ok {
-			if tmo, ok := tmo.(string); ok {
-				if tmo, err := strconv.ParseUint(tmo, 10, 32); err == nil {
-					if tmo > 0 {
-						timeout = time.Duration(tmo) * time.Millisecond
-						cfg.DialTimeout = timeout
-					} else {
-						return nil, fmt.Errorf("Timeout may not be zero")
-					}
+	}
+	cfg := clientv3.Config{DialTimeout: timeout}
+	// timeout
+	if tmo, ok := params["timeout"]; ok {
+		if tmo, ok := tmo.(string); ok {
+			if tmo, err := strconv.ParseUint(tmo, 10, 32); err == nil {
+				if tmo > 0 {
+					timeout = time.Duration(tmo) * time.Millisecond
+					cfg.DialTimeout = timeout
 				} else {
-					return nil, fmt.Errorf("Failed to parse timeout value: %s", err)
+					return nil, fmt.Errorf("Timeout may not be zero")
 				}
 			} else {
-				return nil, fmt.Errorf("parameters.timeout is not a string")
-			}
-		}
-		logMessages := []string{fmt.Sprintf("timeout: %s", timeout)}
-		// endpoints
-		if endpoints, ok := params["endpoints"]; ok {
-			if endpoints, ok := endpoints.(string); ok {
-				endpoints := strings.Split(endpoints, "|")
-				cfg.Endpoints = endpoints
-				if client, err := clientv3.New(cfg); err == nil {
-					cli = client
-				} else {
-					return nil, fmt.Errorf("Failed to parse endpoints: %s", err)
-				}
-			} else {
-				return nil, fmt.Errorf("parameters.endpoints is not a string")
+				return nil, fmt.Errorf("Failed to parse timeout value: %s", err)
 			}
 		} else {
-			cfg.Endpoints = []string{"[::1]:2379", "127.0.0.1:2379"}
+			return nil, fmt.Errorf("parameters.timeout is not a string")
+		}
+	}
+	logMessages := []string{fmt.Sprintf("timeout: %s", timeout)}
+	// endpoints
+	if endpoints, ok := params["endpoints"]; ok {
+		if endpoints, ok := endpoints.(string); ok {
+			endpoints := strings.Split(endpoints, "|")
+			cfg.Endpoints = endpoints
 			if client, err := clientv3.New(cfg); err == nil {
 				cli = client
 			} else {
-				return nil, fmt.Errorf("Failed to create client: %s", err)
+				return nil, fmt.Errorf("Failed to parse endpoints: %s", err)
 			}
+		} else {
+			return nil, fmt.Errorf("parameters.endpoints is not a string")
 		}
-		return logMessages, nil
+	} else {
+		cfg.Endpoints = []string{"[::1]:2379", "127.0.0.1:2379"}
+		if client, err := clientv3.New(cfg); err == nil {
+			cli = client
+		} else {
+			return nil, fmt.Errorf("Failed to create client: %s", err)
+		}
 	}
+	return logMessages, nil
 }
 
 func closeClient() {
