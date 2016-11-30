@@ -149,6 +149,16 @@ func (qp *queryParts) isDefaultsKey(key string) bool {
 	return false
 }
 
+type rr_func func(obj map[string]interface{}, qp *queryParts) (string, time.Duration, error)
+
+var rr2func map[string]rr_func = map[string]rr_func{
+	"A":    a,
+	"AAAA": aaaa,
+	"NS":   ns,
+	"PTR":  ptr,
+	"SOA":  soa,
+}
+
 func lookup(params map[string]interface{}) (interface{}, error) {
 	qp := queryParts{
 		qname:  params["qname"].(string),
@@ -219,21 +229,11 @@ func lookup(params map[string]interface{}) (interface{}, error) {
 				return false, err
 			}
 			err = nil
-			switch qp.qtype {
-			case "SOA":
-				content, ttl, err = soa(obj, &qp)
-			case "NS":
-				content, ttl, err = ns(obj, &qp)
-			case "A":
-				content, ttl, err = a(obj, &qp)
-			case "AAAA":
-				content, ttl, err = aaaa(obj, &qp)
-			case "PTR":
-				content, ttl, err = ptr(obj, &qp)
-			// TODO more qtypes
-			default:
+			rrFunc, ok := rr2func[qp.qtype]
+			if !ok {
 				return false, fmt.Errorf("unknown/unimplemented qtype '%s', but have (JSON) object data for it (%s)", qp.qtype, qp.recordKey())
 			}
+			content, ttl, err = rrFunc(obj, &qp)
 			if err != nil {
 				return false, err
 			}
