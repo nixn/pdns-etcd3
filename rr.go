@@ -107,7 +107,7 @@ func getDuration(name string, obj map[string]interface{}, qp *queryParts) (time.
 	}
 }
 
-func soa(obj map[string]interface{}, qp *queryParts, revision int64) (string, time.Duration, error) {
+func soa(obj map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
 	// primary
 	primary, err := getString("primary", obj, qp)
 	if err != nil {
@@ -135,7 +135,7 @@ func soa(obj map[string]interface{}, qp *queryParts, revision int64) (string, ti
 	}
 	mail = fqdn(mail, qp.zone)
 	// serial
-	serial := revision
+	serial := *qp.revision
 	// refresh
 	refresh, err := getDuration("refresh", obj, qp)
 	if err != nil {

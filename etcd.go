@@ -16,12 +16,12 @@ package main
 
 import (
 	"fmt"
+	"github.com/coreos/etcd/clientv3"
+	"golang.org/x/net/context"
 	"log"
 	"strconv"
 	"strings"
 	"time"
-	"github.com/coreos/etcd/clientv3"
-	"golang.org/x/net/context"
 )
 
 var (
@@ -89,11 +89,14 @@ func closeClient() {
 	cli.Close()
 }
 
-func get(key string, multi bool) (*clientv3.GetResponse, error) {
+func get(key string, multi bool, revision *int64) (*clientv3.GetResponse, error) {
 	log.Println("loading", key)
 	opts := []clientv3.OpOption{}
 	if multi {
 		opts = append(opts, clientv3.WithPrefix())
+	}
+	if revision != nil {
+		opts = append(opts, clientv3.WithRev(*revision))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	since := time.Now()
@@ -101,8 +104,5 @@ func get(key string, multi bool) (*clientv3.GetResponse, error) {
 	dur := time.Since(since)
 	cancel()
 	log.Println("loading", key, "dur:", dur)
-	if err != nil {
-		return nil, err
-	}
-	return response, nil
+	return response, err
 }

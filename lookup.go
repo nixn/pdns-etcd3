@@ -45,8 +45,8 @@ type defaultsMessage struct {
 	err   error
 }
 
-func loadDefaults(key string, c chan defaultsMessage) {
-	response, err := get(key, false)
+func loadDefaults(key string, revision int64, c chan defaultsMessage) {
+	response, err := get(key, false, &revision)
 	if err != nil {
 		c <- defaultsMessage{key, nil, err}
 		return
@@ -74,7 +74,7 @@ func ensureDefaults(qp *queryParts) error {
 	for _, key := range keys {
 		if _, ok := defaults.values[key]; !ok {
 			log.Println("loading defaults:", key)
-			go loadDefaults(key, c)
+			go loadDefaults(key, *qp.revision, c)
 			n++
 		} else {
 			log.Println("reusing defaults:", key)
@@ -99,6 +99,7 @@ func ensureDefaults(qp *queryParts) error {
 type queryParts struct {
 	zoneId                        int32
 	qname, zone, subdomain, qtype string
+	revision                      *int64
 }
 
 func (qp *queryParts) isANY() bool { return qp.qtype == "ANY" }
@@ -168,15 +169,16 @@ func lookup(params map[string]interface{}) (interface{}, error) {
 	if len(qp.subdomain) == 0 {
 		qp.subdomain = "@"
 	}
-	response, err := get(qp.recordKey(), !qp.isSOA())
+	response, err := get(qp.recordKey(), !qp.isSOA(), nil)
 	if err != nil {
 		return false, fmt.Errorf("failed to load %s: %s", qp.recordKey(), err)
 	}
+	qp.revision = &response.Header.Revision
 	// defaults
-	if defaults.revision != response.Header.Revision {
+	if defaults.revision != *qp.revision {
 		// TODO recheck version
-		log.Println("clearing defaults cache. old revision:", defaults.revision, ", new revision:", response.Header.Revision)
-		defaults.revision = response.Header.Revision
+		log.Printf("clearing defaults cache. old revision: %d, new revision: %d", defaults.revision, *qp.revision)
+		defaults.revision = *qp.revision
 		defaults.values = map[string]map[string]interface{}{}
 	}
 	if qp.isSOA() && isNewZone && response.Count > 0 {
@@ -214,7 +216,7 @@ func lookup(params map[string]interface{}) (interface{}, error) {
 			err = nil
 			switch qp.qtype {
 			case "SOA":
-				content, ttl, err = soa(obj, &qp, response.Header.Revision)
+				content, ttl, err = soa(obj, &qp)
 			case "NS":
 				content, ttl, err = ns(obj, &qp)
 			case "A":
