@@ -35,28 +35,6 @@ func fqdn(domain, qname string) string {
 	return domain
 }
 
-func findValue(name string, obj map[string]interface{}, qp *queryParts) (interface{}, error) {
-	if v, ok := obj[name]; ok {
-		return v, nil
-	}
-	if err := ensureDefaults(qp); err != nil {
-		return nil, err
-	}
-	if v, ok := defaults.values[qp.zoneSubdomainQtypeDefaultsKey()][name]; ok {
-		return v, nil
-	}
-	if v, ok := defaults.values[qp.zoneSubdomainDefaultsKey()][name]; ok {
-		return v, nil
-	}
-	if v, ok := defaults.values[qp.zoneQtypeDefaultsKey()][name]; ok {
-		return v, nil
-	}
-	if v, ok := defaults.values[qp.zoneDefaultsKey()][name]; ok {
-		return v, nil
-	}
-	return nil, fmt.Errorf("missing '%s'", name)
-}
-
 func getInt32(name string, obj map[string]interface{}, qp *queryParts) (int32, error) {
 	if v, err := findValue(name, obj, qp); err == nil {
 		if v, ok := v.(float64); ok {

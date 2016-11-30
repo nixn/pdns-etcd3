@@ -33,45 +33,43 @@ var defaults struct {
 	values   map[string]map[string]interface{} // key = "example.net" or "example.net/subdomain" or "example.net/[subdomain/]RR"
 }
 
-func extractSubdomain(domain, zone string) string {
-	subdomain := strings.TrimSuffix(domain, zone)
-	subdomain = strings.TrimSuffix(subdomain, ".")
-	return subdomain
-}
-
 type defaultsMessage struct {
 	key   string
 	value map[string]interface{}
 	err   error
 }
 
-func loadDefaults(key string, revision int64, c chan defaultsMessage) {
-	response, err := get(key, false, &revision)
+func loadDefaults(key string, revision int64, c chan interface{}) {
+	response, err := get(key, true, &revision)
 	if err != nil {
-		c <- defaultsMessage{key, nil, err}
+		c <- err
 		return
 	}
-	defs := map[string]interface{}{}
-	if response.Count > 0 {
-		err := json.Unmarshal(response.Kvs[0].Value, &defs)
-		if err != nil {
-			c <- defaultsMessage{key, nil, err}
-			return
+	c <- int(response.Count) + 1
+	haveMain := false
+	for _, item := range response.Kvs {
+		itemKey := string(item.Key)
+		msg := defaultsMessage{itemKey, map[string]interface{}{}, nil}
+		msg.err = json.Unmarshal(item.Value, &msg.value)
+		c <- msg
+		if itemKey == key {
+			haveMain = true
 		}
 	}
-	c <- defaultsMessage{key, defs, nil}
+	if haveMain {
+		c <- 0
+	} else {
+		c <- 1
+		c <- defaultsMessage{key, map[string]interface{}{}, nil}
+	}
 }
 
 func ensureDefaults(qp *queryParts) error {
-	keys := []string{
-		qp.zoneDefaultsKey(),
-		qp.zoneQtypeDefaultsKey(),
-		qp.zoneSubdomainDefaultsKey(),
-		qp.zoneSubdomainQtypeDefaultsKey()}
-	c := make(chan defaultsMessage, len(keys))
+	c := make(chan interface{}, 10)
 	n := 0
 	since := time.Now()
-	for _, key := range keys {
+	for _, withSubdomain := range []bool{false, true} {
+		key := qp.defaultsKey(withSubdomain, false)
 		if _, ok := defaults.values[key]; !ok {
 			log.Println("loading defaults:", key)
 			go loadDefaults(key, *qp.revision, c)
@@ -83,11 +81,21 @@ func ensureDefaults(qp *queryParts) error {
 	var err error
 	for i := 0; i < n; i++ {
 		msg := <-c
-		if msg.err == nil {
-			defaults.values[msg.key] = msg.value
-		} else {
-			if err == nil {
+		switch msg.(type) {
+		case int:
+			n += msg.(int)
+		case defaultsMessage:
+			msg := msg.(defaultsMessage)
+			if msg.err == nil {
+				// TODO check record (QTYPE supported? version constraints, ...)
+				log.Println("storing defaults:", msg.key)
+				defaults.values[msg.key] = msg.value
+			} else if err == nil {
 				err = msg.err
+			}
+		case error:
+			if err == nil {
+				err = msg.(error)
 			}
 		}
 	}
@@ -118,28 +126,25 @@ func (qp *queryParts) recordKey() string {
 	return key
 }
 
-func (qp *queryParts) zoneDefaultsKey() string { return prefix + qp.zone + "/-defaults" }
-func (qp *queryParts) zoneSubdomainDefaultsKey() string {
-	return prefix + qp.zone + "/" + qp.subdomain + "/-defaults"
+func (qp *queryParts) defaultsKey(withSubdomain, withQtype bool) string {
+	key := prefix + qp.zone
+	if withSubdomain {
+		key += "/" + qp.subdomain
+	}
+	key += "/-defaults-/"
+	if withQtype {
+		key += qp.qtype
+	}
+	return key
 }
-func (qp *queryParts) zoneQtypeDefaultsKey() string {
-	return prefix + qp.zone + "/" + qp.qtype + "-defaults"
-}
-func (qp *queryParts) zoneSubdomainQtypeDefaultsKey() string {
-	return prefix + qp.zone + "/" + qp.subdomain + "/" + qp.qtype + "-defaults"
-}
+
 func (qp *queryParts) isDefaultsKey(key string) bool {
-	if key == qp.zoneDefaultsKey() {
-		return true
-	}
-	if key == qp.zoneSubdomainDefaultsKey() {
-		return true
-	}
-	if key == qp.zoneQtypeDefaultsKey() {
-		return true
-	}
-	if key == qp.zoneSubdomainQtypeDefaultsKey() {
-		return true
+	for _, withSubdomain := range []bool{false, true} {
+		for _, withQtype := range []bool{false, true} {
+			if key == qp.defaultsKey(withSubdomain, withQtype) {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -191,9 +196,9 @@ func lookup(params map[string]interface{}) (interface{}, error) {
 	result := []map[string]interface{}{}
 	for _, item := range response.Kvs {
 		itemKey := string(item.Key)
-		if qp.isDefaultsKey(itemKey) {
+		if qp.isDefaultsKey(itemKey) { // this is needed for 'ANY' requests
 			continue
-		} // this is needed for 'ANY' requests
+		}
 		if len(item.Value) == 0 {
 			return false, fmt.Errorf("empty value")
 		}
@@ -244,6 +249,12 @@ func lookup(params map[string]interface{}) (interface{}, error) {
 	return result, nil
 }
 
+func extractSubdomain(domain, zone string) string {
+	subdomain := strings.TrimSuffix(domain, zone)
+	subdomain = strings.TrimSuffix(subdomain, ".")
+	return subdomain
+}
+
 func makeResultItem(qp *queryParts, content string, ttl time.Duration) map[string]interface{} {
 	return map[string]interface{}{
 		"domain_id": qp.zoneId,
@@ -259,4 +270,21 @@ func makeResultItem(qp *queryParts, content string, ttl time.Duration) map[strin
 
 func seconds(dur time.Duration) int64 {
 	return int64(dur.Seconds())
+}
+
+func findValue(name string, obj map[string]interface{}, qp *queryParts) (interface{}, error) {
+	if v, ok := obj[name]; ok {
+		return v, nil
+	}
+	if err := ensureDefaults(qp); err != nil {
+		return nil, err
+	}
+	for _, withSubdomain := range []bool{true, false} {
+		for _, withQtype := range []bool{true, false} {
+			if v, ok := defaults.values[qp.defaultsKey(withSubdomain, withQtype)][name]; ok {
+				return v, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("missing '%s'", name)
 }

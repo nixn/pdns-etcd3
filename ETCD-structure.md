@@ -91,13 +91,13 @@ It does not have multiple values.
 There are four levels of default values, from most generic to most specific:
 
 1. zone
-  * Key: `<prefix><zone>/-defaults`
+  * Key: `<prefix><zone>/-defaults-/` *(the trailing slash is required)*
 2. zone + QTYPE
-  * Key: `<prefix><zone>/<QTYPE>-defaults`
+  * Key: `<prefix><zone>/-defaults-/<QTYPE>`
 3. zone + subdomain
-  * Key: `<prefix><zone>/<subdomain>/-defaults`
+  * Key: `<prefix><zone>/<subdomain>/-defaults-/` *(the trailing slash is required)*
 4. zone + subdomain + QTYPE
-  * Key: `<prefix><zone>/<subdomain>/<QTYPE>-defaults`
+  * Key: `<prefix><zone>/<subdomain>/-defaults-/<QTYPE>`
 
 Defaults-entries must be JSON objects, with any number of fields (including zero).
 Defaults-entries may be non-existent, which is equivalent to an empty object.
@@ -197,7 +197,7 @@ DNS/version → '0.1'
 
 Forward zone:
 ```
-DNS/example.net/-defaults → '{"ttl": "1h"}'
+DNS/example.net/-defaults-/ → '{"ttl": "1h"}'
 DNS/example.net/@/SOA → '{"primary": "ns1", "mail": "horst.master", "refresh": "1h", "retry": "30m", "expire": 604800, "neg-ttl": "10m"}'
 DNS/example.net/@/NS/first → '{"hostname": "ns1"}'
 DNS/example.net/@/NS/second → '{"hostname": "ns2"}'
@@ -205,7 +205,7 @@ DNS/example.net/ns1/A/1 → '{"ip": [192, 0, 2, 2]}'
 DNS/example.net/ns1/AAAA/1 → '{"ip": "2001:db8::2"}'
 DNS/example.net/ns2/A/1 → '{"ip": "192.0.2.3"}'
 DNS/example.net/ns2/AAAA/1 → '{"ip": "2001:db8::3"}'
-DNS/example.net/@/MX-defaults → '{"ttl": "2h"}'
+DNS/example.net/@/-defaults-/MX → '{"ttl": "2h"}'
 DNS/example.net/@/MX/1 → '10 mail.example.net.'
 DNS/example.net/mail/A/1 → '{"ip": [192,0,2,10]}'
 DNS/example.net/mail/AAAA/1 → '2001:db8::10'
@@ -214,8 +214,8 @@ DNS/example.net/kerberos1/A/1 → '192.0.2.15'
 DNS/example.net/kerberos1/AAAA/1 → '2001:db8::15'
 DNS/example.net/kerberos2/A/1 → '192.0.2.25'
 DNS/example.net/kerberos2/AAAA/1 → '2001:db8::25'
-DNS/example.net/SRV-defaults → '{"priority": 0, "weight": 0}'
-DNS/example.net/_kerberos._tcp/SRV-defaults → '{"port": 88}'
+DNS/example.net/-defaults-/SRV → '{"priority": 0, "weight": 0}'
+DNS/example.net/_kerberos._tcp/-defaults-/SRV → '{"port": 88}'
 DNS/example.net/_kerberos._tcp/SRV/1 → '0 0 88 kerberos1.example.net.'
 DNS/example.net/_kerberos._tcp/SRV/2 → '0 0 88 kerberos2.example.net.'
 DNS/example.net/kerberos-master/CNAME/1 → 'kerberos1.example.net.'
@@ -223,7 +223,7 @@ DNS/example.net/kerberos-master/CNAME/1 → 'kerberos1.example.net.'
 
 Reverse zone for IPv4:
 ```
-DNS/2.0.192.in-addr.arpa/-defaults → '{"ttl": "1h"}'
+DNS/2.0.192.in-addr.arpa/-defaults-/ → '{"ttl": "1h"}'
 DNS/2.0.192.in-addr.arpa/@/SOA → '{"primary": "ns1.example.net.", "mail": "horst.master@example.net.", "refresh": "1h", "retry": "30m", "expire": "168h", "neg-ttl": "10m"}'
 DNS/2.0.192.in-addr.arpa/@/NS/a → '{"hostname": "ns1.example.net."}'
 DNS/2.0.192.in-addr.arpa/@/NS/b → 'ns2.example.net.'
@@ -236,7 +236,7 @@ DNS/2.0.192.in-addr.arpa/25/PTR/1 → 'kerberos2.example.net.'
 
 Reverse zone for IPv6:
 ```
-DNS/8.b.d.0.1.0.0.2.ip6.arpa/-defaults → '{"ttl": 3600}'
+DNS/8.b.d.0.1.0.0.2.ip6.arpa/-defaults-/ → '{"ttl": 3600}'
 DNS/8.b.d.0.1.0.0.2.ip6.arpa/@/SOA → '{"primary":"ns1.example.net.", "mail":"horst.master@example.net.", "refresh":"1h", "retry":"30m", "expire":"168h","neg-ttl":"10m"}'
 DNS/8.b.d.0.1.0.0.2.ip6.arpa/@/NS/1 → 'ns1.example.net.'
 DNS/8.b.d.0.1.0.0.2.ip6.arpa/@/NS/2 → 'ns2.example.net.'
@@ -249,10 +249,10 @@ DNS/8.b.d.0.1.0.0.2.ip6.arpa/5.2.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR
 
 Well … "glue records":
 ```
-DNS/ns1.example.net/-defaults → '{"ttl":"1h"}'
+DNS/ns1.example.net/-defaults-/ → '{"ttl":"1h"}'
 DNS/ns1.example.net/A/1 → '192.0.2.2'
 DNS/ns1.example.net/AAAA/1 → '2001:db8::2'
-DNS/ns2.example.net/-defaults → '{"ttl":"1h"}'
+DNS/ns2.example.net/-defaults-/ → '{"ttl":"1h"}'
 DNS/ns2.example.net/A/1 → '192.0.2.3'
 DNS/ns2.example.net/AAAA/1 → '2001:db8::3'
 ```
