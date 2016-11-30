@@ -153,9 +153,16 @@ func lookup(params map[string]interface{}) (interface{}, error) {
 	if z, ok := id2zone[qp.zoneId]; ok {
 		qp.zone = z
 		isNewZone = false
+	} else if id, ok := zone2id[qp.qname]; ok {
+		qp.zone = qp.qname
+		qp.zoneId = id
+		isNewZone = false
 	} else {
 		qp.zone = qp.qname
 		isNewZone = true
+	}
+	if qp.isSOA() && !isNewZone {
+		log.Printf("found zone '%s' as id '%d'", qp.zone, qp.zoneId)
 	}
 	qp.subdomain = extractSubdomain(qp.qname, qp.zone)
 	if len(qp.subdomain) == 0 {
