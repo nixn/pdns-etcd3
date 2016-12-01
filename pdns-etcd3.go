@@ -81,7 +81,7 @@ func main() {
 		since := time.Now()
 		var result interface{}
 		var err error
-		switch request.Method {
+		switch strings.ToLower(request.Method) {
 		case "lookup":
 			result, err = lookup(request.Parameters)
 		default:
