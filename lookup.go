@@ -149,7 +149,7 @@ func (qp *queryParts) isDefaultsKey(key string) bool {
 	return false
 }
 
-type rr_func func(obj map[string]interface{}, qp *queryParts) (string, time.Duration, error)
+type rr_func func(obj map[string]interface{}, qp *queryParts) (content string, meta map[string]interface{}, err error)
 
 var rr2func map[string]rr_func = map[string]rr_func{
 	"A":    a,
@@ -221,7 +221,7 @@ func lookup(params map[string]interface{}) (interface{}, error) {
 			}
 		}
 		var content string
-		var ttl time.Duration
+		var meta map[string]interface{}
 		if item.Value[0] == '{' {
 			var obj map[string]interface{}
 			err = json.Unmarshal(item.Value, &obj)
@@ -233,7 +233,7 @@ func lookup(params map[string]interface{}) (interface{}, error) {
 			if !ok {
 				return false, fmt.Errorf("unknown/unimplemented qtype '%s', but have (JSON) object data for it (%s)", qp.qtype, qp.recordKey())
 			}
-			content, ttl, err = rrFunc(obj, &qp)
+			content, meta, err = rrFunc(obj, &qp)
 			if err != nil {
 				return false, err
 			}
@@ -243,8 +243,11 @@ func lookup(params map[string]interface{}) (interface{}, error) {
 			if err != nil {
 				return false, err
 			}
+			meta = map[string]interface{}{
+				"ttl": ttl,
+			}
 		}
-		result = append(result, makeResultItem(&qp, content, ttl))
+		result = append(result, makeResultItem(&qp, content, meta))
 	}
 	return result, nil
 }
@@ -255,17 +258,19 @@ func extractSubdomain(domain, zone string) string {
 	return subdomain
 }
 
-func makeResultItem(qp *queryParts, content string, ttl time.Duration) map[string]interface{} {
-	return map[string]interface{}{
+func makeResultItem(qp *queryParts, content string, meta map[string]interface{}) map[string]interface{} {
+	result := map[string]interface{}{
 		"domain_id": qp.zoneId,
 		"qname":     qp.qname,
 		"qtype":     qp.qtype,
 		"content":   content,
-		"ttl":       seconds(ttl),
+		"ttl":       seconds(meta["ttl"].(time.Duration)),
 		"auth":      true,
 	}
-	// TODO handle 'priority'. from remote backend docs:
-	// "Note: priority field is required before 4.0, after 4.0 priority is added to content. This applies to any resource record which uses priority, for example SRV or MX."
+	if priority, ok := meta["priority"]; ok {
+		result["priority"] = priority
+	}
+	return result
 }
 
 func seconds(dur time.Duration) int64 {

@@ -29,17 +29,21 @@ var (
 	timeout = 2 * time.Second
 )
 
+func setConfigFileParameter(value string) error {
+	client, err := clientv3.NewFromConfigFile(value)
+	if err != nil {
+		return fmt.Errorf("failed to create client instance: %s", err)
+	}
+	cli = client
+	return nil
+}
+
 func setupClient(params map[string]interface{}) ([]string, error) {
-	if configFile, ok := params["configFile"]; ok {
-		if configFile, ok := configFile.(string); ok {
-			if client, err := clientv3.NewFromConfigFile(configFile); err == nil {
-				cli = client
-			} else {
-				return nil, fmt.Errorf("Failed to create client instance: %s", err)
-			}
-		} else {
-			return nil, fmt.Errorf("parameters.configFile is not a string")
-		}
+	haveConfigFile, err := readParameter("config-file", params, setConfigFileParameter)
+	if err != nil {
+		return nil, err
+	}
+	if haveConfigFile {
 		return []string{}, nil
 	}
 	cfg := clientv3.Config{DialTimeout: timeout}

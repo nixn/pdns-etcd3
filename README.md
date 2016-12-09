@@ -45,8 +45,12 @@ Of course you need an up and running ETCD v3 cluster and a PowerDNS installation
 ### PowerDNS configuration
 ```
 launch+=remote
-remote-connection-string=pipe:command=/path/to/pdns-etcd3[,<config>][,prefix=anything][,timeout=2000]
+remote-connection-string=pipe:command=/path/to/pdns-etcd3[,pdns-version=3|4][,<config>][,prefix=anything][,timeout=2000]
 ```
+
+`pdns-version` is `3` by default, but may be set to `4` to enable PowerDNS v4 compatibility.
+Version 3 and 4 have incompatible protocols with the backend, so you must use the proper one.
+
 `<config>` is one of
 * `configFile=/path/to/etcd-config-file`
 * `endpoints=192.168.1.7:2379|192.168.1.8:2379`

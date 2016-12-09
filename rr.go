@@ -85,18 +85,18 @@ func getDuration(name string, obj map[string]interface{}, qp *queryParts) (time.
 	}
 }
 
-func soa(obj map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
+func soa(obj map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
 	// primary
 	primary, err := getString("primary", obj, qp)
 	if err != nil {
-		return "", 0, err
+		return "", nil, err
 	}
 	primary = strings.TrimSpace(primary)
 	primary = fqdn(primary, qp.zone)
 	// mail
 	mail, err := getString("mail", obj, qp)
 	if err != nil {
-		return "", 0, err
+		return "", nil, err
 	}
 	mail = strings.TrimSpace(mail)
 	atIndex := strings.Index(mail, "@")
@@ -117,53 +117,59 @@ func soa(obj map[string]interface{}, qp *queryParts) (string, time.Duration, err
 	// refresh
 	refresh, err := getDuration("refresh", obj, qp)
 	if err != nil {
-		return "", 0, err
+		return "", nil, err
 	}
 	// retry
 	retry, err := getDuration("retry", obj, qp)
 	if err != nil {
-		return "", 0, err
+		return "", nil, err
 	}
 	// expire
 	expire, err := getDuration("expire", obj, qp)
 	if err != nil {
-		return "", 0, err
+		return "", nil, err
 	}
 	// negative ttl
 	negativeTTL, err := getDuration("neg-ttl", obj, qp)
 	if err != nil {
-		return "", 0, err
+		return "", nil, err
 	}
 	// ttl
 	ttl, err := getDuration("ttl", obj, qp)
 	if err != nil {
-		return "", 0, err
+		return "", nil, err
 	}
 	// (done)
-	var content = fmt.Sprintf("%s %s %d %d %d %d %d", primary, mail, serial, seconds(refresh), seconds(retry), seconds(expire), seconds(negativeTTL))
-	return content, ttl, nil
+	content := fmt.Sprintf("%s %s %d %d %d %d %d", primary, mail, serial, seconds(refresh), seconds(retry), seconds(expire), seconds(negativeTTL))
+	meta := map[string]interface{}{
+		"ttl": ttl,
+	}
+	return content, meta, nil
 }
 
-func ns(obj map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
+func ns(obj map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
 	hostname, err := getString("hostname", obj, qp)
 	if err != nil {
-		return "", 0, err
+		return "", nil, err
 	}
 	hostname = strings.TrimSpace(hostname)
 	hostname = fqdn(hostname, qp.zone)
 	ttl, err := getDuration("ttl", obj, qp)
 	if err != nil {
-		return "", 0, err
+		return "", nil, err
 	}
 	content := fmt.Sprintf("%s", hostname)
-	return content, ttl, nil
+	meta := map[string]interface{}{
+		"ttl": ttl,
+	}
+	return content, meta, nil
 }
 
-func a(obj map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
+func a(obj map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
 	var ip net.IP
 	v, err := findValue("ip", obj, qp)
 	if err != nil {
-		return "", 0, err
+		return "", nil, err
 	}
 	switch v.(type) {
 	case string:
@@ -174,24 +180,24 @@ func a(obj map[string]interface{}, qp *queryParts) (string, time.Duration, error
 			for i := 0; i < 4; i++ {
 				v, err := strconv.ParseUint(v[i*2:i*2+2], 16, 8)
 				if err != nil {
-					return "", 0, err
+					return "", nil, err
 				}
 				ip[i] = byte(v)
 			}
 		} else {
 			ip = net.ParseIP(v)
 			if ip == nil {
-				return "", 0, fmt.Errorf("invalid IPv4: failed to parse")
+				return "", nil, fmt.Errorf("invalid IPv4: failed to parse")
 			}
 			ip = ip.To4()
 			if ip == nil {
-				return "", 0, fmt.Errorf("invalid IPv4: parsed, but not as IPv4")
+				return "", nil, fmt.Errorf("invalid IPv4: parsed, but not as IPv4")
 			}
 		}
 	case []interface{}:
 		v := v.([]interface{})
 		if len(v) != 4 {
-			return "", 0, fmt.Errorf("invalid IPv4: array length not 4")
+			return "", nil, fmt.Errorf("invalid IPv4: array length not 4")
 		}
 		ip = net.IP{0, 0, 0, 0}
 		for i, v := range v {
@@ -199,38 +205,41 @@ func a(obj map[string]interface{}, qp *queryParts) (string, time.Duration, error
 			case float64:
 				v := int64(v.(float64))
 				if v < 0 || v > 255 {
-					return "", 0, fmt.Errorf("invalid IPv4: part %d out of range", i+1)
+					return "", nil, fmt.Errorf("invalid IPv4: part %d out of range", i+1)
 				}
 				ip[i] = byte(v)
 			case string:
 				v, err := strconv.ParseUint(v.(string), 0, 8)
 				if err != nil {
-					return "", 0, err
+					return "", nil, err
 				}
 				if v > 255 {
-					return "", 0, fmt.Errorf("invalid IPv4: part %d out of range", i+1)
+					return "", nil, fmt.Errorf("invalid IPv4: part %d out of range", i+1)
 				}
 				ip[i] = byte(v)
 			default:
-				return "", 0, fmt.Errorf("invalid IPv4: part neither number nor string")
+				return "", nil, fmt.Errorf("invalid IPv4: part neither number nor string")
 			}
 		}
 	default:
-		return "", 0, fmt.Errorf("invalid IPv4: not string or array")
+		return "", nil, fmt.Errorf("invalid IPv4: not string or array")
 	}
 	ttl, err := getDuration("ttl", obj, qp)
 	if err != nil {
-		return "", 0, err
+		return "", nil, err
 	}
 	content := ip.String()
-	return content, ttl, nil
+	meta := map[string]interface{}{
+		"ttl": ttl,
+	}
+	return content, meta, nil
 }
 
-func aaaa(obj map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
+func aaaa(obj map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
 	var ip net.IP
 	v, err := findValue("ip", obj, qp)
 	if err != nil {
-		return "", 0, err
+		return "", nil, err
 	}
 	switch v.(type) {
 	case string:
@@ -241,18 +250,18 @@ func aaaa(obj map[string]interface{}, qp *queryParts) (string, time.Duration, er
 			for i := 0; i < 16; i++ {
 				v, err := strconv.ParseUint(v[i*2:i*2+2], 16, 8)
 				if err != nil {
-					return "", 0, err
+					return "", nil, err
 				}
 				ip[i] = byte(v)
 			}
 		} else {
 			ip = net.ParseIP(v)
 			if ip == nil {
-				return "", 0, fmt.Errorf("invalid IPv6: failed to parse")
+				return "", nil, fmt.Errorf("invalid IPv6: failed to parse")
 			}
 			ip = ip.To16()
 			if ip == nil {
-				return "", 0, fmt.Errorf("invalid IPv6: parsed, but no IPv6")
+				return "", nil, fmt.Errorf("invalid IPv6: parsed, but no IPv6")
 			}
 		}
 	case []interface{}:
@@ -264,7 +273,7 @@ func aaaa(obj map[string]interface{}, qp *queryParts) (string, time.Duration, er
 		case 16:
 			bytesPerPart = 1
 		default:
-			return "", 0, fmt.Errorf("invalid IPv6: array length neither 8 nor 16")
+			return "", nil, fmt.Errorf("invalid IPv6: array length neither 8 nor 16")
 		}
 		bitSize := bytesPerPart * 8
 		maxVal := uint64(1<<uint(bitSize) - 1)
@@ -279,48 +288,54 @@ func aaaa(obj map[string]interface{}, qp *queryParts) (string, time.Duration, er
 			switch v.(type) {
 			case float64:
 				if v.(float64) < 0 {
-					return "", 0, fmt.Errorf("invalid IPv6: part out of range")
+					return "", nil, fmt.Errorf("invalid IPv6: part out of range")
 				}
 				v := uint64(v.(float64))
 				if v > maxVal {
-					return "", 0, fmt.Errorf("invalid IPv6: part out of range")
+					return "", nil, fmt.Errorf("invalid IPv6: part out of range")
 				}
 				setPart(i, v)
 			case string:
 				v, err := strconv.ParseUint(v.(string), 0, bitSize)
 				if err != nil {
-					return "", 0, fmt.Errorf("invalid IPv6: %s", err)
+					return "", nil, fmt.Errorf("invalid IPv6: %s", err)
 				}
 				if v > maxVal {
-					return "", 0, fmt.Errorf("invalid IPv6: part out of range")
+					return "", nil, fmt.Errorf("invalid IPv6: part out of range")
 				}
 				setPart(i, v)
 			default:
-				return "", 0, fmt.Errorf("invalid IPv6: not string or number")
+				return "", nil, fmt.Errorf("invalid IPv6: not string or number")
 			}
 		}
 	default:
-		return "", 0, fmt.Errorf("invalid IPv6: not string or array")
+		return "", nil, fmt.Errorf("invalid IPv6: not string or array")
 	}
 	ttl, err := getDuration("ttl", obj, qp)
 	if err != nil {
-		return "", 0, err
+		return "", nil, err
 	}
 	content := ip.String()
-	return content, ttl, nil
+	meta := map[string]interface{}{
+		"ttl": ttl,
+	}
+	return content, meta, nil
 }
 
 func ptr(obj map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
 	hostname, err := getString("hostname", obj, qp)
 	if err != nil {
-		return "", 0, err
+		return "", nil, err
 	}
 	hostname = strings.TrimSpace(hostname)
 	hostname = fqdn(hostname, qp.zone)
 	ttl, err := getDuration("ttl", obj, qp)
 	if err != nil {
-		return "", 0, err
+		return "", nil, err
 	}
 	content := fmt.Sprintf("%s", hostname)
-	return content, ttl, nil
+	meta := map[string]interface{}{
+		"ttl": ttl,
+	}
+	return content, meta, nil
 }

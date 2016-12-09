@@ -34,8 +34,45 @@ func (req *pdnsRequest) String() string {
 }
 
 var (
-	prefix = ""
+	pdnsVersion = 3
+	prefix      = ""
 )
+
+type setParameterFunc func(value string) error
+
+func readParameter(name string, params map[string]interface{}, setParameter setParameterFunc) (bool, error) {
+	if v, ok := params[name]; ok {
+		if v, ok := v.(string); ok {
+			if err := setParameter(v); err != nil {
+				return true, fmt.Errorf("failed to set parameter '%s': %s", name, err)
+			}
+			return true, nil
+		}
+		return true, fmt.Errorf("parameter '%s' is not a string", name)
+	}
+	return false, nil
+}
+
+func setStringParameterFunc(param *string) setParameterFunc {
+	return func(value string) error {
+		*param = value
+		return nil
+	}
+}
+
+func setPdnsVersionParameter(param *int) setParameterFunc {
+	return func(value string) error {
+		switch value {
+		case "3":
+			*param = 3
+		case "4":
+			*param = 4
+		default:
+			return fmt.Errorf("invalid pdns version: %s", value)
+		}
+		return nil
+	}
+}
 
 func main() {
 	log.SetPrefix(fmt.Sprintf("pdns-etcd3[%d]: ", os.Getpid()))
@@ -50,14 +87,17 @@ func main() {
 		log.Fatalln("Waited for 'initialize', got:", request.Method)
 	}
 	logMessages := []string{}
-	if pfx, ok := request.Parameters["prefix"]; ok {
-		if pfx, ok := pfx.(string); ok {
-			prefix = pfx
-		} else {
-			fatal(enc, "parameters.prefix is not a string")
-		}
+	// pdns-version
+	if _, err := readParameter("pdns-version", request.Parameters, setPdnsVersionParameter(&pdnsVersion)); err != nil {
+		fatal(enc, err)
 	}
-	logMessages = append(logMessages, fmt.Sprintf("prefix: '%s'", prefix))
+	logMessages = append(logMessages, fmt.Sprintf("pdns-version: %d", pdnsVersion))
+	// prefix
+	if _, err := readParameter("prefix", request.Parameters, setStringParameterFunc(&prefix)); err != nil {
+		fatal(enc, err)
+	}
+	logMessages = append(logMessages, fmt.Sprintf("prefix: %q", prefix))
+	// client
 	if logMsgs, err := setupClient(request.Parameters); err != nil {
 		fatal(enc, err.Error())
 	} else {
@@ -114,7 +154,8 @@ func respond(enc *json.Encoder, result interface{}, msg ...string) {
 	}
 }
 
-func fatal(enc *json.Encoder, msg string) {
-	respond(enc, false, msg)
-	log.Fatalln("Fatal error:", msg)
+func fatal(enc *json.Encoder, msg interface{}) {
+	s := fmt.Sprintf("%s", msg)
+	respond(enc, false, s)
+	log.Fatalln("Fatal error:", s)
 }
