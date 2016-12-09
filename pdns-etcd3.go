@@ -33,6 +33,8 @@ func (req *pdnsRequest) String() string {
 	return fmt.Sprintf("%s: %+v", req.Method, req.Parameters)
 }
 
+var version = "?"
+
 var (
 	pdnsVersion = 3
 	prefix      = ""
@@ -86,7 +88,7 @@ func main() {
 	if request.Method != "initialize" {
 		log.Fatalln("Waited for 'initialize', got:", request.Method)
 	}
-	logMessages := []string{}
+	logMessages := []string{fmt.Sprintf("v:%s", version)}
 	// pdns-version
 	if _, err := readParameter("pdns-version", request.Parameters, setPdnsVersionParameter(&pdnsVersion)); err != nil {
 		fatal(enc, err)
