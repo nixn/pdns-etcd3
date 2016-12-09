@@ -116,12 +116,12 @@ All entries can have a `ttl` field, for the record TTL.
 
 ### Syntax
 
-*Headings denote the logical type, top level list values the JSON type, sublevels are examples.*
+*Headings denote the logical type, top level list values the JSON type, sublevels are notes and examples.*
 
 ###### "domain name"
 * string
-  * `"www"`
-  * `"www.example.net."`
+    * `"www"`
+    * `"www.example.net."`
 
 Domain names undergo a check whether to append the zone name.
 The rule is the same as in [BIND][] zone files: if a name ends with a dot, the zone
@@ -130,10 +130,12 @@ name is not appended, otherwise it is. This is naturally only possible for JSON-
 [bind]: https://www.isc.org/downloads/bind/
 
 ###### "duration"
-* number (seconds, only integral part taken)
-  * `3600`
-* string ([duration][tdur])
-  * `"1h"`
+* number
+    * seconds, only integral part taken
+    * `3600`
+* string
+    * [duration][tdur]
+    * `"1h"`
 
 Values must be positive (that is >= 1 second).
 
@@ -141,22 +143,32 @@ Values must be positive (that is >= 1 second).
 
 ###### "IPv4 address"
 * string
-  * `"192.168.1.2"`
-  * `"::ffff:192.168.1.2"`
-  * `"::ffff:c0a8:0102"`
-  * `"c0a80102"`
+    * `"192.168.1.2"`
+    * `"::ffff:192.168.1.2"`
+    * `"::ffff:c0a8:0102"`
+    * `"c0a80102"`
 * array of bytes or number strings, length 4
-  * `[192, "168", 1, 2]`
+    * `[192, "168", 1, 2]`
 
 ###### "IPv6 address"
 * string
-  * `"2001:0db8::1"`
-  * `"2001:db8:0:0:0000:0:0:1"`
-  * `"20010db8000000000000000000000001"`
+    * `"2001:0db8::1"`
+    * `"2001:db8:0:0:0000:0:0:1"`
+    * `"20010db8000000000000000000000001"`
 * array of numbers (uint16) or strings (of numbers), length 8
-  * `[8193, "0xdb8", "0", 0, 0, 0, 0, 1]`
+    * `[8193, "0xdb8", "0", 0, 0, 0, 0, 1]`
 * array of numbers (uint8) or strings (of numbers), length 16
-  * `[32, 1, 13, "0xb8", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]`
+    * `[32, 1, 13, "0xb8", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]`
+
+###### "uint16"
+* number
+    * only integral part is taken
+    * range: 0 - 65535
+    * `42`
+
+###### "string"
+* string
+    * taken as-is
 
 ### QTYPEs
 
@@ -183,6 +195,25 @@ This way the operator does not have to increase it manually each time he/she cha
 
 #### `PTR`
 * `hostname`: domain name
+
+#### `CNAME`
+* `target`: domain name
+
+#### `DNAME`
+* `target`: domain name
+
+#### `MX`
+* `priority`: uint16
+* `target`: domain name
+
+#### `SRV`
+* `priority`: uint16
+* `weight`: uint16
+* `port`: uint16
+* `target`: domain name
+
+#### `TXT`
+* `text`: string
 
 ## Example
 

@@ -149,14 +149,19 @@ func (qp *queryParts) isDefaultsKey(key string) bool {
 	return false
 }
 
-type rr_func func(obj map[string]interface{}, qp *queryParts) (content string, meta map[string]interface{}, err error)
+type rr_func func(values map[string]interface{}, qp *queryParts) (content string, meta map[string]interface{}, err error)
 
 var rr2func map[string]rr_func = map[string]rr_func{
-	"A":    a,
-	"AAAA": aaaa,
-	"NS":   ns,
-	"PTR":  ptr,
-	"SOA":  soa,
+	"A":     a,
+	"AAAA":  aaaa,
+	"CNAME": domainName("CNAME", "target"),
+	"DNAME": domainName("DNAME", "name"),
+	"MX":    mx,
+	"NS":    domainName("NS", "hostname"),
+	"PTR":   domainName("PTR", "hostname"),
+	"SOA":   soa,
+	"SRV":   srv,
+	"TXT":   txt,
 }
 
 func lookup(params map[string]interface{}) (interface{}, error) {
@@ -223,8 +228,8 @@ func lookup(params map[string]interface{}) (interface{}, error) {
 		var content string
 		var meta map[string]interface{}
 		if item.Value[0] == '{' {
-			var obj map[string]interface{}
-			err = json.Unmarshal(item.Value, &obj)
+			values := map[string]interface{}{}
+			err = json.Unmarshal(item.Value, &values)
 			if err != nil {
 				return false, err
 			}
@@ -233,11 +238,12 @@ func lookup(params map[string]interface{}) (interface{}, error) {
 			if !ok {
 				return false, fmt.Errorf("unknown/unimplemented qtype '%s', but have (JSON) object data for it (%s)", qp.qtype, qp.recordKey())
 			}
-			content, meta, err = rrFunc(obj, &qp)
+			content, meta, err = rrFunc(values, &qp)
 			if err != nil {
 				return false, err
 			}
 		} else {
+			// TODO error when records with 'priority' field or SOA (due to 'serial' field) are not JSON objects
 			content = string(item.Value)
 			ttl, err = getDuration("ttl", nil, &qp)
 			if err != nil {
@@ -277,8 +283,8 @@ func seconds(dur time.Duration) int64 {
 	return int64(dur.Seconds())
 }
 
-func findValue(name string, obj map[string]interface{}, qp *queryParts) (interface{}, error) {
-	if v, ok := obj[name]; ok {
+func findValue(name string, values map[string]interface{}, qp *queryParts) (interface{}, error) {
+	if v, ok := values[name]; ok {
 		return v, nil
 	}
 	if err := ensureDefaults(qp); err != nil {

@@ -35,14 +35,13 @@ func fqdn(domain, qname string) string {
 	return domain
 }
 
-func getInt32(name string, obj map[string]interface{}, qp *queryParts) (int32, error) {
-	if v, err := findValue(name, obj, qp); err == nil {
+func getUint16(name string, values map[string]interface{}, qp *queryParts) (uint16, error) {
+	if v, err := findValue(name, values, qp); err == nil {
 		if v, ok := v.(float64); ok {
-			if v < 0 {
-				return 0, fmt.Errorf("'%s' may not be negative", name)
-			} else {
-				return int32(v), nil
+			if v < 0 || v > 65535 {
+				return 0, fmt.Errorf("'%s' out of range (0-65535)", name)
 			}
+			return uint16(v), nil
 		}
 		return 0, fmt.Errorf("'%s' is not a number", name)
 	} else {
@@ -50,8 +49,8 @@ func getInt32(name string, obj map[string]interface{}, qp *queryParts) (int32, e
 	}
 }
 
-func getString(name string, obj map[string]interface{}, qp *queryParts) (string, error) {
-	if v, err := findValue(name, obj, qp); err == nil {
+func getString(name string, values map[string]interface{}, qp *queryParts) (string, error) {
+	if v, err := findValue(name, values, qp); err == nil {
 		if v, ok := v.(string); ok {
 			return v, nil
 		}
@@ -61,8 +60,8 @@ func getString(name string, obj map[string]interface{}, qp *queryParts) (string,
 	}
 }
 
-func getDuration(name string, obj map[string]interface{}, qp *queryParts) (time.Duration, error) {
-	if v, err := findValue(name, obj, qp); err == nil {
+func getDuration(name string, values map[string]interface{}, qp *queryParts) (time.Duration, error) {
+	if v, err := findValue(name, values, qp); err == nil {
 		var dur time.Duration
 		switch v.(type) {
 		case float64:
@@ -85,16 +84,43 @@ func getDuration(name string, obj map[string]interface{}, qp *queryParts) (time.
 	}
 }
 
-func soa(obj map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
+func getHostname(name string, values map[string]interface{}, qp *queryParts) (string, error) {
+	hostname, err := getString(name, values, qp)
+	if err != nil {
+		return "", err
+	}
+	hostname = strings.TrimSpace(hostname)
+	hostname = fqdn(hostname, qp.zone)
+	return hostname, nil
+}
+
+func domainName(qtype, fieldName string) rr_func {
+	return func(values map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
+		name, err := getHostname(fieldName, values, qp)
+		if err != nil {
+			return "", nil, err
+		}
+		ttl, err := getDuration("ttl", values, qp)
+		if err != nil {
+			return "", nil, err
+		}
+		meta := map[string]interface{}{
+			"ttl": ttl,
+		}
+		return name, meta, nil
+	}
+}
+
+func soa(values map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
 	// primary
-	primary, err := getString("primary", obj, qp)
+	primary, err := getString("primary", values, qp)
 	if err != nil {
 		return "", nil, err
 	}
 	primary = strings.TrimSpace(primary)
 	primary = fqdn(primary, qp.zone)
 	// mail
-	mail, err := getString("mail", obj, qp)
+	mail, err := getString("mail", values, qp)
 	if err != nil {
 		return "", nil, err
 	}
@@ -115,27 +141,27 @@ func soa(obj map[string]interface{}, qp *queryParts) (string, map[string]interfa
 	// serial
 	serial := *qp.revision
 	// refresh
-	refresh, err := getDuration("refresh", obj, qp)
+	refresh, err := getDuration("refresh", values, qp)
 	if err != nil {
 		return "", nil, err
 	}
 	// retry
-	retry, err := getDuration("retry", obj, qp)
+	retry, err := getDuration("retry", values, qp)
 	if err != nil {
 		return "", nil, err
 	}
 	// expire
-	expire, err := getDuration("expire", obj, qp)
+	expire, err := getDuration("expire", values, qp)
 	if err != nil {
 		return "", nil, err
 	}
 	// negative ttl
-	negativeTTL, err := getDuration("neg-ttl", obj, qp)
+	negativeTTL, err := getDuration("neg-ttl", values, qp)
 	if err != nil {
 		return "", nil, err
 	}
 	// ttl
-	ttl, err := getDuration("ttl", obj, qp)
+	ttl, err := getDuration("ttl", values, qp)
 	if err != nil {
 		return "", nil, err
 	}
@@ -147,27 +173,9 @@ func soa(obj map[string]interface{}, qp *queryParts) (string, map[string]interfa
 	return content, meta, nil
 }
 
-func ns(obj map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
-	hostname, err := getString("hostname", obj, qp)
-	if err != nil {
-		return "", nil, err
-	}
-	hostname = strings.TrimSpace(hostname)
-	hostname = fqdn(hostname, qp.zone)
-	ttl, err := getDuration("ttl", obj, qp)
-	if err != nil {
-		return "", nil, err
-	}
-	content := fmt.Sprintf("%s", hostname)
-	meta := map[string]interface{}{
-		"ttl": ttl,
-	}
-	return content, meta, nil
-}
-
-func a(obj map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
+func a(values map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
 	var ip net.IP
-	v, err := findValue("ip", obj, qp)
+	v, err := findValue("ip", values, qp)
 	if err != nil {
 		return "", nil, err
 	}
@@ -224,7 +232,7 @@ func a(obj map[string]interface{}, qp *queryParts) (string, map[string]interface
 	default:
 		return "", nil, fmt.Errorf("invalid IPv4: not string or array")
 	}
-	ttl, err := getDuration("ttl", obj, qp)
+	ttl, err := getDuration("ttl", values, qp)
 	if err != nil {
 		return "", nil, err
 	}
@@ -235,9 +243,9 @@ func a(obj map[string]interface{}, qp *queryParts) (string, map[string]interface
 	return content, meta, nil
 }
 
-func aaaa(obj map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
+func aaaa(values map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
 	var ip net.IP
-	v, err := findValue("ip", obj, qp)
+	v, err := findValue("ip", values, qp)
 	if err != nil {
 		return "", nil, err
 	}
@@ -311,7 +319,7 @@ func aaaa(obj map[string]interface{}, qp *queryParts) (string, map[string]interf
 	default:
 		return "", nil, fmt.Errorf("invalid IPv6: not string or array")
 	}
-	ttl, err := getDuration("ttl", obj, qp)
+	ttl, err := getDuration("ttl", values, qp)
 	if err != nil {
 		return "", nil, err
 	}
@@ -322,18 +330,86 @@ func aaaa(obj map[string]interface{}, qp *queryParts) (string, map[string]interf
 	return content, meta, nil
 }
 
-func ptr(obj map[string]interface{}, qp *queryParts) (string, time.Duration, error) {
-	hostname, err := getString("hostname", obj, qp)
+func srv(values map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
+	priority, err := getUint16("priority", values, qp)
 	if err != nil {
 		return "", nil, err
 	}
-	hostname = strings.TrimSpace(hostname)
-	hostname = fqdn(hostname, qp.zone)
-	ttl, err := getDuration("ttl", obj, qp)
+	weight, err := getUint16("weight", values, qp)
 	if err != nil {
 		return "", nil, err
 	}
-	content := fmt.Sprintf("%s", hostname)
+	port, err := getUint16("port", values, qp)
+	if err != nil {
+		return "", nil, err
+	}
+	target, err := getHostname("target", values, qp)
+	if err != nil {
+		return "", nil, err
+	}
+	ttl, err := getDuration("ttl", values, qp)
+	if err != nil {
+		return "", nil, err
+	}
+	format := ""
+	params := []interface{}{}
+	if pdnsVersion == 4 {
+		format += "%d "
+		params = append(params, priority)
+	}
+	format += "%d %d %s"
+	params = append(params, weight, port, target)
+	content := fmt.Sprintf(format, params...)
+	meta := map[string]interface{}{
+		"ttl": ttl,
+	}
+	if pdnsVersion == 3 {
+		meta["priority"] = priority
+	}
+	return content, meta, nil
+}
+
+func mx(values map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
+	priority, err := getUint16("priority", values, qp)
+	if err != nil {
+		return "", nil, err
+	}
+	target, err := getHostname("target", values, qp)
+	if err != nil {
+		return "", nil, err
+	}
+	ttl, err := getDuration("ttl", values, qp)
+	if err != nil {
+		return "", nil, err
+	}
+	format := ""
+	params := []interface{}{}
+	if pdnsVersion == 4 {
+		format += "%d "
+		params = append(params, priority)
+	}
+	format += "%s"
+	params = append(params, target)
+	content := fmt.Sprintf(format, params...)
+	meta := map[string]interface{}{
+		"ttl": ttl,
+	}
+	if pdnsVersion == 3 {
+		meta["priority"] = priority
+	}
+	return content, meta, nil
+}
+
+func txt(values map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
+	text, err := getString("text", values, qp)
+	if err != nil {
+		return "", nil, err
+	}
+	ttl, err := getDuration("ttl", values, qp)
+	if err != nil {
+		return "", nil, err
+	}
+	content := text
 	meta := map[string]interface{}{
 		"ttl": ttl,
 	}
