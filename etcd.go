@@ -44,7 +44,7 @@ func setupClient(params map[string]interface{}) ([]string, error) {
 		return nil, err
 	}
 	if haveConfigFile {
-		return []string{}, nil
+		return []string{fmt.Sprintf("config-file: %s", params["config-file"])}, nil
 	}
 	cfg := clientv3.Config{DialTimeout: timeout}
 	// timeout
@@ -70,22 +70,23 @@ func setupClient(params map[string]interface{}) ([]string, error) {
 		if endpoints, ok := endpoints.(string); ok {
 			endpoints := strings.Split(endpoints, "|")
 			cfg.Endpoints = endpoints
-			if client, err := clientv3.New(cfg); err == nil {
-				cli = client
-			} else {
+			client, err := clientv3.New(cfg)
+			if err != nil {
 				return nil, fmt.Errorf("Failed to parse endpoints: %s", err)
 			}
+			cli = client
 		} else {
 			return nil, fmt.Errorf("parameters.endpoints is not a string")
 		}
 	} else {
 		cfg.Endpoints = []string{"[::1]:2379", "127.0.0.1:2379"}
-		if client, err := clientv3.New(cfg); err == nil {
-			cli = client
-		} else {
+		client, err := clientv3.New(cfg)
+		if err != nil {
 			return nil, fmt.Errorf("Failed to create client: %s", err)
 		}
+		cli = client
 	}
+	logMessages = append(logMessages, fmt.Sprintf("endpoints: %v", cfg.Endpoints))
 	return logMessages, nil
 }
 
