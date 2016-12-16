@@ -2,51 +2,65 @@
 
 ## Stability
 
-The structure is currently in development and may change multiple times in an incompatible
-way until a stable major release. After such a release the structure won't change
-for the same major release (but may for future major releases).
+The structure is currently in development and may change multiple times in a
+backwards-incompatible way until a stable major release.
+
+For each *release* (development or stable), which changes the structure in a
+backwards-incompatible way, the structure major version changes too.
+This is not true for a *commit*.
+
+For details, see "Version" section below.
 
 ## Rules
 
 * Record entry values are either JSON objects or plain strings (that is without
 quotation marks). If an entry value begins with a `{`, it is parsed as a JSON object,
-otherwise it is taken as plain string.
+otherwise it is taken as plain string.<br>
+There are exceptions to this rule: each JSON-supported record with a priority field
+may not be stored as plain string, due to the incompatibility of backend protocols
+of PowerDNS between versions 3 and 4.
 
 * Each record which has a JSON entry value must be supported by the program.
 Otherwise an error is emitted and the request/response fails. This is not true for plain strings,
 which are returned as-is, without an error, but also without defaults support (except TTL).
-This behaviour allows support for JSON-unsupported records.
+This behaviour allows servicing JSON-unsupported records.
 
 * Entry values store the *content* of a record, they do not include the domain name,
-the DNS class (`IN`) and the record type (`A`, `MX`, …), these values are
+the DNS class (`IN`) or the record type (`A`, `MX`, …), these values are
 in the key already. They may include a record-specific TTL value, see below rule for details.
 
 * The record TTL is a regular field in case of a JSON object entry (key `"ttl"`), but there
 is (currently) no way to define a record-specific TTL for a plain string entry.
-One may use a default value as a workaround for this limitation.
+One may use a default value as a (nearly equivalent) workaround for this limitation.
 
 * For each record field a default value is searched for and used, if an entry value
 does not specify the field value itself. If no value is found for the field,
 an error is raised and the request/response fails.
 
-* Subdomains are determined by the domain name in question (QNAME) minus the zone name
-(and the separating dot). E.g. QNAME `some.thing.example.net` in zone `example.net`
-yields the subdomain `some.thing`.
-If the QNAME is equal to the zone name, the subdomain is set to `@` for ETCD requests.
+* "Zones" are defined by domains having a `SOA` entry. The zone domain is used
+for automatic appending to unqualified domain names beneath it. These entries
+(beneath a zone) are served with the 'authoritative answer' bit (AA) set.
 
 ## Structure (Entries)
 
 `<prefix>` is the global prefix from configuration (see [README](README.md)).
 
-### Version
+### Version (versioned entries)
 
-* Key: `<prefix>version`
-* Value: `<major>[.<minor>]`
-  * `<major>` and `<minor>` must be non-negative integers
+Versioned entries are used for upgrading the program version with to a higher
+major version without interrupting service for rewriting the entries.
+
+#### Syntax and rules
+
+A versioned entry has a version number appended to the regular key, prefixed by `@`: `DNS/www.example.com./A/1@0.1`.
+
+A version number has the syntax `<major>` or `<major>.<minor>`
+(minor is optional, if zero)
+with `<major>` and `<minor>` being non-negative integers.
 
 `<major>` begins with `1` (exception: pre-1.0 development, see below).
-Every time when a backward-incompatible change to the
-structure is introduced, `<major>` increases and `<minor>` resets to `0`.
+Every time when a backward-incompatible change to the structure is introduced,
+`<major>` increases and `<minor>` resets to `0`.
 Otherwise a change (which should be only additions) increases only `<minor>`.
 
 During the development of first stable release (`1` or `1.0`) the `<major>` number
@@ -55,25 +69,32 @@ changes. Therefore there may be another minor number (usually called *patch*),
 so that a development data version could be `0.3.2`.
 
 Version compatibility is as follows:
-* The program's version major number must be equal to the data version major number.
-  * Exception: Program version `1.0` (or `1.0.*`) supports data version `1.0` *and* `0.y.*`,
-  the last pre-1.0-development version (`y` is undetermined yet).
+* The program's version major number must be equal to the data version major number.<br>
+Exception: Program version `1.0` (or `1.0.*`) supports data version `1.0` *and* `0.y.*`,
+the last pre-1.0-development version (`y` is undetermined yet).
 * The program's version minor number must be equal to or greater than the data version minor number. Otherwise the program refuses to work.
 
-Version checking is not implemented yet.
+**Warning:** Versioning is not implemented yet, not even reading a versioned entry,
+so **don't use it yet**. It will be implemented in the first release (0.1).
 
-The version described here is `0.1`.
+If two entries with the same key exist, one versioned with the currently supported version,
+the other not versioned (plain), the versioned one is taken, the plain one is ignored.
+
+#### Current version
+
+The structure version described here is `0.1`.
 
 ### Records
 
 Each resource record has at least one corresponding entry in the storage.
 Entries are as follows:
 
-* Key: `<prefix><zone>/<subdomain>/<QTYPE>/<id>`
-  * `<zone>` is a domain name, e.g. `example.net`
-  * `<subdomain>` is as described in the rules above
-  * `<QTYPE>` is the type of the resource resource, e.g. `A`, `MX`, …
-  * `<id>` is user-defined, it has no meaning in the program, it may even be empty
+* Key: `<prefix><domain>/<QTYPE>/<id>` (the slashes are literal!)
+    * `<domain>` is a domain name, e.g. `example.net.` or `www.example.net.`<br>
+    It could also be reversed (setting `reversed-names`), which then looks like `net.example.` or `net.example.www.`.
+    Consider also the options `no-trailing-dot` and `no-trailing-dot-on-root`.
+    * `<QTYPE>` is the type of the resource resource, e.g. `A`, `MX`, …
+    * `<id>` is user-defined, it has no meaning in the program, it may even be empty
 * Value: `<JSON object>` or `<plain string>`
 
 For multiple values of the same record use multiple `<id>`s. All records
@@ -81,23 +102,41 @@ but `SOA` may have multiple values.
 
 #### Exceptions
 
-* For the `SOA` record the entry key is `<prefix><zone>/@/SOA` (no `<id>`).
+* For the `SOA` record the entry key is `<prefix><domain>/SOA` (no `/<id>`).
 It does not have multiple values.
 
 * The QTYPE `ANY` is not a real record, so nothing to store for it.
 
 ### Defaults
 
-There are four levels of default values, from most generic to most specific:
+There are four top-levels of default values ("defaults"):
+1. global<br>
+Key: `<prefix>-defaults-/`
+2. global + QTYPE<br>
+Key: `<prefix>-defaults-/<QTYPE>`
+3. domain<br>
+Key: `<prefix><domain>/-defaults-/`
+4. domain + QTYPE<br>
+Key: `<prefix><domain>/-defaults-/<QTYPE>`
 
-1. zone
-  * Key: `<prefix><zone>/-defaults-/` *(the trailing slash is required)*
-2. zone + QTYPE
-  * Key: `<prefix><zone>/-defaults-/<QTYPE>`
-3. zone + subdomain
-  * Key: `<prefix><zone>/<subdomain>/-defaults-/` *(the trailing slash is required)*
-4. zone + subdomain + QTYPE
-  * Key: `<prefix><zone>/<subdomain>/-defaults-/<QTYPE>`
+More specific defaults override the more generic defaults, field-wise. For the
+domain defaults the sub-domain defaults override the parent domain defaults.
+Also the QTYPE-defaults override the non-qtype-defaults.
+
+For example, for the query `www.example.com` with qtype `A`, these are all
+considered defaults entries, from most specific to most generic (prefix `DNS/`):
+* `DNS/www.example.com./-defaults-/A`
+* `DNS/www.example.com./-defaults-/`
+* `DNS/example.com./-defaults-/A`
+* `DNS/example.com./-defaults-/`
+* `DNS/com./-defaults-/A`
+* `DNS/com./-defaults-/`
+* `DNS/./-defaults-/A`
+* `DNS/./-defaults-/`
+* `DNS/-defaults-/A`
+* `DNS/-defaults-/`
+
+Of course, the values in the record(s) itself (`DNS/www.example.com./A/<id>`) override all defaults.
 
 Defaults-entries must be JSON objects, with any number of fields (including zero).
 Defaults-entries may be non-existent, which is equivalent to an empty object.
@@ -219,71 +258,72 @@ This way the operator does not have to increase it manually each time he/she cha
 
 *To be clear on the value, it's always enclosed in ' (single quotes).*
 
-Prefix: `DNS/` (note the trailing slash, it is part of the prefix, *not* inserted automatically)
+* `prefix` is `DNS/`<br>
+(note the trailing slash, it is part of the prefix, *not* inserted automatically)
+* `reversed-names` is true.<br>
+* `no-trailing-dot` is false.<br>
+* `no-trailing-dot-on-root` is false.
 
-Version:
+Global defaults:
 ```
-DNS/version → '0.1'
+DNS/-defaults-/ → '{"ttl": "1h"}'
+DNS/-defaults-/SRV → '{"priority": 0, "weight": 0}'
+DNS/-defaults-/SOA → '{"refresh": "1h", "retry": "30m", "expire": 604800, "neg-ttl": "10m"}'
 ```
 
-Forward zone:
+Forward zone for `example.net`:
 ```
-DNS/example.net/-defaults-/ → '{"ttl": "1h"}'
-DNS/example.net/@/SOA → '{"primary": "ns1", "mail": "horst.master", "refresh": "1h", "retry": "30m", "expire": 604800, "neg-ttl": "10m"}'
-DNS/example.net/@/NS/first → '{"hostname": "ns1"}'
-DNS/example.net/@/NS/second → '{"hostname": "ns2"}'
-DNS/example.net/ns1/A/1 → '{"ip": [192, 0, 2, 2]}'
-DNS/example.net/ns1/AAAA/1 → '{"ip": "2001:db8::2"}'
-DNS/example.net/ns2/A/1 → '{"ip": "192.0.2.3"}'
-DNS/example.net/ns2/AAAA/1 → '{"ip": "2001:db8::3"}'
-DNS/example.net/@/-defaults-/MX → '{"ttl": "2h"}'
-DNS/example.net/@/MX/1 → '10 mail.example.net.'
-DNS/example.net/mail/A/1 → '{"ip": [192,0,2,10]}'
-DNS/example.net/mail/AAAA/1 → '2001:db8::10'
-DNS/example.net/@/TXT/1 → 'v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all'
-DNS/example.net/kerberos1/A/1 → '192.0.2.15'
-DNS/example.net/kerberos1/AAAA/1 → '2001:db8::15'
-DNS/example.net/kerberos2/A/1 → '192.0.2.25'
-DNS/example.net/kerberos2/AAAA/1 → '2001:db8::25'
-DNS/example.net/-defaults-/SRV → '{"priority": 0, "weight": 0}'
-DNS/example.net/_kerberos._tcp/-defaults-/SRV → '{"port": 88}'
-DNS/example.net/_kerberos._tcp/SRV/1 → '0 0 88 kerberos1.example.net.'
-DNS/example.net/_kerberos._tcp/SRV/2 → '0 0 88 kerberos2.example.net.'
-DNS/example.net/kerberos-master/CNAME/1 → 'kerberos1.example.net.'
+DNS/net.example./SOA → '{"primary": "ns1", "mail": "horst.master"}'
+DNS/net.example./NS/first → '{"hostname": "ns1"}'
+DNS/net.example./NS/second → '{"hostname": "ns2"}'
+DNS/net.example.ns1./A/ → '{"ip": [192, 0, 2, 2]}'
+DNS/net.example.ns1./AAAA/ → '{"ip": "2001:db8::2"}'
+DNS/net.example.ns2./A/ → '{"ip": "192.0.2.3"}'
+DNS/net.example.ns2./AAAA/ → '{"ip": "2001:db8::3"}'
+DNS/net.example/-defaults-/MX → '{"ttl": "2h"}'
+DNS/net.example./MX/1 → '{"priority": 10, "target": "mail"}'
+DNS/net.example.mail./A/ → '{"ip": [192,0,2,10]}'
+DNS/net.example.mail./AAAA/ → '2001:db8::10'
+DNS/net.example./TXT/1 → 'v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all'
+DNS/net.example./TXT/sth → '{"text":"{text which begins with a curly brace}"}'
+DNS/net.example.kerberos1./A/1 → '192.0.2.15'
+DNS/net.example.kerberos1./AAAA/1 → '2001:db8::15'
+DNS/net.example.kerberos2./A/ → '192.0.2.25'
+DNS/net.example.kerberos2./AAAA/ → '2001:db8::25'
+DNS/net.example._tcp._kerberos/-defaults-/SRV → '{"port": 88}'
+DNS/net.example._tcp._kerberos./SRV/1 → '{"target": "kerberos1"}'
+DNS/net.example._tcp._kerberos./SRV/2 → '{"target": "kerberos2"}'
+DNS/net.example.kerberos-master./CNAME/ → '{"target": "kerberos1"}'
 ```
 
 Reverse zone for IPv4:
 ```
-DNS/2.0.192.in-addr.arpa/-defaults-/ → '{"ttl": "1h"}'
-DNS/2.0.192.in-addr.arpa/@/SOA → '{"primary": "ns1.example.net.", "mail": "horst.master@example.net.", "refresh": "1h", "retry": "30m", "expire": "168h", "neg-ttl": "10m"}'
-DNS/2.0.192.in-addr.arpa/@/NS/a → '{"hostname": "ns1.example.net."}'
-DNS/2.0.192.in-addr.arpa/@/NS/b → 'ns2.example.net.'
-DNS/2.0.192.in-addr.arpa/2/PTR/1 → '{"hostname": "ns1.example.net."}'
-DNS/2.0.192.in-addr.arpa/3/PTR/1 → 'ns2.example.net.'
-DNS/2.0.192.in-addr.arpa/10/PTR/1 → '{"hostname": "mail.example.net."}'
-DNS/2.0.192.in-addr.arpa/15/PTR/1 → 'kerberos1.example.net.'
-DNS/2.0.192.in-addr.arpa/25/PTR/1 → 'kerberos2.example.net.'
+DNS/arpa.in-addr.192.0.2./SOA → '{"primary": "ns1.example.net.", "mail": "horst.master@example.net."}'
+DNS/arpa.in-addr.192.0.2./NS/a → '{"hostname": "ns1.example.net."}'
+DNS/arpa.in-addr.192.0.2./NS/b → 'ns2.example.net.'
+DNS/arpa.in-addr.192.0.2.2./PTR/ → '{"hostname": "ns1.example.net."}'
+DNS/arpa.in-addr.192.0.2.3./PTR/ → 'ns2.example.net.'
+DNS/arpa.in-addr.192.0.2.10./PTR/ → '{"hostname": "mail.example.net."}'
+DNS/arpa.in-addr.192.0.2.15./PTR/ → 'kerberos1.example.net.'
+DNS/arpa.in-addr.192.0.2.25./PTR/ → 'kerberos2.example.net.'
 ```
 
 Reverse zone for IPv6:
 ```
-DNS/8.b.d.0.1.0.0.2.ip6.arpa/-defaults-/ → '{"ttl": 3600}'
-DNS/8.b.d.0.1.0.0.2.ip6.arpa/@/SOA → '{"primary":"ns1.example.net.", "mail":"horst.master@example.net.", "refresh":"1h", "retry":"30m", "expire":"168h","neg-ttl":"10m"}'
-DNS/8.b.d.0.1.0.0.2.ip6.arpa/@/NS/1 → 'ns1.example.net.'
-DNS/8.b.d.0.1.0.0.2.ip6.arpa/@/NS/2 → 'ns2.example.net.'
-DNS/8.b.d.0.1.0.0.2.ip6.arpa/2.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 → 'ns1.example.net.'
-DNS/8.b.d.0.1.0.0.2.ip6.arpa/3.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 → 'ns2.example.net.'
-DNS/8.b.d.0.1.0.0.2.ip6.arpa/0.1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 → 'mail.example.net.'
-DNS/8.b.d.0.1.0.0.2.ip6.arpa/5.1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 → 'kerberos1.example.net.'
-DNS/8.b.d.0.1.0.0.2.ip6.arpa/5.2.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/PTR/1 → 'kerberos2.example.net.'
+DNS/arpa.ip6.2.0.0.1.0.d.b.8./SOA → '{"primary":"ns1.example.net.", "mail":"horst.master@example.net."}'
+DNS/arpa.ip6.2.0.0.1.0.d.b.8./NS/1 → 'ns1.example.net.'
+DNS/arpa.ip6.2.0.0.1.0.d.b.8./NS/2 → 'ns2.example.net.'
+DNS/arpa.ip6.2.0.0.1.0.d.b.8.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.2./PTR/ → 'ns1.example.net.'
+DNS/arpa.ip6.2.0.0.1.0.d.b.8.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.3./PTR/ → 'ns2.example.net.'
+DNS/arpa.ip6.2.0.0.1.0.d.b.8.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.1.0./PTR/ → 'mail.example.net.'
+DNS/arpa.ip6.2.0.0.1.0.d.b.8.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.1.5./PTR/ → 'kerberos1.example.net.'
+DNS/arpa.ip6.2.0.0.1.0.d.b.8.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.2.5./PTR/ → 'kerberos2.example.net.'
 ```
 
-Well … "glue records":
+Delegation and glue records:
 ```
-DNS/ns1.example.net/-defaults-/ → '{"ttl":"1h"}'
-DNS/ns1.example.net/A/1 → '192.0.2.2'
-DNS/ns1.example.net/AAAA/1 → '2001:db8::2'
-DNS/ns2.example.net/-defaults-/ → '{"ttl":"1h"}'
-DNS/ns2.example.net/A/1 → '192.0.2.3'
-DNS/ns2.example.net/AAAA/1 → '2001:db8::3'
+DNS/net.example.subunit./NS/1 → '{"hostname": "ns1.subunit"}'
+DNS/net.example.subunit./NS/2 → '{"hostname": "ns2.subuint"}'
+DNS/net.example.subunit.ns1./A/ → '192.0.3.2'
+DNS/net.example.subunit.ns2./A/ → '192.0.3.3'
 ```

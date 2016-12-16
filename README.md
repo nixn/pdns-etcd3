@@ -75,12 +75,7 @@ given in milliseconds.
 ### ETCD structure
 
 See [ETCD-structure][etcd-structure]. The structure lies beneath the `prefix`
-configured in PowerDNS (see above). For better performance/caching it is
-recommended to use a cluster for DNS exclusively:<br>
-pdns-etcd3 caches defaults, using the global cluster revision as expiry indicator.
-So every time when changing the data in the cluster (that is: changing the revision),
-the cached defaults are invalidated and must be loaded again, resulting in additional
-calls to the cluster, thus increasing the response latency.
+configured in PowerDNS (see above).
 
 [etcd-structure]: ETCD-structure.md
 

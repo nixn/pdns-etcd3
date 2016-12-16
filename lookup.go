@@ -22,208 +22,242 @@ import (
 	"time"
 )
 
-var (
-	zone2id          = map[string]int32{}
-	id2zone          = map[int32]string{}
-	nextZoneId int32 = 1
-)
-
-var defaults struct {
-	revision int64
-	values   map[string]map[string]interface{} // key = "example.net" or "example.net/subdomain" or "example.net/[subdomain/]RR"
-}
-
-type defaultsMessage struct {
-	key   string
-	value map[string]interface{}
-	err   error
-}
-
-func loadDefaults(key string, revision int64, c chan interface{}) {
-	response, err := get(key, true, &revision)
-	if err != nil {
-		c <- err
-		return
-	}
-	c <- int(response.Count) + 1
-	haveMain := false
-	for _, item := range response.Kvs {
-		itemKey := string(item.Key)
-		msg := defaultsMessage{itemKey, map[string]interface{}{}, nil}
-		msg.err = json.Unmarshal(item.Value, &msg.value)
-		c <- msg
-		if itemKey == key {
-			haveMain = true
-		}
-	}
-	if haveMain {
-		c <- 0
-	} else {
-		c <- 1
-		c <- defaultsMessage{key, map[string]interface{}{}, nil}
-	}
-}
-
-func ensureDefaults(qp *queryParts) error {
-	c := make(chan interface{}, 10)
-	n := 0
-	since := time.Now()
-	for _, withSubdomain := range []bool{false, true} {
-		key := qp.defaultsKey(withSubdomain, false)
-		if _, ok := defaults.values[key]; !ok {
-			log.Println("loading defaults:", key)
-			go loadDefaults(key, *qp.revision, c)
-			n++
-		} else {
-			log.Println("reusing defaults:", key)
-		}
-	}
-	var err error
+func reversed(a []string) []string {
+	n := len(a)
+	r := make([]string, n)
 	for i := 0; i < n; i++ {
-		msg := <-c
-		switch msg.(type) {
-		case int:
-			n += msg.(int)
-		case defaultsMessage:
-			msg := msg.(defaultsMessage)
-			if msg.err == nil {
-				// TODO check record (QTYPE supported? version constraints, ...)
-				log.Println("storing defaults:", msg.key)
-				defaults.values[msg.key] = msg.value
-			} else if err == nil {
-				err = msg.err
-			}
-		case error:
-			if err == nil {
-				err = msg.(error)
-			}
+		r[n-i-1] = a[i]
+	}
+	return r
+}
+
+type dataNode struct {
+	parent   *dataNode
+	hasSOA   bool
+	lname    string // local name
+	defaults map[string]*map[string]interface{}
+	children map[string]*dataNode
+}
+
+func (dn *dataNode) getQname() string {
+	qname := dn.lname
+	for dn := dn.parent; dn != nil; dn = dn.parent {
+		qname += "." + dn.lname
+	}
+	return qname
+}
+
+func (dn *dataNode) getZoneNode() *dataNode {
+	for dn := dn; dn != nil; dn = dn.parent {
+		if dn.hasSOA {
+			return dn
 		}
 	}
-	dur := time.Since(since)
-	log.Println("ensureDefaults dur:", dur)
-	return err
+	return nil
 }
 
-type queryParts struct {
-	zoneId                        int32
-	qname, zone, subdomain, qtype string
-	revision                      *int64
+type query struct {
+	nameParts []string
+	qtype     string
 }
 
-func (qp *queryParts) isANY() bool { return qp.qtype == "ANY" }
-func (qp *queryParts) isSOA() bool { return qp.qtype == "SOA" }
-
-func (qp *queryParts) zoneKey() string      { return prefix + qp.zone }
-func (qp *queryParts) subdomainKey() string { return prefix + qp.zone + "/" + qp.subdomain }
-func (qp *queryParts) recordKey() string {
-	key := prefix + qp.zone + "/" + qp.subdomain
-	if !qp.isANY() {
-		key += "/" + qp.qtype
+// 'fqdn' is for getting the domain name in normal form (with a trailing dot)
+func (q *query) fqdn() string {
+	parts := q.nameParts
+	if reversedNames {
+		parts = reversed(parts)
 	}
-	if !qp.isSOA() {
-		key += "/"
+	return strings.Join(parts, ".") + "."
+}
+
+// 'name' is for getting the domain name in storage form
+func (q *query) name(partsCount int) string {
+	last := len(q.nameParts)
+	if reversedNames {
+		last = partsCount
+	}
+	name := strings.Join(q.nameParts[last-partsCount:last], ".")
+	if name == "" {
+		if noTrailingDotOnRoot {
+			return ""
+		}
+		return "."
+	}
+	if noTrailingDot {
+		return name
+	}
+	return name + "."
+}
+
+func (q *query) isANY() bool { return q.qtype == "ANY" }
+func (q *query) isSOA() bool { return q.qtype == "SOA" }
+
+// TODO CNAME and DNAME also single value records?
+
+func (q *query) nameKey(partsCount int) string {
+	return prefix + q.name(partsCount) + "/"
+}
+
+func (q *query) recordKey() string {
+	key := q.nameKey(len(q.nameParts))
+	if !q.isANY() {
+		key += q.qtype
+		if !q.isSOA() {
+			key += "/"
+		}
 	}
 	return key
 }
 
-func (qp *queryParts) defaultsKey(withSubdomain, withQtype bool) string {
-	key := prefix + qp.zone
-	if withSubdomain {
-		key += "/" + qp.subdomain
+func (q *query) getKeys() []keyMultiPair {
+	keys := []keyMultiPair{{q.recordKey(), !q.isSOA()}} // record
+	// defaults
+	for i := len(q.nameParts); i >= 0; i-- {
+		keys = append(keys, keyMultiPair{q.nameKey(i) + "-defaults-/", true})
+		keys = append(keys, keyMultiPair{q.nameKey(i) + "SOA", false})
 	}
-	key += "/-defaults-/"
-	if withQtype {
-		key += qp.qtype
-	}
-	return key
+	keys = append(keys, keyMultiPair{prefix + "-defaults-/", true}) // global defaults
+	return keys
 }
 
-func (qp *queryParts) isDefaultsKey(key string) bool {
-	for _, withSubdomain := range []bool{false, true} {
-		for _, withQtype := range []bool{false, true} {
-			if key == qp.defaultsKey(withSubdomain, withQtype) {
-				return true
-			}
+type rr_func func(values map[string]interface{}, data *dataNode, revision int64) (content string, meta map[string]interface{}, err error)
+
+func splitDomainName(name string, reverse bool) []string {
+	name = strings.TrimSuffix(name, ".")
+	parts := strings.Split(name, ".")
+	if reverse {
+		for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
+			parts[i], parts[j] = parts[j], parts[i]
 		}
 	}
-	return false
-}
-
-type rr_func func(values map[string]interface{}, qp *queryParts) (content string, meta map[string]interface{}, err error)
-
-var rr2func map[string]rr_func = map[string]rr_func{
-	"A":     a,
-	"AAAA":  aaaa,
-	"CNAME": domainName("CNAME", "target"),
-	"DNAME": domainName("DNAME", "name"),
-	"MX":    mx,
-	"NS":    domainName("NS", "hostname"),
-	"PTR":   domainName("PTR", "hostname"),
-	"SOA":   soa,
-	"SRV":   srv,
-	"TXT":   txt,
+	return parts
 }
 
 func lookup(params map[string]interface{}) (interface{}, error) {
-	qp := queryParts{
-		qname:  params["qname"].(string),
-		zoneId: int32(params["zone-id"].(float64)), // note: documentation says 'zone_id', but it's 'zone-id'! further it is called 'domain_id' in responses (what a mess)
-		qtype:  params["qtype"].(string),
+	// TODO re-enable zone ids and cache zone answers to reply subsequent requests for same zone (id) fast (without ETCD request)
+	q := query{
+		nameParts: splitDomainName(params["qname"].(string), reversedNames),
+		qtype:     params["qtype"].(string),
 	}
-	var isNewZone bool
-	if z, ok := id2zone[qp.zoneId]; ok {
-		qp.zone = z
-		isNewZone = false
-	} else if id, ok := zone2id[qp.qname]; ok {
-		qp.zone = qp.qname
-		qp.zoneId = id
-		isNewZone = false
-	} else {
-		qp.zone = qp.qname
-		isNewZone = true
-	}
-	if qp.isSOA() && !isNewZone {
-		log.Printf("found zone '%s' as id '%d'", qp.zone, qp.zoneId)
-	}
-	qp.subdomain = extractSubdomain(qp.qname, qp.zone)
-	if len(qp.subdomain) == 0 {
-		qp.subdomain = "@"
-	}
-	response, err := get(qp.recordKey(), !qp.isSOA(), nil)
+	keys := q.getKeys()
+	response, err := getall(keys, nil)
 	if err != nil {
-		return false, fmt.Errorf("failed to load %s: %s", qp.recordKey(), err)
+		return false, fmt.Errorf("failed to load %v +: %s", keys[0], err)
 	}
-	qp.revision = &response.Header.Revision
-	// defaults
-	if defaults.revision != *qp.revision {
-		// TODO recheck version
-		log.Printf("clearing defaults cache. old revision: %d, new revision: %d", defaults.revision, *qp.revision)
-		defaults.revision = *qp.revision
-		defaults.values = map[string]map[string]interface{}{}
-	}
-	if qp.isSOA() && isNewZone && response.Count > 0 {
-		qp.zoneId = nextZoneId
-		nextZoneId++
-		log.Printf("storing zone '%s' as id %d", qp.zone, qp.zoneId)
-		zone2id[qp.zone] = qp.zoneId
-		id2zone[qp.zoneId] = qp.zone
+	if !response.Succeeded {
+		return false, fmt.Errorf("query not succeeded (%v +)", keys[0])
 	}
 	result := []map[string]interface{}{}
-	for _, item := range response.Kvs {
-		itemKey := string(item.Key)
-		if qp.isDefaultsKey(itemKey) { // this is needed for 'ANY' requests
-			continue
-		}
-		if len(item.Value) == 0 {
-			return false, fmt.Errorf("empty value")
-		}
-		qp := qp // clone
-		if qp.isANY() {
-			qp.qtype = strings.TrimPrefix(itemKey, qp.recordKey())
-			idx := strings.Index(qp.qtype, "/")
-			if idx >= 0 {
-				qp.qtype = qp.qtype[0:idx]
+	itemResponse := response.Responses[0].GetResponseRange()
+	if itemResponse.Count == 0 {
+		return result, nil // 'result' is empty yet!
+	}
+	dataTree := &dataNode{
+		lname:    "",
+		defaults: map[string]*map[string]interface{}{},
+		children: map[string]*dataNode{},
+	}
+	for _, treeResponseOp := range response.Responses[1:] {
+		for _, item := range treeResponseOp.GetResponseRange().Kvs {
+			qtype := strings.TrimPrefix(string(item.Key), prefix)
+			idx := strings.Index(qtype, "/")
+			if idx < 0 {
+				log.Fatal("should never happen: idx < 0 for", string(item.Key))
 			}
+			name := qtype[:idx]
+			qtype = qtype[idx+1:] // name + slash
+			var nameParts []string
+			isSoaEntry := false
+			if name == "-defaults-" { // global defaults
+				name = ""
+				nameParts = []string{}
+			} else { // domain defaults or SOA
+				nameParts = splitDomainName(name, !reversedNames)
+				if qtype == "SOA" {
+					isSoaEntry = true
+				} else {
+					qtype = strings.TrimPrefix(qtype, "-defaults-/")
+				}
+			}
+			if _, ok := rr2func[qtype]; !ok {
+				if qtype != "" {
+					log.Printf("unsupported qtype %q, ignoring defaults entry %q", qtype, string(item.Key))
+					continue
+				}
+			}
+			data := dataTree
+			for _, namePart := range nameParts {
+				if childData, ok := data.children[namePart]; ok {
+					data = childData
+				} else {
+					childData = &dataNode{
+						parent:   data,
+						lname:    namePart,
+						defaults: map[string]*map[string]interface{}{},
+						children: map[string]*dataNode{},
+					}
+					data.children[namePart] = childData
+					data = childData
+				}
+			}
+			if isSoaEntry {
+				data.hasSOA = true
+				//log.Println("found SOA:", data.getQname())
+				continue
+			}
+			var defaults *map[string]interface{}
+			if v, ok := data.defaults[qtype]; ok {
+				defaults = v
+			} else {
+				v = &map[string]interface{}{}
+				data.defaults[qtype] = v
+				defaults = v
+			}
+			err := json.Unmarshal(item.Value, defaults)
+			if err != nil {
+				return false, fmt.Errorf("failed to parse JSON (as object) for %q: %s", string(item.Key), err)
+			}
+		}
+	}
+	data := dataTree
+	start := len(q.nameParts)
+	add := -1
+	end := -1
+	if reversedNames {
+		end = start
+		start = 0
+		add = 1
+	}
+	for i := start; i != end; i += add {
+		childLname := q.nameParts[i]
+		if childData, ok := data.children[childLname]; ok {
+			data = childData
+		} else {
+			childData = &dataNode{
+				parent:   data,
+				lname:    childLname,
+				defaults: map[string]*map[string]interface{}{},
+				children: map[string]*dataNode{},
+			}
+			data.children[childLname] = childData
+			data = childData
+		}
+	}
+	for _, item := range itemResponse.Kvs {
+		itemKey := string(item.Key)
+		if len(item.Value) == 0 {
+			return false, fmt.Errorf("empty value for %q", string(item.Key))
+		}
+		q := q // clone (needed for ANY requests)
+		if q.isANY() {
+			q.qtype = strings.TrimPrefix(itemKey, q.recordKey())
+			idx := strings.Index(q.qtype, "/")
+			if idx >= 0 {
+				q.qtype = q.qtype[:idx]
+			}
+		}
+		if q.qtype == "-defaults-" { // this happens for ANY requests
+			continue
 		}
 		var content string
 		var meta map[string]interface{}
@@ -234,18 +268,18 @@ func lookup(params map[string]interface{}) (interface{}, error) {
 				return false, err
 			}
 			err = nil
-			rrFunc, ok := rr2func[qp.qtype]
+			rrFunc, ok := rr2func[q.qtype]
 			if !ok {
-				return false, fmt.Errorf("unknown/unimplemented qtype '%s', but have (JSON) object data for it (%s)", qp.qtype, qp.recordKey())
+				return false, fmt.Errorf("unknown/unimplemented qtype %q, but have (JSON) object data for it (%s)", q.qtype, q.recordKey())
 			}
-			content, meta, err = rrFunc(values, &qp)
+			content, meta, err = rrFunc(values, data, response.Header.Revision)
 			if err != nil {
 				return false, err
 			}
 		} else {
 			// TODO error when records with 'priority' field or SOA (due to 'serial' field) are not JSON objects
 			content = string(item.Value)
-			ttl, err = getDuration("ttl", nil, &qp)
+			ttl, err := getDuration("ttl", nil, q.qtype, data)
 			if err != nil {
 				return false, err
 			}
@@ -253,25 +287,18 @@ func lookup(params map[string]interface{}) (interface{}, error) {
 				"ttl": ttl,
 			}
 		}
-		result = append(result, makeResultItem(&qp, content, meta))
+		result = append(result, makeResultItem(q.qtype, data, content, meta))
 	}
 	return result, nil
 }
 
-func extractSubdomain(domain, zone string) string {
-	subdomain := strings.TrimSuffix(domain, zone)
-	subdomain = strings.TrimSuffix(subdomain, ".")
-	return subdomain
-}
-
-func makeResultItem(qp *queryParts, content string, meta map[string]interface{}) map[string]interface{} {
+func makeResultItem(qtype string, data *dataNode, content string, meta map[string]interface{}) map[string]interface{} {
 	result := map[string]interface{}{
-		"domain_id": qp.zoneId,
-		"qname":     qp.qname,
-		"qtype":     qp.qtype,
-		"content":   content,
-		"ttl":       seconds(meta["ttl"].(time.Duration)),
-		"auth":      true,
+		"qname":   data.getQname(),
+		"qtype":   qtype,
+		"content": content,
+		"ttl":     seconds(meta["ttl"].(time.Duration)),
+		"auth":    data.getZoneNode() != nil,
 	}
 	if priority, ok := meta["priority"]; ok {
 		result["priority"] = priority
@@ -283,19 +310,21 @@ func seconds(dur time.Duration) int64 {
 	return int64(dur.Seconds())
 }
 
-func findValue(name string, values map[string]interface{}, qp *queryParts) (interface{}, error) {
+func findValue(name string, values map[string]interface{}, qtype string, data *dataNode) (interface{}, error) {
 	if v, ok := values[name]; ok {
 		return v, nil
 	}
-	if err := ensureDefaults(qp); err != nil {
-		return nil, err
-	}
-	for _, withSubdomain := range []bool{true, false} {
-		for _, withQtype := range []bool{true, false} {
-			if v, ok := defaults.values[qp.defaultsKey(withSubdomain, withQtype)][name]; ok {
+	for data := data; data != nil; data = data.parent {
+		if defaults, ok := data.defaults[qtype]; ok {
+			if v, ok := (*defaults)[name]; ok {
+				return v, nil
+			}
+		}
+		if defaults, ok := data.defaults[""]; ok {
+			if v, ok := (*defaults)[name]; ok {
 				return v, nil
 			}
 		}
 	}
-	return nil, fmt.Errorf("missing '%s'", name)
+	return nil, fmt.Errorf("missing %q", name)
 }

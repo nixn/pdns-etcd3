@@ -36,9 +36,27 @@ func (req *pdnsRequest) String() string {
 var version = "?"
 
 var (
-	pdnsVersion = 3
-	prefix      = ""
+	pdnsVersion         = 3
+	prefix              = ""
+	reversedNames       = false
+	noTrailingDot       = false
+	noTrailingDotOnRoot = false
 )
+
+func parseBoolean(s string) (bool, error) {
+	s = strings.ToLower(s)
+	for _, v := range []string{"y", "yes", "1", "true", "on"} {
+		if s == v {
+			return true, nil
+		}
+	}
+	for _, v := range []string{"n", "no", "0", "false", "off"} {
+		if s == v {
+			return false, nil
+		}
+	}
+	return false, fmt.Errorf("not a boolean string (y[es]/n[o], 1/0, true/false, on/off)")
+}
 
 type setParameterFunc func(value string) error
 
@@ -53,6 +71,17 @@ func readParameter(name string, params map[string]interface{}, setParameter setP
 		return true, fmt.Errorf("parameter '%s' is not a string", name)
 	}
 	return false, nil
+}
+
+func setBooleanParameterFunc(param *bool) setParameterFunc {
+	return func(value string) error {
+		v, err := parseBoolean(value)
+		if err != nil {
+			return err
+		}
+		*param = v
+		return nil
+	}
 }
 
 func setStringParameterFunc(param *string) setParameterFunc {
@@ -99,6 +128,23 @@ func main() {
 		fatal(enc, err)
 	}
 	logMessages = append(logMessages, fmt.Sprintf("prefix: %q", prefix))
+	// reversed-names
+	if _, err := readParameter("reversed-names", request.Parameters, setBooleanParameterFunc(&reversedNames)); err != nil {
+		fatal(enc, err)
+	}
+	logMessages = append(logMessages, fmt.Sprintf("reversed-names: %v", reversedNames))
+	// no-trailing-dot
+	if _, err := readParameter("no-trailing-dot", request.Parameters, setBooleanParameterFunc(&noTrailingDot)); err != nil {
+		fatal(enc, err)
+	}
+	logMessages = append(logMessages, fmt.Sprintf("no-trailing-dot: %v", noTrailingDot))
+	// no-trailing-dot-on-root
+	if noTrailingDot {
+		if _, err := readParameter("no-trailing-dot-on-root", request.Parameters, setBooleanParameterFunc(&noTrailingDotOnRoot)); err != nil {
+			fatal(enc, err)
+		}
+		logMessages = append(logMessages, fmt.Sprintf("no-trailing-dot-on-root: %v", noTrailingDotOnRoot))
+	}
 	// client
 	if logMsgs, err := setupClient(request.Parameters); err != nil {
 		fatal(enc, err.Error())
@@ -106,7 +152,6 @@ func main() {
 		logMessages = append(logMessages, logMsgs...)
 	}
 	defer closeClient()
-	// TODO check storage version
 	respond(enc, true, logMessages...)
 	log.Println("initialized.", strings.Join(logMessages, ". "))
 	// main loop

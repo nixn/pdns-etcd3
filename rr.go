@@ -23,6 +23,19 @@ import (
 	"time"
 )
 
+var rr2func map[string]rr_func = map[string]rr_func{
+	"A":     a,
+	"AAAA":  aaaa,
+	"CNAME": domainName("CNAME", "target"),
+	"DNAME": domainName("DNAME", "name"),
+	"MX":    mx,
+	"NS":    domainName("NS", "hostname"),
+	"PTR":   domainName("PTR", "hostname"),
+	"SOA":   soa,
+	"SRV":   srv,
+	"TXT":   txt,
+}
+
 func fqdn(domain, qname string) string {
 	l := len(domain)
 	if l == 0 || domain[l-1] != '.' {
@@ -35,8 +48,8 @@ func fqdn(domain, qname string) string {
 	return domain
 }
 
-func getUint16(name string, values map[string]interface{}, qp *queryParts) (uint16, error) {
-	if v, err := findValue(name, values, qp); err == nil {
+func getUint16(name string, values map[string]interface{}, qtype string, data *dataNode) (uint16, error) {
+	if v, err := findValue(name, values, qtype, data); err == nil {
 		if v, ok := v.(float64); ok {
 			if v < 0 || v > 65535 {
 				return 0, fmt.Errorf("'%s' out of range (0-65535)", name)
@@ -49,8 +62,8 @@ func getUint16(name string, values map[string]interface{}, qp *queryParts) (uint
 	}
 }
 
-func getString(name string, values map[string]interface{}, qp *queryParts) (string, error) {
-	if v, err := findValue(name, values, qp); err == nil {
+func getString(name string, values map[string]interface{}, qtype string, data *dataNode) (string, error) {
+	if v, err := findValue(name, values, qtype, data); err == nil {
 		if v, ok := v.(string); ok {
 			return v, nil
 		}
@@ -60,8 +73,8 @@ func getString(name string, values map[string]interface{}, qp *queryParts) (stri
 	}
 }
 
-func getDuration(name string, values map[string]interface{}, qp *queryParts) (time.Duration, error) {
-	if v, err := findValue(name, values, qp); err == nil {
+func getDuration(name string, values map[string]interface{}, qtype string, data *dataNode) (time.Duration, error) {
+	if v, err := findValue(name, values, qtype, data); err == nil {
 		var dur time.Duration
 		switch v.(type) {
 		case float64:
@@ -84,23 +97,23 @@ func getDuration(name string, values map[string]interface{}, qp *queryParts) (ti
 	}
 }
 
-func getHostname(name string, values map[string]interface{}, qp *queryParts) (string, error) {
-	hostname, err := getString(name, values, qp)
+func getHostname(name string, values map[string]interface{}, qtype string, data *dataNode) (string, error) {
+	hostname, err := getString(name, values, qtype, data)
 	if err != nil {
 		return "", err
 	}
 	hostname = strings.TrimSpace(hostname)
-	hostname = fqdn(hostname, qp.zone)
+	hostname = fqdn(hostname, data.getZoneNode().getQname())
 	return hostname, nil
 }
 
 func domainName(qtype, fieldName string) rr_func {
-	return func(values map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
-		name, err := getHostname(fieldName, values, qp)
+	return func(values map[string]interface{}, data *dataNode, revision int64) (string, map[string]interface{}, error) {
+		name, err := getHostname(fieldName, values, qtype, data)
 		if err != nil {
 			return "", nil, err
 		}
-		ttl, err := getDuration("ttl", values, qp)
+		ttl, err := getDuration("ttl", values, qtype, data)
 		if err != nil {
 			return "", nil, err
 		}
@@ -111,16 +124,17 @@ func domainName(qtype, fieldName string) rr_func {
 	}
 }
 
-func soa(values map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
+func soa(values map[string]interface{}, data *dataNode, revision int64) (string, map[string]interface{}, error) {
 	// primary
-	primary, err := getString("primary", values, qp)
+	primary, err := getString("primary", values, "SOA", data)
 	if err != nil {
 		return "", nil, err
 	}
+	zone := data.getZoneNode().getQname()
 	primary = strings.TrimSpace(primary)
-	primary = fqdn(primary, qp.zone)
+	primary = fqdn(primary, zone)
 	// mail
-	mail, err := getString("mail", values, qp)
+	mail, err := getString("mail", values, "SOA", data)
 	if err != nil {
 		return "", nil, err
 	}
@@ -137,31 +151,31 @@ func soa(values map[string]interface{}, qp *queryParts) (string, map[string]inte
 		localpart = strings.Replace(localpart, ".", "\\.", -1)
 		mail = localpart + "." + domain
 	}
-	mail = fqdn(mail, qp.zone)
+	mail = fqdn(mail, zone)
 	// serial
-	serial := *qp.revision
+	serial := revision
 	// refresh
-	refresh, err := getDuration("refresh", values, qp)
+	refresh, err := getDuration("refresh", values, "SOA", data)
 	if err != nil {
 		return "", nil, err
 	}
 	// retry
-	retry, err := getDuration("retry", values, qp)
+	retry, err := getDuration("retry", values, "SOA", data)
 	if err != nil {
 		return "", nil, err
 	}
 	// expire
-	expire, err := getDuration("expire", values, qp)
+	expire, err := getDuration("expire", values, "SOA", data)
 	if err != nil {
 		return "", nil, err
 	}
 	// negative ttl
-	negativeTTL, err := getDuration("neg-ttl", values, qp)
+	negativeTTL, err := getDuration("neg-ttl", values, "SOA", data)
 	if err != nil {
 		return "", nil, err
 	}
 	// ttl
-	ttl, err := getDuration("ttl", values, qp)
+	ttl, err := getDuration("ttl", values, "SOA", data)
 	if err != nil {
 		return "", nil, err
 	}
@@ -173,9 +187,9 @@ func soa(values map[string]interface{}, qp *queryParts) (string, map[string]inte
 	return content, meta, nil
 }
 
-func a(values map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
+func a(values map[string]interface{}, data *dataNode, revision int64) (string, map[string]interface{}, error) {
 	var ip net.IP
-	v, err := findValue("ip", values, qp)
+	v, err := findValue("ip", values, "A", data)
 	if err != nil {
 		return "", nil, err
 	}
@@ -232,7 +246,7 @@ func a(values map[string]interface{}, qp *queryParts) (string, map[string]interf
 	default:
 		return "", nil, fmt.Errorf("invalid IPv4: not string or array")
 	}
-	ttl, err := getDuration("ttl", values, qp)
+	ttl, err := getDuration("ttl", values, "A", data)
 	if err != nil {
 		return "", nil, err
 	}
@@ -243,9 +257,9 @@ func a(values map[string]interface{}, qp *queryParts) (string, map[string]interf
 	return content, meta, nil
 }
 
-func aaaa(values map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
+func aaaa(values map[string]interface{}, data *dataNode, revision int64) (string, map[string]interface{}, error) {
 	var ip net.IP
-	v, err := findValue("ip", values, qp)
+	v, err := findValue("ip", values, "AAAA", data)
 	if err != nil {
 		return "", nil, err
 	}
@@ -319,7 +333,7 @@ func aaaa(values map[string]interface{}, qp *queryParts) (string, map[string]int
 	default:
 		return "", nil, fmt.Errorf("invalid IPv6: not string or array")
 	}
-	ttl, err := getDuration("ttl", values, qp)
+	ttl, err := getDuration("ttl", values, "AAAA", data)
 	if err != nil {
 		return "", nil, err
 	}
@@ -330,24 +344,24 @@ func aaaa(values map[string]interface{}, qp *queryParts) (string, map[string]int
 	return content, meta, nil
 }
 
-func srv(values map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
-	priority, err := getUint16("priority", values, qp)
+func srv(values map[string]interface{}, data *dataNode, revision int64) (string, map[string]interface{}, error) {
+	priority, err := getUint16("priority", values, "SRV", data)
 	if err != nil {
 		return "", nil, err
 	}
-	weight, err := getUint16("weight", values, qp)
+	weight, err := getUint16("weight", values, "SRV", data)
 	if err != nil {
 		return "", nil, err
 	}
-	port, err := getUint16("port", values, qp)
+	port, err := getUint16("port", values, "SRV", data)
 	if err != nil {
 		return "", nil, err
 	}
-	target, err := getHostname("target", values, qp)
+	target, err := getHostname("target", values, "SRV", data)
 	if err != nil {
 		return "", nil, err
 	}
-	ttl, err := getDuration("ttl", values, qp)
+	ttl, err := getDuration("ttl", values, "SRV", data)
 	if err != nil {
 		return "", nil, err
 	}
@@ -369,16 +383,16 @@ func srv(values map[string]interface{}, qp *queryParts) (string, map[string]inte
 	return content, meta, nil
 }
 
-func mx(values map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
-	priority, err := getUint16("priority", values, qp)
+func mx(values map[string]interface{}, data *dataNode, revision int64) (string, map[string]interface{}, error) {
+	priority, err := getUint16("priority", values, "MX", data)
 	if err != nil {
 		return "", nil, err
 	}
-	target, err := getHostname("target", values, qp)
+	target, err := getHostname("target", values, "MX", data)
 	if err != nil {
 		return "", nil, err
 	}
-	ttl, err := getDuration("ttl", values, qp)
+	ttl, err := getDuration("ttl", values, "MX", data)
 	if err != nil {
 		return "", nil, err
 	}
@@ -400,12 +414,12 @@ func mx(values map[string]interface{}, qp *queryParts) (string, map[string]inter
 	return content, meta, nil
 }
 
-func txt(values map[string]interface{}, qp *queryParts) (string, map[string]interface{}, error) {
-	text, err := getString("text", values, qp)
+func txt(values map[string]interface{}, data *dataNode, revision int64) (string, map[string]interface{}, error) {
+	text, err := getString("text", values, "TXT", data)
 	if err != nil {
 		return "", nil, err
 	}
-	ttl, err := getDuration("ttl", values, qp)
+	ttl, err := getDuration("ttl", values, "MX", data)
 	if err != nil {
 		return "", nil, err
 	}

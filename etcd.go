@@ -24,6 +24,8 @@ import (
 	"time"
 )
 
+var _ = log.Printf // suppress compiler error when not logging anything
+
 var (
 	cli     *clientv3.Client
 	timeout = 2 * time.Second
@@ -94,8 +96,20 @@ func closeClient() {
 	cli.Close()
 }
 
+type keyMultiPair struct {
+	key   string
+	multi bool
+}
+
+func (kmp *keyMultiPair) String() string {
+	s := kmp.key
+	if kmp.multi {
+		s += "…"
+	}
+	return s
+}
+
 func get(key string, multi bool, revision *int64) (*clientv3.GetResponse, error) {
-	log.Println("loading", key)
 	opts := []clientv3.OpOption{}
 	if multi {
 		opts = append(opts, clientv3.WithPrefix())
@@ -108,6 +122,29 @@ func get(key string, multi bool, revision *int64) (*clientv3.GetResponse, error)
 	response, err := cli.Get(ctx, key, opts...)
 	dur := time.Since(since)
 	cancel()
-	log.Println("loading", key, "dur:", dur)
+	log.Printf("get %q dur: %s", key, dur)
+	return response, err
+}
+
+func getall(keys []keyMultiPair, revision *int64) (*clientv3.TxnResponse, error) {
+	ops := []clientv3.Op{}
+	for _, kmp := range keys {
+		opts := []clientv3.OpOption{}
+		if kmp.multi {
+			opts = append(opts, clientv3.WithPrefix())
+		}
+		if revision != nil {
+			opts = append(opts, clientv3.WithRev(*revision))
+		}
+		ops = append(ops, clientv3.OpGet(kmp.key, opts...))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	since := time.Now()
+	txn := cli.Txn(ctx)
+	txn.Then(ops...)
+	response, err := txn.Commit()
+	dur := time.Since(since)
+	cancel()
+	log.Printf("get %v (%d) dur: %s", keys[0], len(keys), dur)
 	return response, err
 }
