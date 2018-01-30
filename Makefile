@@ -1,16 +1,16 @@
 SOURCES := $(wildcard *.go)
 OUT := pdns-etcd3
-VERSION := $(shell git describe --always --long --dirty)
+VERSION ?= $(shell git describe --dirty)
 
 .PHONY: all
 all: fmt $(OUT) vet
 
 $(OUT): $(SOURCES)
-	go build -i -v -o $(OUT) -ldflags="-X main.version=${VERSION}"
+	CGO_ENABLED=0 go build -i -o $(OUT) -ldflags="-extldflags=-static -X main.version=${VERSION}"
 
 .PHONY: fmt
 fmt:
-	gofmt -l -s -w .
+	gofmt -s -w $(SOURCES)
 
 .PHONY: vet
 vet:
