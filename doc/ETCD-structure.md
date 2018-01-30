@@ -43,7 +43,7 @@ for automatic appending to unqualified domain names beneath it. These entries
 
 ## Structure (Entries)
 
-`<prefix>` is the global prefix from configuration (see [README](README.md)).
+`<prefix>` is the global prefix from configuration (see [README](../README.md)).
 
 ### Version (versioned entries)
 
@@ -329,7 +329,7 @@ DNS/net.example.kerberos1./A/1 → '192.0.2.15'
 DNS/net.example.kerberos1./AAAA/1 → '2001:db8::15'
 DNS/net.example.kerberos2./A/ → '192.0.2.25'
 DNS/net.example.kerberos2./AAAA/ → '2001:db8::25'
-DNS/net.example._tcp._kerberos/-defaults-/SRV → '{"port": 88}'
+DNS/net.example._tcp._kerberos./-defaults-/SRV → '{"port": 88}'
 DNS/net.example._tcp._kerberos./SRV/1 → '{"target": "kerberos1"}'
 DNS/net.example._tcp._kerberos./SRV/2 → '{"target": "kerberos2"}'
 DNS/net.example.kerberos-master./CNAME/ → '{"target": "kerberos1"}'
