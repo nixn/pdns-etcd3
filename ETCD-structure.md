@@ -80,6 +80,45 @@ so **don't use it yet**. It will be implemented in the first release (0.1).
 If two entries with the same key exist, one versioned with the currently supported version,
 the other not versioned (plain), the versioned one is taken, the plain one is ignored.
 
+#### Upgrading
+
+Upgrading to a higher major version without interrupting service works as follows
+(in this example from *old* version `1.1` to *new* version `2`):
+
+1. Ensure that all servers have the *old* (current) version<br>
+(that should be an invariant of any upgrading process anyway).
+2. Determine which entries must be rewritten (updated), added or deleted.
+3. For each entry-to-be-rewritten (in example `DNS/example.com./SOA`):
+    1. add a new versioned entry of same key with the *old* content and the *old* version:<br>
+    `DNS/example.com./SOA@1.1` → `<old content>`
+    2. rewrite the plain entry with the *new* content<br>
+    `DNS/example.com./SOA` → `<new content>`<br>
+    (the plain entry is ignored yet because all servers currently prefer the versioned entry)
+4. For each entry-to-be-added (in example `DNS/example.com./NEW`):
+    1. add a new versioned entry with that key, the *new* content and the *new* version:<br>
+    `DNS/example.com./NEW@2` → `<new content>`<br>
+    (this entry is ignored yet, because the version is unsupported by the current servers)
+5. For each entry-to-be-removed (in example `DNS/example.com./OLD`):
+    1. add a new versioned entry of same key with the *old* content and the *old* version:<br>
+    `DNS/example.com./OLD@1.1` → `<old content>`<br>
+    (this entry is instantly preferred by the current servers, so be sure to get the content right)
+    2. delete the plain entry of same key:<br>
+    `DNS/example.com./OLD` → *deleted*
+6. Upgrade all servers (stop, update, restart), one by one, to the *new* version.<br>
+*Tip*: Remove one server from public service, upgrade it and test the new entries.
+If it works well, restore public service and continue upgrading the other servers.
+7. Remove each versioned entry with *old* (now really old) version:<br>
+`DNS/example.com./SOA@1.1`, `DNS/example.com./OLD@1.1`, … (`*@1.1`)<br>
+(unfortunately ETCD does not support suffix requests)
+8. For each entry-to-be-added (in example `DNS/example.com./NEW`):
+    1. Add a new plain entry of same key with *new* content:<br>
+    `DNS/example.com./NEW` → `<new content>`
+    2. Remove the versioned entry of same key with *new* version:
+    `DNS/example.com./NEW@2` → *deleted*
+9. Make a break, you're done!
+
+(There should be a migration script…)
+
 #### Current version
 
 The structure version described here is `0.1`.
