@@ -107,4 +107,4 @@ For now, there is much logging, as the program is in alpha state.
 
 Copyright © 2016-2018 nix <https://github.com/nixn>
 
-Distributed under the Apache 2.0 license, available in the file [LICENSE]().
+Distributed under the Apache 2.0 license, available in the file [LICENSE](LICENSE).
