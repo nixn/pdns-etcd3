@@ -40,7 +40,7 @@ func setConfigFileParameter(value string) error {
 	return nil
 }
 
-func setupClient(params map[string]interface{}) ([]string, error) {
+func setupClient(params objectType) ([]string, error) {
 	haveConfigFile, err := readParameter("config-file", params, setConfigFileParameter)
 	if err != nil {
 		return nil, err
@@ -57,13 +57,13 @@ func setupClient(params map[string]interface{}) ([]string, error) {
 					timeout = time.Duration(tmo) * time.Millisecond
 					cfg.DialTimeout = timeout
 				} else {
-					return nil, fmt.Errorf("Timeout may not be zero")
+					return nil, fmt.Errorf("timeout may not be zero")
 				}
 			} else {
-				return nil, fmt.Errorf("Failed to parse timeout value: %s", err)
+				return nil, fmt.Errorf("failed to parse timeout value: %s", err)
 			}
 		} else {
-			return nil, fmt.Errorf("parameters.timeout is not a string")
+			return nil, fmt.Errorf("timeout is not a string")
 		}
 	}
 	logMessages := []string{fmt.Sprintf("timeout: %s", timeout)}
@@ -74,7 +74,7 @@ func setupClient(params map[string]interface{}) ([]string, error) {
 			cfg.Endpoints = endpoints
 			client, err := clientv3.New(cfg)
 			if err != nil {
-				return nil, fmt.Errorf("Failed to parse endpoints: %s", err)
+				return nil, fmt.Errorf("failed to parse endpoints: %s", err)
 			}
 			cli = client
 		} else {
@@ -84,7 +84,7 @@ func setupClient(params map[string]interface{}) ([]string, error) {
 		cfg.Endpoints = []string{defaultEndpointIPv6, defaultEndpointIPv4}
 		client, err := clientv3.New(cfg)
 		if err != nil {
-			return nil, fmt.Errorf("Failed to create client: %s", err)
+			return nil, fmt.Errorf("failed to create client: %s", err)
 		}
 		cli = client
 	}
@@ -110,7 +110,7 @@ func (kmp *keyMultiPair) String() string {
 }
 
 func get(key string, multi bool, revision *int64) (*clientv3.GetResponse, error) {
-	opts := []clientv3.OpOption{}
+	opts := []clientv3.OpOption(nil)
 	if multi {
 		opts = append(opts, clientv3.WithPrefix())
 	}
@@ -122,14 +122,14 @@ func get(key string, multi bool, revision *int64) (*clientv3.GetResponse, error)
 	response, err := cli.Get(ctx, key, opts...)
 	dur := time.Since(since)
 	cancel()
-	log.Printf("get %q dur: %s", key, dur)
+	log.Printf("get %q (%v) dur: %s", key, multi, dur)
 	return response, err
 }
 
 func getall(keys []keyMultiPair, revision *int64) (*clientv3.TxnResponse, error) {
-	ops := []clientv3.Op{}
+	ops := []clientv3.Op(nil)
 	for _, kmp := range keys {
-		opts := []clientv3.OpOption{}
+		opts := []clientv3.OpOption(nil)
 		if kmp.multi {
 			opts = append(opts, clientv3.WithPrefix())
 		}

@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var rr2func map[string]rr_func = map[string]rr_func{
+var rr2func map[string]rrFunc = map[string]rrFunc{
 	"A":     a,
 	"AAAA":  aaaa,
 	"CNAME": domainName("CNAME", "target"),
@@ -48,7 +48,7 @@ func fqdn(domain, qname string) string {
 	return domain
 }
 
-func getUint16(name string, values map[string]interface{}, qtype string, data *dataNode) (uint16, error) {
+func getUint16(name string, values objectType, qtype string, data *dataNode) (uint16, error) {
 	if v, err := findValue(name, values, qtype, data); err == nil {
 		if v, ok := v.(float64); ok {
 			if v < 0 || v > 65535 {
@@ -62,7 +62,7 @@ func getUint16(name string, values map[string]interface{}, qtype string, data *d
 	}
 }
 
-func getString(name string, values map[string]interface{}, qtype string, data *dataNode) (string, error) {
+func getString(name string, values objectType, qtype string, data *dataNode) (string, error) {
 	if v, err := findValue(name, values, qtype, data); err == nil {
 		if v, ok := v.(string); ok {
 			return v, nil
@@ -73,7 +73,7 @@ func getString(name string, values map[string]interface{}, qtype string, data *d
 	}
 }
 
-func getDuration(name string, values map[string]interface{}, qtype string, data *dataNode) (time.Duration, error) {
+func getDuration(name string, values objectType, qtype string, data *dataNode) (time.Duration, error) {
 	if v, err := findValue(name, values, qtype, data); err == nil {
 		var dur time.Duration
 		switch v.(type) {
@@ -97,7 +97,7 @@ func getDuration(name string, values map[string]interface{}, qtype string, data 
 	}
 }
 
-func getHostname(name string, values map[string]interface{}, qtype string, data *dataNode) (string, error) {
+func getHostname(name string, values objectType, qtype string, data *dataNode) (string, error) {
 	hostname, err := getString(name, values, qtype, data)
 	if err != nil {
 		return "", err
@@ -107,8 +107,8 @@ func getHostname(name string, values map[string]interface{}, qtype string, data 
 	return hostname, nil
 }
 
-func domainName(qtype, fieldName string) rr_func {
-	return func(values map[string]interface{}, data *dataNode, revision int64) (string, map[string]interface{}, error) {
+func domainName(qtype, fieldName string) rrFunc {
+	return func(values objectType, data *dataNode, revision int64) (string, objectType, error) {
 		name, err := getHostname(fieldName, values, qtype, data)
 		if err != nil {
 			return "", nil, err
@@ -117,14 +117,14 @@ func domainName(qtype, fieldName string) rr_func {
 		if err != nil {
 			return "", nil, err
 		}
-		meta := map[string]interface{}{
+		meta := objectType{
 			"ttl": ttl,
 		}
 		return name, meta, nil
 	}
 }
 
-func soa(values map[string]interface{}, data *dataNode, revision int64) (string, map[string]interface{}, error) {
+func soa(values objectType, data *dataNode, revision int64) (string, objectType, error) {
 	// primary
 	primary, err := getString("primary", values, "SOA", data)
 	if err != nil {
@@ -181,13 +181,13 @@ func soa(values map[string]interface{}, data *dataNode, revision int64) (string,
 	}
 	// (done)
 	content := fmt.Sprintf("%s %s %d %d %d %d %d", primary, mail, serial, seconds(refresh), seconds(retry), seconds(expire), seconds(negativeTTL))
-	meta := map[string]interface{}{
+	meta := objectType{
 		"ttl": ttl,
 	}
 	return content, meta, nil
 }
 
-func a(values map[string]interface{}, data *dataNode, revision int64) (string, map[string]interface{}, error) {
+func a(values objectType, data *dataNode, revision int64) (string, objectType, error) {
 	var ip net.IP
 	v, err := findValue("ip", values, "A", data)
 	if err != nil {
@@ -251,13 +251,13 @@ func a(values map[string]interface{}, data *dataNode, revision int64) (string, m
 		return "", nil, err
 	}
 	content := ip.String()
-	meta := map[string]interface{}{
+	meta := objectType{
 		"ttl": ttl,
 	}
 	return content, meta, nil
 }
 
-func aaaa(values map[string]interface{}, data *dataNode, revision int64) (string, map[string]interface{}, error) {
+func aaaa(values objectType, data *dataNode, revision int64) (string, objectType, error) {
 	var ip net.IP
 	v, err := findValue("ip", values, "AAAA", data)
 	if err != nil {
@@ -338,13 +338,13 @@ func aaaa(values map[string]interface{}, data *dataNode, revision int64) (string
 		return "", nil, err
 	}
 	content := ip.String()
-	meta := map[string]interface{}{
+	meta := objectType{
 		"ttl": ttl,
 	}
 	return content, meta, nil
 }
 
-func srv(values map[string]interface{}, data *dataNode, revision int64) (string, map[string]interface{}, error) {
+func srv(values objectType, data *dataNode, revision int64) (string, objectType, error) {
 	priority, err := getUint16("priority", values, "SRV", data)
 	if err != nil {
 		return "", nil, err
@@ -366,7 +366,7 @@ func srv(values map[string]interface{}, data *dataNode, revision int64) (string,
 		return "", nil, err
 	}
 	format := ""
-	params := []interface{}{}
+	params := []interface{}(nil)
 	if pdnsVersion == 4 {
 		format += "%d "
 		params = append(params, priority)
@@ -374,7 +374,7 @@ func srv(values map[string]interface{}, data *dataNode, revision int64) (string,
 	format += "%d %d %s"
 	params = append(params, weight, port, target)
 	content := fmt.Sprintf(format, params...)
-	meta := map[string]interface{}{
+	meta := objectType{
 		"ttl": ttl,
 	}
 	if pdnsVersion == 3 {
@@ -383,7 +383,7 @@ func srv(values map[string]interface{}, data *dataNode, revision int64) (string,
 	return content, meta, nil
 }
 
-func mx(values map[string]interface{}, data *dataNode, revision int64) (string, map[string]interface{}, error) {
+func mx(values objectType, data *dataNode, revision int64) (string, objectType, error) {
 	priority, err := getUint16("priority", values, "MX", data)
 	if err != nil {
 		return "", nil, err
@@ -397,7 +397,7 @@ func mx(values map[string]interface{}, data *dataNode, revision int64) (string, 
 		return "", nil, err
 	}
 	format := ""
-	params := []interface{}{}
+	params := []interface{}(nil)
 	if pdnsVersion == 4 {
 		format += "%d "
 		params = append(params, priority)
@@ -405,7 +405,7 @@ func mx(values map[string]interface{}, data *dataNode, revision int64) (string, 
 	format += "%s"
 	params = append(params, target)
 	content := fmt.Sprintf(format, params...)
-	meta := map[string]interface{}{
+	meta := objectType{
 		"ttl": ttl,
 	}
 	if pdnsVersion == 3 {
@@ -414,7 +414,7 @@ func mx(values map[string]interface{}, data *dataNode, revision int64) (string, 
 	return content, meta, nil
 }
 
-func txt(values map[string]interface{}, data *dataNode, revision int64) (string, map[string]interface{}, error) {
+func txt(values objectType, data *dataNode, revision int64) (string, objectType, error) {
 	text, err := getString("text", values, "TXT", data)
 	if err != nil {
 		return "", nil, err
@@ -424,7 +424,7 @@ func txt(values map[string]interface{}, data *dataNode, revision int64) (string,
 		return "", nil, err
 	}
 	content := text
-	meta := map[string]interface{}{
+	meta := objectType{
 		"ttl": ttl,
 	}
 	return content, meta, nil

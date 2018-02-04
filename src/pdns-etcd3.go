@@ -26,7 +26,7 @@ import (
 
 type pdnsRequest struct {
 	Method     string
-	Parameters map[string]interface{}
+	Parameters objectType
 }
 
 func (req *pdnsRequest) String() string {
@@ -60,7 +60,7 @@ func parseBoolean(s string) (bool, error) {
 
 type setParameterFunc func(value string) error
 
-func readParameter(name string, params map[string]interface{}, setParameter setParameterFunc) (bool, error) {
+func readParameter(name string, params objectType, setParameter setParameterFunc) (bool, error) {
 	if v, ok := params[name]; ok {
 		if v, ok := v.(string); ok {
 			if err := setParameter(v); err != nil {
@@ -186,8 +186,8 @@ func main() {
 	}
 }
 
-func makeResponse(result interface{}, msg ...string) map[string]interface{} {
-	response := map[string]interface{}{"result": result}
+func makeResponse(result interface{}, msg ...string) objectType {
+	response := objectType{"result": result}
 	if len(msg) > 0 {
 		response["log"] = msg
 	}
