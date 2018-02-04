@@ -95,7 +95,7 @@ func (q *query) isSOA() bool { return q.qtype == "SOA" }
 // TODO CNAME and DNAME also single value records?
 
 func (q *query) nameKey(partsCount int) string {
-	return prefix + q.name(partsCount) + "/"
+	return prefix + q.name(partsCount) + keySeparator
 }
 
 func (q *query) recordKey() string {
@@ -103,7 +103,7 @@ func (q *query) recordKey() string {
 	if !q.isANY() {
 		key += q.qtype
 		if !q.isSOA() {
-			key += "/"
+			key += keySeparator
 		}
 	}
 	return key
@@ -113,10 +113,10 @@ func (q *query) getKeys() []keyMultiPair {
 	keys := []keyMultiPair{{q.recordKey(), !q.isSOA()}} // record
 	// defaults
 	for i := len(q.nameParts); i >= 0; i-- {
-		keys = append(keys, keyMultiPair{q.nameKey(i) + "-defaults-/", true})
+		keys = append(keys, keyMultiPair{q.nameKey(i) + defaultsKey + keySeparator, true})
 		keys = append(keys, keyMultiPair{q.nameKey(i) + "SOA", false})
 	}
-	keys = append(keys, keyMultiPair{prefix + "-defaults-/", true}) // global defaults
+	keys = append(keys, keyMultiPair{prefix + defaultsKey + keySeparator, true}) // global defaults
 	return keys
 }
 
@@ -160,15 +160,15 @@ func lookup(params map[string]interface{}) (interface{}, error) {
 	for _, treeResponseOp := range response.Responses[1:] {
 		for _, item := range treeResponseOp.GetResponseRange().Kvs {
 			qtype := strings.TrimPrefix(string(item.Key), prefix)
-			idx := strings.Index(qtype, "/")
+			idx := strings.Index(qtype, keySeparator)
 			if idx < 0 {
 				log.Fatal("should never happen: idx < 0 for", string(item.Key))
 			}
 			name := qtype[:idx]
-			qtype = qtype[idx+1:] // name + slash
+			qtype = qtype[idx+len(keySeparator):] // name + separator
 			var nameParts []string
 			isSoaEntry := false
-			if name == "-defaults-" { // global defaults
+			if name == defaultsKey { // global defaults
 				name = ""
 				nameParts = []string{}
 			} else { // domain defaults or SOA
@@ -176,7 +176,7 @@ func lookup(params map[string]interface{}) (interface{}, error) {
 				if qtype == "SOA" {
 					isSoaEntry = true
 				} else {
-					qtype = strings.TrimPrefix(qtype, "-defaults-/")
+					qtype = strings.TrimPrefix(qtype, defaultsKey + keySeparator)
 				}
 			}
 			if _, ok := rr2func[qtype]; !ok {
@@ -251,12 +251,12 @@ func lookup(params map[string]interface{}) (interface{}, error) {
 		q := q // clone (needed for ANY requests)
 		if q.isANY() {
 			q.qtype = strings.TrimPrefix(itemKey, q.recordKey())
-			idx := strings.Index(q.qtype, "/")
+			idx := strings.Index(q.qtype, keySeparator)
 			if idx >= 0 {
 				q.qtype = q.qtype[:idx]
 			}
 		}
-		if q.qtype == "-defaults-" { // this happens for ANY requests
+		if q.qtype == defaultsKey { // this happens for ANY requests
 			continue
 		}
 		var content string

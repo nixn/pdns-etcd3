@@ -28,7 +28,7 @@ var _ = log.Printf // suppress compiler error when not logging anything
 
 var (
 	cli     *clientv3.Client
-	timeout = 2 * time.Second
+	timeout = defaultDialTimeout
 )
 
 func setConfigFileParameter(value string) error {
@@ -81,7 +81,7 @@ func setupClient(params map[string]interface{}) ([]string, error) {
 			return nil, fmt.Errorf("parameters.endpoints is not a string")
 		}
 	} else {
-		cfg.Endpoints = []string{"[::1]:2379", "127.0.0.1:2379"}
+		cfg.Endpoints = []string{defaultEndpointIPv6, defaultEndpointIPv4}
 		client, err := clientv3.New(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to create client: %s", err)

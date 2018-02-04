@@ -36,11 +36,11 @@ func (req *pdnsRequest) String() string {
 var version = "?"
 
 var (
-	pdnsVersion         = 3
-	prefix              = ""
-	reversedNames       = false
-	noTrailingDot       = false
-	noTrailingDotOnRoot = false
+	pdnsVersion         = defaultPdnsVersion
+	prefix              = defaultPrefix
+	reversedNames       = defaultReversedNames
+	noTrailingDot       = defaultNoTrailingDot
+	noTrailingDotOnRoot = defaultNoTrailingDotOnRoot
 )
 
 func parseBoolean(s string) (bool, error) {
