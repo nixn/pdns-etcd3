@@ -15,11 +15,11 @@ limitations under the License. */
 package main
 
 type dataNode struct {
-	parent      *dataNode
-	hasSOA      bool
-	lname       string                // local name
-	defaults    map[string]objectType // <QTYPE> or "" → values
-	children    map[string]*dataNode  // key = <lname of subdomain>. if children[lname] == nil, the subdomain is present, but the data is not loaded (would be a subzone)
+	parent   *dataNode
+	hasSOA   bool
+	lname    string                 // local name
+	defaults map[string]*objectType // <QTYPE> or "" → values
+	children map[string]*dataNode   // key = <lname of subdomain>. if children[lname] == nil, the subdomain is present, but the data is not loaded (would be a subzone)
 }
 
 func (dn *dataNode) getQname() string {

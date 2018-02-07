@@ -144,7 +144,7 @@ func lookup(params objectType) (interface{}, error) {
 				if qtype == "SOA" {
 					isSoaEntry = true
 				} else {
-					qtype = strings.TrimPrefix(qtype, defaultsKey + keySeparator)
+					qtype = strings.TrimPrefix(qtype, defaultsKey+keySeparator)
 				}
 			}
 			if _, ok := rr2func[qtype]; !ok {
@@ -220,7 +220,7 @@ func lookup(params objectType) (interface{}, error) {
 		if query.isANY() {
 			query.qtype = strings.TrimPrefix(itemKey, query.recordKey())
 			idx := strings.Index(query.qtype, keySeparator)
-				query.qtype = query.qtype[:idx]
+			query.qtype = query.qtype[:idx]
 		}
 		if query.qtype == defaultsKey { // this happens for ANY requests
 			continue
