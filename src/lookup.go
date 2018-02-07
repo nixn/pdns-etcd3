@@ -22,69 +22,46 @@ import (
 	"time"
 )
 
-
-
 type queryType struct {
-	nameParts []string
-	qtype     string
+	name  nameType
+	qtype string
 }
 
-// 'fqdn' is for getting the domain name in normal form (with a trailing dot)
-func (query *queryType) fqdn() string {
-	parts := query.nameParts
-	if reversedNames {
-		parts = reversed(parts)
-	}
-	return strings.Join(parts, ".") + "."
-}
-
-// 'name' is for getting the domain name in storage form
-func (query *queryType) name(partsCount int) string {
-	last := len(query.nameParts)
-	if reversedNames {
-		last = partsCount
-	}
-	name := strings.Join(query.nameParts[last-partsCount:last], ".")
-	if name == "" {
-		if noTrailingDotOnRoot {
-			return ""
-		}
-		return "."
-	}
-	if noTrailingDot {
-		return name
-	}
-	return name + "."
+func (query *queryType) String() string {
+	return fmt.Sprintf("%s%s%s", query.name.normal(), keySeparator, query.qtype)
 }
 
 func (query *queryType) isANY() bool { return query.qtype == "ANY" }
 func (query *queryType) isSOA() bool { return query.qtype == "SOA" }
 
-// TODO CNAME and DNAME also single value records?
-
-func (query *queryType) nameKey(partsCount int) string {
-	return prefix + query.name(partsCount) + keySeparator
+func (query *queryType) recordKey(withTrailingDot bool) string {
+	return recordKey(&query.name, query.name.len(), withTrailingDot, query.qtype)
 }
 
-func (query *queryType) recordKey() string {
-	key := query.nameKey(len(query.nameParts))
-	if !query.isANY() {
-		key += query.qtype
-		if !query.isSOA() {
+// TODO CNAME and DNAME also single value records?
+
+func recordKey(name *nameType, level int, withTrailingDot bool, qtype string) string {
+	key := prefix + name.key(level, withTrailingDot)
+	if qtype != "ANY" {
+		key += qtype
+		if qtype != "SOA" {
 			key += keySeparator
 		}
 	}
 	return key
 }
 
-func (query *queryType) getKeys() []keyMultiPair {
-	keys := []keyMultiPair{{query.recordKey(), !query.isSOA()}} // record
-	// defaults
-	for i := len(query.nameParts); i >= 0; i-- {
-		keys = append(keys, keyMultiPair{query.nameKey(i) + defaultsKey + keySeparator, true})
-		keys = append(keys, keyMultiPair{query.nameKey(i) + "SOA", false})
+func getKeys(name *nameType, onlySOA bool) []keyMultiPair {
+	keys := []keyMultiPair(nil)
+	for level := name.len(); level >= 0; level-- {
+		for _, withTrailingDot := range []bool{true, false} {
+			if !onlySOA {
+				keys = append(keys, keyMultiPair{recordKey(name, level, withTrailingDot, defaultsKey), true})
+			}
+			keys = append(keys, keyMultiPair{recordKey(name, level, withTrailingDot, "SOA"), false})
+			// TODO versioned keys
+		}
 	}
-	keys = append(keys, keyMultiPair{prefix + defaultsKey + keySeparator, true}) // global defaults
 	return keys
 }
 
@@ -92,11 +69,12 @@ type rrFunc func(values objectType, data *dataNode, revision int64) (content str
 
 func splitDomainName(name string, reverse bool) []string {
 	name = strings.TrimSuffix(name, ".")
+	if name == "" {
+		return []string(nil)
+	}
 	parts := strings.Split(name, ".")
 	if reverse {
-		for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
-			parts[i], parts[j] = parts[j], parts[i]
-		}
+		parts = reversed(parts)
 	}
 	return parts
 }
@@ -104,10 +82,10 @@ func splitDomainName(name string, reverse bool) []string {
 func lookup(params objectType) (interface{}, error) {
 	// TODO re-enable zone ids and cache zone answers to reply subsequent requests for same zone (id) fast (without ETCD request)
 	query := queryType{
-		nameParts: splitDomainName(params["qname"].(string), reversedNames),
-		qtype:     params["qtype"].(string),
+		name:  nameType(splitDomainName(params["qname"].(string), reversedNames)),
+		qtype: params["qtype"].(string),
 	}
-	keys := query.getKeys()
+	keys := getKeys(&query.name, false)
 	response, err := getall(keys, nil)
 	if err != nil {
 		return false, fmt.Errorf("failed to load %v +: %s", keys[0], err)
@@ -188,16 +166,8 @@ func lookup(params objectType) (interface{}, error) {
 		}
 	}
 	data := dataTree
-	start := len(query.nameParts)
-	add := -1
-	end := -1
-	if reversedNames {
-		end = start
-		start = 0
-		add = 1
-	}
-	for i := start; i != end; i += add {
-		childLname := query.nameParts[i]
+	for level, maxLevel := 1, query.name.len(); level <= maxLevel; level++ {
+		childLname := query.name.part(level)
 		if childData, ok := data.children[childLname]; ok {
 			data = childData
 		} else {
@@ -218,7 +188,10 @@ func lookup(params objectType) (interface{}, error) {
 		}
 		query := query // clone (needed for ANY requests)
 		if query.isANY() {
-			query.qtype = strings.TrimPrefix(itemKey, query.recordKey())
+			query.qtype = strings.TrimPrefix(itemKey, query.recordKey(false))
+			if query.name.len() > 0 {
+				query.qtype = strings.TrimPrefix(query.qtype, ".")
+			}
 			idx := strings.Index(query.qtype, keySeparator)
 			query.qtype = query.qtype[:idx]
 		}
@@ -236,7 +209,7 @@ func lookup(params objectType) (interface{}, error) {
 			err = nil
 			rrFunc, ok := rr2func[query.qtype]
 			if !ok {
-				return false, fmt.Errorf("unknown/unimplemented qtype %q, but have (JSON) object data for it (%s)", query.qtype, query.recordKey())
+				return false, fmt.Errorf("unknown/unimplemented qtype %q, but have (JSON) object data for it (%s)", query.qtype, query.recordKey(false))
 			}
 			content, meta, err = rrFunc(values, data, response.Header.Revision)
 			if err != nil {

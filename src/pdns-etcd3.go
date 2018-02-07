@@ -36,11 +36,9 @@ func (req *pdnsRequest) String() string {
 var version = "?"
 
 var (
-	pdnsVersion         = defaultPdnsVersion
-	prefix              = defaultPrefix
-	reversedNames       = defaultReversedNames
-	noTrailingDot       = defaultNoTrailingDot
-	noTrailingDotOnRoot = defaultNoTrailingDotOnRoot
+	pdnsVersion   = defaultPdnsVersion
+	prefix        = defaultPrefix
+	reversedNames = defaultReversedNames
 )
 
 func parseBoolean(s string) (bool, error) {
@@ -133,18 +131,6 @@ func main() {
 		fatal(enc, err)
 	}
 	logMessages = append(logMessages, fmt.Sprintf("reversed-names: %v", reversedNames))
-	// no-trailing-dot
-	if _, err := readParameter("no-trailing-dot", request.Parameters, setBooleanParameterFunc(&noTrailingDot)); err != nil {
-		fatal(enc, err)
-	}
-	logMessages = append(logMessages, fmt.Sprintf("no-trailing-dot: %v", noTrailingDot))
-	// no-trailing-dot-on-root
-	if noTrailingDot {
-		if _, err := readParameter("no-trailing-dot-on-root", request.Parameters, setBooleanParameterFunc(&noTrailingDotOnRoot)); err != nil {
-			fatal(enc, err)
-		}
-		logMessages = append(logMessages, fmt.Sprintf("no-trailing-dot-on-root: %v", noTrailingDotOnRoot))
-	}
 	// client
 	if logMsgs, err := setupClient(request.Parameters); err != nil {
 		fatal(enc, err.Error())

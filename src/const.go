@@ -17,11 +17,9 @@ package main
 import "time"
 
 const (
-	defaultPdnsVersion         = 3
-	defaultPrefix              = ""
-	defaultReversedNames       = false
-	defaultNoTrailingDot       = false
-	defaultNoTrailingDotOnRoot = false
+	defaultPdnsVersion   = 3
+	defaultPrefix        = ""
+	defaultReversedNames = false
 )
 
 const (

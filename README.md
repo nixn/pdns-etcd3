@@ -58,7 +58,7 @@ Of course you need an up and running ETCD v3 cluster and a PowerDNS installation
 ### PowerDNS configuration
 ```
 launch+=remote
-remote-connection-string=pipe:command=/path/to/pdns-etcd3[,pdns-version=3|4][,<config>][,prefix=anything][,timeout=2000]
+remote-connection-string=pipe:command=/path/to/pdns-etcd3[,pdns-version=3|4][,<config>][,prefix=anything][,reversed-names=<boolean>][,timeout=2000]
 ```
 
 `pdns-version` is `3` by default, but may be set to `4` to enable PowerDNS v4 compatibility.
@@ -81,6 +81,11 @@ has started. Same goes for `discovery-srv`; it is undecided yet if this config i
 If `<config>` is not given, it defaults to `endpoints=[::1]:2379|127.0.0.1:2379`
 
 `prefix` is optional and is empty by default.
+
+`reversed-names` controls, whether the domain names in the data are in normal or in reversed form
+(like in PTR records). The value is a boolean and accepts the following strings:
+`y`, `n`, `yes`, `no`, `true`, `false`, `on`, `off`, `1` and `0` (case-insensitive).
+The default is `false`.
 
 `timeout` is optional and defaults to 2 seconds. The value must be a positive integer,
 given in milliseconds.

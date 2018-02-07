@@ -128,12 +128,12 @@ The structure version described here is `0.1`.
 Each resource record has at least one corresponding entry in the storage.
 Entries are as follows:
 
-* Key: `<prefix><domain>/<QTYPE>/<id>` (the slashes are literal!)
-    * `<domain>` is a domain name, e.g. `example.net.` or `www.example.net.`<br>
-    It could also be reversed (setting `reversed-names`), which then looks like `net.example.` or `net.example.www.`.
-    Consider also the options `no-trailing-dot` and `no-trailing-dot-on-root`.
+* Key: `<prefix><domain>/<QTYPE>/<id>` (the slashes are literal)
+    * `<domain>` is a domain name, with or without a trailing dot, e.g. `example.net` or `www.example.net.`<br>
+    It could also be reversed (see configuration option `reversed-names`), which then looks like `net.example` or `net.example.www.`.
+    The root domain `.` is an exception: the dot must not be omitted, regardless of the option value.
     * `<QTYPE>` is the type of the resource resource, e.g. `A`, `MX`, …
-    * `<id>` is user-defined, it has no meaning in the program, it may even be empty
+    * `<id>` is user-defined, it has no meaning in the program, it may even be empty.
 * Value: `<JSON object>` or `<plain string>`
 
 For multiple values of the same record use multiple `<id>`s. All records
@@ -300,8 +300,6 @@ This way the operator does not have to increase it manually each time he/she cha
 * `prefix` is `DNS/`<br>
 (note the trailing slash, it is part of the prefix, *not* inserted automatically)
 * `reversed-names` is true.<br>
-* `no-trailing-dot` is false.<br>
-* `no-trailing-dot-on-root` is false.
 
 Global defaults:
 ```
