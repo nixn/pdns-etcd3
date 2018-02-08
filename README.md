@@ -48,7 +48,10 @@ There is no stable release yet, even no beta. Any testing is appreciated.
 ## Installation
 
 ```sh
-go get github.com/nixn/pdns-etcd3
+git clone https://github.com/nixn/pdns-etcd3.git
+cd pdns-etcd3
+git submodule update --init
+make
 ```
 
 Of course you need an up and running ETCD v3 cluster and a PowerDNS installation.
