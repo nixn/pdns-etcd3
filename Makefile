@@ -1,5 +1,5 @@
 OUT := pdns-etcd3
-VERSION ?= $(shell git describe --always --dirty)
+GIT_VERSION := $(shell git describe --always --dirty)
 
 RM ?= rm -f
 GOPATH := $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/lib
@@ -8,7 +8,7 @@ GOPATH := $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/lib
 
 $(OUT): $(wildcard src/*.go)
 	@$(MAKE) --no-print-directory fmt
-	CGO_ENABLED=0 go build -o $(OUT) -a -ldflags="-extldflags=-static -X main.version=${VERSION}" ./src
+	CGO_ENABLED=0 go build -o $(OUT) -a -ldflags="-extldflags=-static -X main.gitVersion=${GIT_VERSION}" ./src
 	@$(MAKE) --no-print-directory vet
 
 fmt:

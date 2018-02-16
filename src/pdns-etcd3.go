@@ -33,7 +33,11 @@ func (req *pdnsRequest) String() string {
 	return fmt.Sprintf("%s: %+v", req.Method, req.Parameters)
 }
 
-var version = "?"
+var (
+	dataVersion    = versionType{true, 1, 0} // update this when changing data structure
+	releaseVersion = versionType{true, 1, 0} // update this when releasing a new version
+	gitVersion     = "?"
+)
 
 var (
 	pdnsVersion   = defaultPdnsVersion
@@ -103,19 +107,47 @@ func setPdnsVersionParameter(param *int) setParameterFunc {
 	}
 }
 
+func setDurationParameterFunc(param *time.Duration, allowNegative bool, minValue time.Duration) setParameterFunc {
+	return func(value string) error {
+		dur, err := time.ParseDuration(value)
+		if err != nil {
+			return fmt.Errorf("failed to parse value as duration: %s", err)
+		}
+		if !allowNegative && dur < 0 {
+			return fmt.Errorf("negative durations not allowed")
+		}
+		testValue := dur
+		if testValue < 0 {
+			testValue = -testValue
+		}
+		if testValue < minValue {
+			return fmt.Errorf("duration value %q less than minimum of %q", testValue, minValue)
+		}
+		*param = dur
+		return nil
+	}
+}
+
 func main() {
+	// TODO handle arguments, f.e. 'show-defaults' standalone command
 	log.SetPrefix(fmt.Sprintf("pdns-etcd3[%d]: ", os.Getpid()))
 	log.SetFlags(0)
+	programVersion := fmt.Sprintf("%s/%s", &dataVersion, &releaseVersion)
+	if "v"+programVersion != gitVersion {
+		programVersion += fmt.Sprintf(" (%s)", gitVersion)
+	}
+	log.Printf("pdns-etcd3 %s, Copyright © 2016-2018 nix <https://github.com/nixn>", programVersion)
+	var err error
 	dec := json.NewDecoder(os.Stdin)
 	enc := json.NewEncoder(os.Stdout)
 	var request pdnsRequest
-	if err := dec.Decode(&request); err != nil {
+	if err = dec.Decode(&request); err != nil {
 		log.Fatalln("Failed to decode JSON:", err)
 	}
 	if request.Method != "initialize" {
 		log.Fatalln("Waited for 'initialize', got:", request.Method)
 	}
-	logMessages := []string{fmt.Sprintf("v:%s", version)}
+	logMessages := []string(nil)
 	// pdns-version
 	if _, err := readParameter("pdns-version", request.Parameters, setPdnsVersionParameter(&pdnsVersion)); err != nil {
 		fatal(enc, err)

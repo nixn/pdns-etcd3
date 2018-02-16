@@ -47,15 +47,16 @@ for automatic appending to unqualified domain names beneath it. These entries
 
 ### Version (versioned entries)
 
-Versioned entries are used for upgrading the program version with to a higher
-major version without interrupting service for rewriting the entries.
+Versioned entries are used for upgrading the program to a higher version
+without interrupting service when adjusting the entries.
 
 #### Syntax and rules
 
-A versioned entry has a version number appended to the regular key, prefixed by `@`: `DNS/www.example.com./A/1@0.1`.
+A versioned entry has a version number appended to the regular key,
+prefixed by `@`: `DNS/www.example.com./A/1@0.1`.
 
 A version number has the syntax `<major>` or `<major>.<minor>`
-(minor is optional, if zero)
+(`.<minor>` is optional, if minor is zero)
 with `<major>` and `<minor>` being non-negative integers.
 
 `<major>` begins with `1` (exception: pre-1.0 development, see below).
@@ -64,23 +65,28 @@ Every time when a backward-incompatible change to the structure is introduced,
 Otherwise a change (which should be only additions) increases only `<minor>`.
 
 During the development of first stable release (`1` or `1.0`) the `<major>` number
-is `0`, and the minor number starts with `1` and acts as the major number regarding
+is `0`, the minor number starts with `1` and acts as the major number regarding
 changes. Therefore there may be another minor number (usually called *patch*),
 so that a development data version could be `0.3.2`.
 
-Version compatibility is as follows:
-* The program's version major number must be equal to the data version major number.<br>
-Exception: Program version `1.0` (or `1.0.*`) supports data version `1.0` *and* `0.y.*`,
-the last pre-1.0-development version (`y` is undetermined yet).
-* The program's version minor number must be equal to or greater than the data version minor number. Otherwise the program refuses to work.
+The program ignores all versioned entries, which are either of a different major version
+or of a higher minor version (same major version) than the program's data version.
+All unversioned entries are read and used by all program versions.
+
+For multiple entries with an equivalent key and an equivalent version specification
+(same version or unversioned) it is not defined, which entry is taken.
+It could be any of those, but only one (no merging).
+
+For multiple entries with an equivalent key and different version specifications
+the versioned entry with the highest supported version is taken.
+If no versioned entry is supported, the unversioned entry is taken (if any).
 
 **Warning:** Versioning is not implemented yet, not even reading a versioned entry,
 so **don't use it yet**. It will be implemented in the first release (0.1).
 
-If two entries with the same key exist, one versioned with the currently supported version,
-the other not versioned (plain), the versioned one is taken, the plain one is ignored.
-
 #### Upgrading
+
+##### Major version change
 
 Upgrading to a higher major version without interrupting service works as follows
 (in this example from *old* version `1.1` to *new* version `2`):
@@ -94,34 +100,39 @@ Upgrading to a higher major version without interrupting service works as follow
     2. rewrite the plain entry with the *new* content<br>
     `DNS/example.com./SOA` → `<new content>`<br>
     (the plain entry is ignored yet because all servers currently prefer the versioned entry)
-4. For each entry-to-be-added (in example `DNS/example.com./NEW`):
+4. For each entry-to-be-added (in example `DNS/example.com./NEW/`):
     1. add a new versioned entry with that key, the *new* content and the *new* version:<br>
-    `DNS/example.com./NEW@2` → `<new content>`<br>
+    `DNS/example.com./NEW/@2` → `<new content>`<br>
     (this entry is ignored yet, because the version is unsupported by the current servers)
-5. For each entry-to-be-removed (in example `DNS/example.com./OLD`):
+5. For each entry-to-be-removed (in example `DNS/example.com./OLD/`):
     1. add a new versioned entry of same key with the *old* content and the *old* version:<br>
-    `DNS/example.com./OLD@1.1` → `<old content>`<br>
+    `DNS/example.com./OLD/@1.1` → `<old content>`<br>
     (this entry is instantly preferred by the current servers, so be sure to get the content right)
     2. delete the plain entry of same key:<br>
-    `DNS/example.com./OLD` → *deleted*
+    `DNS/example.com./OLD/` → *deleted*
 6. Upgrade all servers (stop, update, restart), one by one, to the *new* version.<br>
 *Tip*: Remove one server from public service, upgrade it and test the new entries.
 If it works well, restore public service and continue upgrading the other servers.
 7. Remove each versioned entry with *old* (now really old) version:<br>
-`DNS/example.com./SOA@1.1`, `DNS/example.com./OLD@1.1`, … (`*@1.1`)<br>
+`DNS/example.com./SOA@1.1`, `DNS/example.com./OLD/@1.1`, … (`*@1.1`)<br>
 (unfortunately ETCD does not support suffix requests)
-8. For each entry-to-be-added (in example `DNS/example.com./NEW`):
+8. For each entry-to-be-added (in example `DNS/example.com./NEW/`):
     1. Add a new plain entry of same key with *new* content:<br>
-    `DNS/example.com./NEW` → `<new content>`
+    `DNS/example.com./NEW/` → `<new content>`
     2. Remove the versioned entry of same key with *new* version:
-    `DNS/example.com./NEW@2` → *deleted*
+    `DNS/example.com./NEW/@2` → *deleted*
 9. Make a break, you're done!
 
-(There should be a migration script…)
+##### Minor version change
+
+Upgrading to a higher minor version (same major version) is a subset of the steps from above:
+1, 2 (only added entries), 4, 6, 8 and 9.
+
+<small>(There should be a migration script or two…)</small>
 
 #### Current version
 
-The structure version described here is `0.1`.
+The current data version is `0.1` and is described in this document.
 
 ### Records
 

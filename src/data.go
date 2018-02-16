@@ -38,3 +38,16 @@ func (dn *dataNode) getZoneNode() *dataNode {
 	}
 	return nil
 }
+
+type versionType struct {
+	isDevelopment bool
+	major, minor  uint64
+}
+
+func (version *versionType) String() string {
+	var prefix string
+	if version.isDevelopment {
+		prefix = "0."
+	}
+	return fmt.Sprintf("%s%d.%d", prefix, version.major, version.minor)
+}
