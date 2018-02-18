@@ -19,9 +19,9 @@ There is no stable release yet, even no beta. Any testing is appreciated.
 
 * Automatic serial for `SOA` records (based on the cluster revision).
 * Replication is handled by the ETCD cluster, no additional configuration is needed for using multiple authoritative PowerDNS servers.
-* Multiple syntax possibilities for JSON-supported records
+* [Multiple syntax possibilities for JSON-supported records](doc/ETCD-structure.md#syntax)
 * Support for automatically appending zone name to unqualified domain names
-* Multi-level defaults, overridable
+* [Multi-level defaults, overridable](doc/ETCD-structure.md#defaults)
 
 #### Planned
 
@@ -34,11 +34,12 @@ There is no stable release yet, even no beta. Any testing is appreciated.
 * Override of domain name appended to unqualified names (instead of zone name)
   * useful for `PTR` records in reverse zones
 * Upgrade data structure (if needed for new program version) without interrupting service
-  * already described the upgrade procedure, need to implement versioned entries
+  * already [described the upgrade procedure](doc/ETCD-structure.md#upgrading), need to implement versioned entries
 * Support more encodings for data (beside JSON)
   * [EDN][] by [go-edn][]
   * possibly [YAML][] by [go-yaml][]
   * …
+* DNSSEC support (PowerDNS DNSSEC-specific calls)
 
 [edn]: https://github.com/edn-format/edn
 [go-edn]: https://github.com/go-edn/edn
@@ -86,7 +87,7 @@ If `<config>` is not given, it defaults to `endpoints=[::1]:2379|127.0.0.1:2379`
 `prefix` is optional and is empty by default.
 
 `reversed-names` controls, whether the domain names in the data are in normal or in reversed form
-(like in PTR records). The value is a boolean and accepts the following strings:
+(like for PTR queries). The value is a boolean and accepts the following strings:
 `y`, `n`, `yes`, `no`, `true`, `false`, `on`, `off`, `1` and `0` (case-insensitive).
 The default is `false`.
 
@@ -95,24 +96,39 @@ given in milliseconds.
 
 ### ETCD structure
 
-See [ETCD structure][etcd-structure]. The structure lies beneath the `prefix`
+See [ETCD structure](doc/ETCD-structure.md). The structure lies beneath the `prefix`
 configured in PowerDNS (see above).
-
-[etcd-structure]: doc/ETCD-structure.md
 
 ## Compatibility
 
-pdns-etcd3 is tested on PowerDNS 3.x and uses an ETCD v3 cluster. It
-may work on PowerDNS 4.x, but is not tested, though it is planned to
-support both eventually, or even only 4.x later. Issues regarding
-PowerDNS 4.x are not handled yet.
+pdns-etcd3 is tested on PowerDNS versions 3 and 4, and uses an ETCD v3 cluster.
+It's currently only one version of each (pdns 3.4.1 and 4.0.3, ETCD API 3.0),
+until I find a way to test it on different versions easily.
+Therefore each release shall state which versions were used for testing,
+so one can be sure to have a working combination for deploying,
+when using those (tested) versions.
+Most likely it will work on other "usually compatible" versions,
+but that cannot be guaranteed.
 
-## Debugging
+## Testing / Debugging
 
-For now, there is much logging, as the program is in alpha state.
+For now, there is much simple logging, as the program is in heavy development / alpha state.
+The plan is to build a logging structure, which can be used to selectively
+trace and debug different components.
 
 ## License
 
 Copyright © 2016-2018 nix <https://github.com/nixn>
 
 Distributed under the Apache 2.0 license, available in the file [LICENSE](LICENSE).
+
+## Donations
+
+If you like pdns-etcd3, please consider donating to support the further development. Thank you!
+
+Bitcoin (BTC): `1pdns4U2r4JqkzsJRpTEYNirTFLtuWee9`<br>
+Monero (XMR): `4CjXUfpdcba5G5z1LXAx3ngoDtAHoFGdpJWvCayULXeaEhA4QvJEHdR7Xi3ptsbhSfGcSpdBHbK4CgyC6Qcwy5Rt2GGDfQCM7PcTgfEQ5Q`<br>
+Ethereum (ETH): `0x003D87efb7069e875a8a1226c9DadaC03dE1f779`
+
+These addresses are dedicated to pdns-etcd3 development.
+For my general development, other projects and personal donation addresses see my profile or my web page.
