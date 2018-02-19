@@ -14,12 +14,15 @@ limitations under the License. */
 
 package main
 
-import "time"
+import (
+	"time"
+)
 
 const (
 	defaultPdnsVersion   = 3
 	defaultPrefix        = ""
 	defaultReversedNames = false
+	defaultMinCacheTime  = 5 * time.Second
 )
 
 const (
@@ -29,6 +32,7 @@ const (
 )
 
 const (
-	defaultsKey  = "-defaults-"
-	keySeparator = "/"
+	defaultsKey      = "-defaults-"
+	keySeparator     = "/"
+	versionSeparator = "@"
 )

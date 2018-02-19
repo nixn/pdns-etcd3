@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var rr2func map[string]rrFunc = map[string]rrFunc{
+var rr2func = map[string]rrFunc{
 	"A":     a,
 	"AAAA":  aaaa,
 	"CNAME": domainName("CNAME", "target"),
@@ -48,8 +48,8 @@ func fqdn(domain, qname string) string {
 	return domain
 }
 
-func getUint16(name string, values objectType, qtype string, data *dataNode) (uint16, error) {
-	if v, err := findValue(name, values, qtype, data); err == nil {
+func getUint16(name string, values objectType, qtype, id string, data *dataNode) (uint16, error) {
+	if v, err := findValue(name, values, qtype, id, data); err == nil {
 		if v, ok := v.(float64); ok {
 			if v < 0 || v > 65535 {
 				return 0, fmt.Errorf("'%s' out of range (0-65535)", name)
@@ -62,8 +62,8 @@ func getUint16(name string, values objectType, qtype string, data *dataNode) (ui
 	}
 }
 
-func getString(name string, values objectType, qtype string, data *dataNode) (string, error) {
-	if v, err := findValue(name, values, qtype, data); err == nil {
+func getString(name string, values objectType, qtype, id string, data *dataNode) (string, error) {
+	if v, err := findValue(name, values, qtype, id, data); err == nil {
 		if v, ok := v.(string); ok {
 			return v, nil
 		}
@@ -73,47 +73,47 @@ func getString(name string, values objectType, qtype string, data *dataNode) (st
 	}
 }
 
-func getDuration(name string, values objectType, qtype string, data *dataNode) (time.Duration, error) {
-	if v, err := findValue(name, values, qtype, data); err == nil {
-		var dur time.Duration
-		switch v.(type) {
-		case float64:
-			dur = time.Duration(int64(v.(float64))) * time.Second
-		case string:
-			if v, err := time.ParseDuration(v.(string)); err == nil {
-				dur = v
-			} else {
-				return 0, fmt.Errorf("'%s' parse error: %s", name, err)
-			}
-		default:
-			return 0, fmt.Errorf("'%s' is neither a number nor a string", name)
-		}
-		if dur < time.Second {
-			return dur, fmt.Errorf("'%s' must be positive", name)
-		}
-		return dur, nil
-	} else {
+func getDuration(name string, values objectType, qtype, id string, data *dataNode) (time.Duration, error) {
+	v, err := findValue(name, values, qtype, id, data)
+	if err != nil {
 		return 0, err
 	}
+	var dur time.Duration
+	switch v.(type) {
+	case float64:
+		dur = time.Duration(int64(v.(float64))) * time.Second
+	case string:
+		if v, err := time.ParseDuration(v.(string)); err == nil {
+			dur = v
+		} else {
+			return 0, fmt.Errorf("%q parse error: %s", name, err)
+		}
+	default:
+		return 0, fmt.Errorf("%q is neither a number nor a string", name)
+	}
+	if dur < time.Second {
+		return 0, fmt.Errorf("%q must be positive", name)
+	}
+	return dur, nil
 }
 
-func getHostname(name string, values objectType, qtype string, data *dataNode) (string, error) {
-	hostname, err := getString(name, values, qtype, data)
+func getHostname(name string, values objectType, qtype, id string, data *dataNode) (string, error) {
+	hostname, err := getString(name, values, qtype, id, data)
 	if err != nil {
 		return "", err
 	}
 	hostname = strings.TrimSpace(hostname)
-	hostname = fqdn(hostname, data.getZoneNode().getQname())
+	hostname = fqdn(hostname, data.findZone().getQname())
 	return hostname, nil
 }
 
 func domainName(qtype, fieldName string) rrFunc {
-	return func(values objectType, data *dataNode, revision int64) (string, objectType, error) {
-		name, err := getHostname(fieldName, values, qtype, data)
+	return func(values objectType, id string, data *dataNode, revision int64) (string, objectType, error) {
+		name, err := getHostname(fieldName, values, qtype, id, data)
 		if err != nil {
 			return "", nil, err
 		}
-		ttl, err := getDuration("ttl", values, qtype, data)
+		ttl, err := getDuration("ttl", values, qtype, id, data)
 		if err != nil {
 			return "", nil, err
 		}
@@ -124,17 +124,17 @@ func domainName(qtype, fieldName string) rrFunc {
 	}
 }
 
-func soa(values objectType, data *dataNode, revision int64) (string, objectType, error) {
+func soa(values objectType, id string, data *dataNode, revision int64) (string, objectType, error) {
 	// primary
-	primary, err := getString("primary", values, "SOA", data)
+	primary, err := getString("primary", values, "SOA", id, data)
 	if err != nil {
 		return "", nil, err
 	}
-	zone := data.getZoneNode().getQname()
+	zone := data.findZone().getQname()
 	primary = strings.TrimSpace(primary)
 	primary = fqdn(primary, zone)
 	// mail
-	mail, err := getString("mail", values, "SOA", data)
+	mail, err := getString("mail", values, "SOA", id, data)
 	if err != nil {
 		return "", nil, err
 	}
@@ -155,27 +155,27 @@ func soa(values objectType, data *dataNode, revision int64) (string, objectType,
 	// serial
 	serial := revision
 	// refresh
-	refresh, err := getDuration("refresh", values, "SOA", data)
+	refresh, err := getDuration("refresh", values, "SOA", id, data)
 	if err != nil {
 		return "", nil, err
 	}
 	// retry
-	retry, err := getDuration("retry", values, "SOA", data)
+	retry, err := getDuration("retry", values, "SOA", id, data)
 	if err != nil {
 		return "", nil, err
 	}
 	// expire
-	expire, err := getDuration("expire", values, "SOA", data)
+	expire, err := getDuration("expire", values, "SOA", id, data)
 	if err != nil {
 		return "", nil, err
 	}
 	// negative ttl
-	negativeTTL, err := getDuration("neg-ttl", values, "SOA", data)
+	negativeTTL, err := getDuration("neg-ttl", values, "SOA", id, data)
 	if err != nil {
 		return "", nil, err
 	}
 	// ttl
-	ttl, err := getDuration("ttl", values, "SOA", data)
+	ttl, err := getDuration("ttl", values, "SOA", id, data)
 	if err != nil {
 		return "", nil, err
 	}
@@ -187,12 +187,12 @@ func soa(values objectType, data *dataNode, revision int64) (string, objectType,
 	return content, meta, nil
 }
 
-func a(values objectType, data *dataNode, revision int64) (string, objectType, error) {
-	var ip net.IP
-	v, err := findValue("ip", values, "A", data)
+func a(values objectType, id string, data *dataNode, revision int64) (string, objectType, error) {
+	v, err := findValue("ip", values, "A", id, data)
 	if err != nil {
 		return "", nil, err
 	}
+	var ip net.IP
 	switch v.(type) {
 	case string:
 		v := v.(string)
@@ -246,7 +246,7 @@ func a(values objectType, data *dataNode, revision int64) (string, objectType, e
 	default:
 		return "", nil, fmt.Errorf("invalid IPv4: not string or array")
 	}
-	ttl, err := getDuration("ttl", values, "A", data)
+	ttl, err := getDuration("ttl", values, "A", id, data)
 	if err != nil {
 		return "", nil, err
 	}
@@ -257,9 +257,9 @@ func a(values objectType, data *dataNode, revision int64) (string, objectType, e
 	return content, meta, nil
 }
 
-func aaaa(values objectType, data *dataNode, revision int64) (string, objectType, error) {
+func aaaa(values objectType, id string, data *dataNode, revision int64) (string, objectType, error) {
 	var ip net.IP
-	v, err := findValue("ip", values, "AAAA", data)
+	v, err := findValue("ip", values, "AAAA", id, data)
 	if err != nil {
 		return "", nil, err
 	}
@@ -333,7 +333,7 @@ func aaaa(values objectType, data *dataNode, revision int64) (string, objectType
 	default:
 		return "", nil, fmt.Errorf("invalid IPv6: not string or array")
 	}
-	ttl, err := getDuration("ttl", values, "AAAA", data)
+	ttl, err := getDuration("ttl", values, "AAAA", id, data)
 	if err != nil {
 		return "", nil, err
 	}
@@ -344,24 +344,24 @@ func aaaa(values objectType, data *dataNode, revision int64) (string, objectType
 	return content, meta, nil
 }
 
-func srv(values objectType, data *dataNode, revision int64) (string, objectType, error) {
-	priority, err := getUint16("priority", values, "SRV", data)
+func srv(values objectType, id string, data *dataNode, revision int64) (string, objectType, error) {
+	priority, err := getUint16("priority", values, "SRV", id, data)
 	if err != nil {
 		return "", nil, err
 	}
-	weight, err := getUint16("weight", values, "SRV", data)
+	weight, err := getUint16("weight", values, "SRV", id, data)
 	if err != nil {
 		return "", nil, err
 	}
-	port, err := getUint16("port", values, "SRV", data)
+	port, err := getUint16("port", values, "SRV", id, data)
 	if err != nil {
 		return "", nil, err
 	}
-	target, err := getHostname("target", values, "SRV", data)
+	target, err := getHostname("target", values, "SRV", id, data)
 	if err != nil {
 		return "", nil, err
 	}
-	ttl, err := getDuration("ttl", values, "SRV", data)
+	ttl, err := getDuration("ttl", values, "SRV", id, data)
 	if err != nil {
 		return "", nil, err
 	}
@@ -383,16 +383,16 @@ func srv(values objectType, data *dataNode, revision int64) (string, objectType,
 	return content, meta, nil
 }
 
-func mx(values objectType, data *dataNode, revision int64) (string, objectType, error) {
-	priority, err := getUint16("priority", values, "MX", data)
+func mx(values objectType, id string, data *dataNode, revision int64) (string, objectType, error) {
+	priority, err := getUint16("priority", values, "MX", id, data)
 	if err != nil {
 		return "", nil, err
 	}
-	target, err := getHostname("target", values, "MX", data)
+	target, err := getHostname("target", values, "MX", id, data)
 	if err != nil {
 		return "", nil, err
 	}
-	ttl, err := getDuration("ttl", values, "MX", data)
+	ttl, err := getDuration("ttl", values, "MX", id, data)
 	if err != nil {
 		return "", nil, err
 	}
@@ -414,12 +414,12 @@ func mx(values objectType, data *dataNode, revision int64) (string, objectType, 
 	return content, meta, nil
 }
 
-func txt(values objectType, data *dataNode, revision int64) (string, objectType, error) {
-	text, err := getString("text", values, "TXT", data)
+func txt(values objectType, id string, data *dataNode, revision int64) (string, objectType, error) {
+	text, err := getString("text", values, "TXT", id, data)
 	if err != nil {
 		return "", nil, err
 	}
-	ttl, err := getDuration("ttl", values, "MX", data)
+	ttl, err := getDuration("ttl", values, "MX", id, data)
 	if err != nil {
 		return "", nil, err
 	}

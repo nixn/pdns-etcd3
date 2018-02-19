@@ -30,8 +30,8 @@ the DNS class (`IN`) or the record type (`A`, `MX`, …), these values are
 in the key already. They may include a record-specific TTL value, see below rule for details.
 
 * The record TTL is a regular field in case of a JSON object entry (key `"ttl"`), but there
-is (currently) no way to define a record-specific TTL for a plain string entry.
-One may use a default value as a (nearly equivalent) workaround for this limitation.
+is no way to directly define a record-specific TTL for a plain string entry.
+One may use a default value as a workaround for this limitation¹.
 
 * For each record field a default value is searched for and used, if an entry value
 does not specify the field value itself. If no value is found for the field,
@@ -40,6 +40,12 @@ an error is raised and the request/response fails.
 * "Zones" are defined by domains having a `SOA` entry. The zone domain is used
 for automatic appending to unqualified domain names beneath it. These entries
 (beneath a zone) are served with the 'authoritative answer' bit (AA) set.
+
+<small>
+¹ For example to have a specific TTL on a record with the unsupported QTYPE <code>ABC</code> one can use the entry
+<code>&lt;prefix&gt;&lt;domain&gt;/-defaults-/ABC/record-id</code> → <code>{"ttl":"&lt;specific-ttl-value&gt;"}</code>
+to specify the TTL for the entry <code>&lt;prefix&gt;&lt;domain&gt;/ABC/record-id</code> → <code>&lt;plain content for ABC&gt;</code>.
+</small>
 
 ## Structure (Entries)
 
@@ -80,9 +86,6 @@ It could be any of those, but only one (no merging).
 For multiple entries with an equivalent key and different version specifications
 the versioned entry with the highest supported version is taken.
 If no versioned entry is supported, the unversioned entry is taken (if any).
-
-**Warning:** Versioning is not implemented yet, not even reading a versioned entry,
-so **don't use it yet**. It will be implemented in the first release (0.1).
 
 #### Upgrading
 
@@ -142,7 +145,8 @@ Entries are as follows:
 * Key: `<prefix><domain>/<QTYPE>/<id>` (the slashes are literal)
     * `<domain>` is a domain name, with or without a trailing dot, e.g. `example.net` or `www.example.net.`<br>
     It could also be reversed (see configuration option `reversed-names`), which then looks like `net.example` or `net.example.www.`.
-    The root domain `.` is an exception: the dot must not be omitted, regardless of the option value.
+    The root domain `.` is an exception: the dot must not be omitted, regardless of the option value.<br>
+    **WARNING: The current version requires `reversed-names` to be true due to implementation details.**
     * `<QTYPE>` is the type of the resource resource, e.g. `A`, `MX`, …
     * `<id>` is user-defined, it has no meaning in the program, it may even be empty.
 * Value: `<JSON object>` or `<plain string>`
@@ -159,34 +163,43 @@ It does not have multiple values.
 
 ### Defaults
 
-There are four top-levels of default values ("defaults"):
+There are four levels of default values ("defaults") for each domain level:
 1. global<br>
-Key: `<prefix>-defaults-/`
-2. global + QTYPE<br>
-Key: `<prefix>-defaults-/<QTYPE>`
-3. domain<br>
-Key: `<prefix><domain>/-defaults-/`
-4. domain + QTYPE<br>
-Key: `<prefix><domain>/-defaults-/<QTYPE>`
+Key: `<prefix><domain>/-defaults-` or `<prefix><domain>/-defaults-/` (not both!)
+2. QTYPE<br>
+Key: `<prefix><domain>/-defaults-/<QTYPE>` or `<prefix><domain>/-defaults-/<QTYPE>/` (not both!)
+3. id<br>
+Key: `<prefix><domain>/-defaults-//<id>` (the qtype is empty, note the double slash)
+4. QTYPE + id<br>
+Key: `<prefix><domain>/-defaults-/<QTYPE>/<id>`
 
 More specific defaults override the more generic defaults, field-wise. For the
-domain defaults the sub-domain defaults override the parent domain defaults.
-Also the QTYPE-defaults override the non-qtype-defaults.
+domain defaults the sub-domain defaults override the parent domain defaults (the levels).
+Also the QTYPE defaults override the non-qtype defaults. At last, the id-only defaults
+override the QTYPE-only defaults.
 
-For example, for the query `www.example.com` with qtype `A`, these are all
-considered defaults entries, from most specific to most generic (prefix `DNS/`):
-* `DNS/www.example.com./-defaults-/A`
-* `DNS/www.example.com./-defaults-/`
-* `DNS/example.com./-defaults-/A`
-* `DNS/example.com./-defaults-/`
-* `DNS/com./-defaults-/A`
-* `DNS/com./-defaults-/`
-* `DNS/./-defaults-/A`
-* `DNS/./-defaults-/`
-* `DNS/-defaults-/A`
-* `DNS/-defaults-/`
+For example, for the query `www.example.com` with qtype `A`, the following lists all
+defaults entries, with the higher overriding the lower. For all of them
+(but the root domain) there could be also an equivalent entry without a trailing dot on the
+domain name (again: only one of the equivalent entries is taken!). (`<prefix>` is `DNS/`):
+* `DNS/www.example.com./-defaults-/A/<id>`
+* `DNS/www.example.com./-defaults-//<id>`
+* `DNS/www.example.com./-defaults-/A` or `DNS/www.example.com./-defaults-/A/`
+* `DNS/www.example.com./-defaults-` or `DNS/www.example.com./defaults-/`
+* `DNS/example.com./-defaults-/A/<id>`
+* `DNS/example.com./-defaults-//<id>`
+* `DNS/example.com./-defaults-/A` or `DNS/example.com./-defaults-/A/`
+* `DNS/example.com./-defaults-` or `DNS/example.com./-defaults-/`
+* `DNS/com./-defaults-/A/<id>`
+* `DNS/com./-defaults-//<id>`
+* `DNS/com./-defaults-/A` or `DNS/com./-defaults-/A/`
+* `DNS/com./-defaults-` or `DNS/com./-defaults-/`
+* `DNS/./-defaults-/A/<id>`
+* `DNS/./-defaults-//<id>`
+* `DNS/./-defaults-/A` or `DNS/./-defaults-/A/`
+* `DNS/./-defaults-` or `DNS/./-defaults-/`
 
-Of course, the values in the record(s) itself (`DNS/www.example.com./A/<id>`) override all defaults.
+Of course, the values in the record itself (`DNS/www.example.com./A/<id>`) override all defaults.
 
 Defaults-entries must be JSON objects, with any number of fields (including zero).
 Defaults-entries may be non-existent, which is equivalent to an empty object.
@@ -314,9 +327,9 @@ This way the operator does not have to increase it manually each time he/she cha
 
 Global defaults:
 ```
-DNS/-defaults-/ → '{"ttl": "1h"}'
-DNS/-defaults-/SRV → '{"priority": 0, "weight": 0}'
-DNS/-defaults-/SOA → '{"refresh": "1h", "retry": "30m", "expire": 604800, "neg-ttl": "10m"}'
+DNS/./-defaults-/ → '{"ttl": "1h"}'
+DNS/./-defaults-/SRV → '{"priority": 0, "weight": 0}'
+DNS/./-defaults-/SOA → '{"refresh": "1h", "retry": "30m", "expire": 604800, "neg-ttl": "10m"}'
 ```
 
 Forward zone for `example.net`:

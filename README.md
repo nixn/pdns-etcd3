@@ -22,6 +22,7 @@ There is no stable release yet, even no beta. Any testing is appreciated.
 * [Multiple syntax possibilities for JSON-supported records](doc/ETCD-structure.md#syntax)
 * Support for automatically appending zone name to unqualified domain names
 * [Multi-level defaults, overridable](doc/ETCD-structure.md#defaults)
+* [Upgrade data structure](doc/ETCD-structure.md#upgrading) (if needed for new program version) without interrupting service
 
 #### Planned
 
@@ -33,8 +34,6 @@ There is no stable release yet, even no beta. Any testing is appreciated.
   * overrideable per entry
 * Override of domain name appended to unqualified names (instead of zone name)
   * useful for `PTR` records in reverse zones
-* Upgrade data structure (if needed for new program version) without interrupting service
-  * already [described the upgrade procedure](doc/ETCD-structure.md#upgrading), need to implement versioned entries
 * Support more encodings for data (beside JSON)
   * [EDN][] by [go-edn][]
   * possibly [YAML][] by [go-yaml][]
@@ -89,7 +88,8 @@ If `<config>` is not given, it defaults to `endpoints=[::1]:2379|127.0.0.1:2379`
 `reversed-names` controls, whether the domain names in the data are in normal or in reversed form
 (like for PTR queries). The value is a boolean and accepts the following strings:
 `y`, `n`, `yes`, `no`, `true`, `false`, `on`, `off`, `1` and `0` (case-insensitive).
-The default is `false`.
+The default is `false`.<br>
+**WARNING: Currently `reversed-names` must be set to true due to the current implementation!**
 
 `timeout` is optional and defaults to 2 seconds. The value must be a positive integer,
 given in milliseconds.

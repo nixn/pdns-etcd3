@@ -43,6 +43,7 @@ var (
 	pdnsVersion   = defaultPdnsVersion
 	prefix        = defaultPrefix
 	reversedNames = defaultReversedNames
+	minCacheTime  = defaultMinCacheTime
 )
 
 func parseBoolean(s string) (bool, error) {
@@ -163,6 +164,11 @@ func main() {
 		fatal(enc, err)
 	}
 	logMessages = append(logMessages, fmt.Sprintf("reversed-names: %v", reversedNames))
+	// min-cache-time
+	if _, err := readParameter("min-cache-time", request.Parameters, setDurationParameterFunc(&minCacheTime, false, 0)); err != nil {
+		fatal(enc, err)
+	}
+	logMessages = append(logMessages, fmt.Sprintf("min-cache-time: %s", minCacheTime))
 	// client
 	if logMsgs, err := setupClient(request.Parameters); err != nil {
 		fatal(enc, err.Error())
@@ -170,6 +176,7 @@ func main() {
 		logMessages = append(logMessages, logMsgs...)
 	}
 	defer closeClient()
+	dataCache = newDataCache(0, time.Time{})
 	respond(enc, true, logMessages...)
 	log.Println("initialized.", strings.Join(logMessages, ". "))
 	// main loop
@@ -193,14 +200,12 @@ func main() {
 			result, err = false, fmt.Errorf("unknown/unimplemented request: %s", request)
 		}
 		if err == nil {
-			log.Println("result:", result)
 			respond(enc, result)
 		} else {
-			log.Println("error:", err)
 			respond(enc, result, err.Error())
 		}
 		dur := time.Since(since)
-		log.Println("request dur:", dur)
+		log.Printf("result: %v [err %v] [dur %s]", result, err, dur)
 	}
 }
 

@@ -109,7 +109,41 @@ func (kmp *keyMultiPair) String() string {
 	return s
 }
 
-func get(key string, multi bool, revision *int64) (*clientv3.GetResponse, error) {
+type keyValuePair struct {
+	Key   string
+	Value []byte
+}
+
+type getResponseType struct {
+	Revision int64
+	DataChan <-chan keyValuePair
+}
+
+func getResponse(response *clientv3.GetResponse) *getResponseType {
+	ch := make(chan keyValuePair)
+	go func() {
+		for _, item := range response.Kvs {
+			ch <- keyValuePair{string(item.Key), item.Value}
+		}
+		close(ch)
+	}()
+	return &getResponseType{response.Header.Revision, ch}
+}
+
+func txnResponse(response *clientv3.TxnResponse) *getResponseType {
+	ch := make(chan keyValuePair)
+	go func() {
+		for _, txnOp := range response.Responses {
+			for _, item := range txnOp.GetResponseRange().Kvs {
+				ch <- keyValuePair{string(item.Key), item.Value}
+			}
+		}
+		close(ch)
+	}()
+	return &getResponseType{response.Header.Revision, ch}
+}
+
+func get(key string, multi bool, revision *int64) (*getResponseType, error) {
 	opts := []clientv3.OpOption(nil)
 	if multi {
 		opts = append(opts, clientv3.WithPrefix())
@@ -123,10 +157,13 @@ func get(key string, multi bool, revision *int64) (*clientv3.GetResponse, error)
 	dur := time.Since(since)
 	cancel()
 	log.Printf("get %q (%v) dur: %s", key, multi, dur)
-	return response, err
+	if err != nil {
+		return nil, err
+	}
+	return getResponse(response), nil
 }
 
-func getall(keys []keyMultiPair, revision *int64) (*clientv3.TxnResponse, error) {
+func getall(keys []keyMultiPair, revision *int64) (*getResponseType, error) {
 	ops := []clientv3.Op(nil)
 	for _, kmp := range keys {
 		opts := []clientv3.OpOption(nil)
@@ -145,6 +182,16 @@ func getall(keys []keyMultiPair, revision *int64) (*clientv3.TxnResponse, error)
 	response, err := txn.Commit()
 	dur := time.Since(since)
 	cancel()
-	log.Printf("get %v (%d) dur: %s", keys[0], len(keys), dur)
-	return response, err
+	if err != nil {
+		return nil, fmt.Errorf("[dur %s] %s", dur, err)
+	}
+	if !response.Succeeded {
+		return nil, fmt.Errorf("[dur %s] txn not succeeded", dur)
+	}
+	counts := []int64(nil)
+	for _, response := range response.Responses {
+		counts = append(counts, response.GetResponseRange().Count)
+	}
+	log.Printf("get %v, dur: %s, counts: %v", keys, dur, counts)
+	return txnResponse(response), nil
 }
