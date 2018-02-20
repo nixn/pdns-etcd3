@@ -146,4 +146,3 @@ func newDataCache(revision int64, expiresAt time.Time) *dataCacheType {
 		expiresAt: expiresAt,
 	}
 }
-

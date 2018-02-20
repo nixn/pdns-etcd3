@@ -52,9 +52,6 @@ func (name *nameType) normal() string {
 
 // get the domain in storage form
 func (name *nameType) key(level int, withTrailingDot bool) string {
-	if level == 0 {
-		return "."
-	}
 	end := level
 	if !reversedNames {
 		end = name.len()

@@ -36,59 +36,59 @@ func (query *queryType) String() string {
 func (query *queryType) isANY() bool { return query.qtype == "ANY" }
 func (query *queryType) isSOA() bool { return query.qtype == "SOA" }
 
-func (query *queryType) recordKey(withTrailingDot bool) string {
-	return recordKeys(&query.name, query.name.len(), withTrailingDot, query.qtype, true)[0].key
-}
-
 // TODO CNAME and DNAME also single value records?
 
-func recordKeys(name *nameType, level int, withTrailingDot bool, qtype string, multi bool) []keyMultiPair {
+func recordKeys(name *nameType, level int, withTrailingDot bool, entryType entryType, qtype string, multi bool) []keyMultiPair {
+	// assuming qtype is never empty. use "ANY" for omitting
 	key := prefix + name.key(level, withTrailingDot) + keySeparator
+	if entryType != normalEntry {
+		key += entryType2nonQtype[entryType] + keySeparator
+	}
 	if qtype != "ANY" {
-		key += qtype
-		if qtype != "SOA" {
-			key += keySeparator
+		key += qtype + keySeparator
+	}
+	keyNoSep := strings.TrimSuffix(key, keySeparator)
+	keys := []keyMultiPair{{keyNoSep + versionSeparator, true}, {keyNoSep, false}}
+	if multi {
+		keys = append(keys, keyMultiPair{key, true})
+	} else {
+		keys = append(keys, keyMultiPair{key + versionSeparator, true})
+		if qtype == "ANY" { // TODO this is logically not possible (qtype == ANY && multi == false)
+			keys = append(keys, keyMultiPair{key + keySeparator + versionSeparator, true})
+		}
+		keys = append(keys, keyMultiPair{key, false})
+		if qtype == "ANY" { // TODO this is logically not possible (qtype == ANY && multi == false)
+			keys = append(keys, keyMultiPair{key + keySeparator, false})
 		}
 	}
-	keys := []keyMultiPair(nil)
-	// get the versioned first, they should be parsed first for structure upgrade procedure
-	if !multi {
-		keys = append(keys, keyMultiPair{key + versionSeparator, true})
-	}
-	keys = append(keys, keyMultiPair{key, multi})
 	return keys
 }
 
-func getSingleLevelKeys(name *nameType, level int, qtypes ...keyMultiPair) []keyMultiPair {
+func getSingleLevelKeys(name *nameType, level int, entryType entryType, qtypes ...keyMultiPair) []keyMultiPair {
 	keys := []keyMultiPair(nil)
 	for _, withTrailingDot := range []bool{true, false} {
-		if level == 0 && !withTrailingDot {
-			// skip the second root domain entry, b/c it's the same as first (the dot is always present)
-			continue
-		}
 		for _, qtype := range qtypes {
-			keys = append(keys, recordKeys(name, level, withTrailingDot, qtype.key, qtype.multi)...)
+			keys = append(keys, recordKeys(name, level, withTrailingDot, entryType, qtype.key, qtype.multi)...)
 		}
 	}
 	return keys
 }
 
-func getMultiLevelKeys(name *nameType, qtypes ...keyMultiPair) []keyMultiPair {
+func getMultiLevelKeys(name *nameType, entryType entryType, qtypes ...keyMultiPair) []keyMultiPair {
 	keys := []keyMultiPair(nil)
 	for level := name.len(); level >= 0; level-- {
-		keys = append(keys, getSingleLevelKeys(name, level, qtypes...)...)
+		keys = append(keys, getSingleLevelKeys(name, level, entryType, qtypes...)...)
 	}
 	return keys
 }
 
-func getDomainKeys(name *nameType) []keyMultiPair {
-	// TODO this works only for reversed-names == true!
+func getDomainKeys(name *nameType) []keyMultiPair { // TODO this works only for reversed-names == true!
 	// "com.example/"
-	keys := recordKeys(name, name.len(), false, "ANY", true)
-	// "com.example." (note the missing trailing slash, omitted to get the subdomains! that's why reversed-names must be true)
-	keys = append(keys, keyMultiPair{strings.TrimSuffix(recordKeys(name, name.len(), true, "ANY", true)[0].key, keySeparator), true})
-	// all parent defaults // TODO start at parent domain // TODO get also {<prefix><domain>/-defaults-, false} (no trailing slash)
-	keys = append(keys, getMultiLevelKeys(name, keyMultiPair{defaultsKey, true})...)
+	keys := recordKeys(name, name.len(), false, normalEntry, "ANY", true)
+	// "com.example." (note the missing trailing slash, omitted to get the subdomains! that's why reversed-names must be true for now)
+	keys = append(keys, keyMultiPair{recordKeys(name, name.len(), true, normalEntry, "ANY", true)[1].key, true})
+	// all parent defaults // TODO start at parent domain
+	keys = append(keys, getMultiLevelKeys(name, defaultsEntry, keyMultiPair{"ANY", true})...)
 	return keys
 }
 
@@ -99,6 +99,15 @@ type entryType string // enum
 const (
 	normalEntry   entryType = "normal"
 	defaultsEntry entryType = "defaults"
+)
+
+var (
+	nonQtype2entryType = map[string]entryType{
+		defaultsKey: defaultsEntry,
+	}
+	entryType2nonQtype = map[entryType]string{
+		defaultsEntry: defaultsKey,
+	}
 )
 
 func splitDomainName(name string, reverse bool) []string {
@@ -125,11 +134,18 @@ func parseEntryValue(value []byte) (interface{}, error) {
 	return values, nil
 }
 
-func parseEntryKey(key string) (err error, name nameType, entryType entryType, qtype, id string, version *versionType) {
+func cutKeyPart(key string) (string, string) {
+	idx := strings.Index(key, keySeparator)
+	if idx < 0 {
+		return key, ""
+	}
+	return key[:idx], key[idx+len(keySeparator):]
+}
+
+func parseEntryKey(key string) (name nameType, entryType entryType, qtype, id string, version *versionType, err error) {
 	key = strings.TrimPrefix(key, prefix)
 	// version
-	idx := strings.Index(key, versionSeparator)
-	if idx >= 0 {
+	if idx := strings.Index(key, versionSeparator); idx >= 0 {
 		version, err = parseEntryVersion(key[idx+len(versionSeparator):])
 		if err != nil {
 			err = fmt.Errorf("failed to parse version: %s", err)
@@ -137,51 +153,24 @@ func parseEntryKey(key string) (err error, name nameType, entryType entryType, q
 		}
 		key = key[:idx]
 	}
-	sepLen := len(keySeparator)
 	// name
-	idx = strings.Index(key, keySeparator)
-	if idx < 0 {
-		err = fmt.Errorf("no separator %q", keySeparator)
-		return
-	}
-	name = splitDomainName(key[:idx], false)
-	key = key[idx+sepLen:] // strip name + separator
-	// domain defaults (without trailing keySeparator)
-	if key == defaultsKey {
-		entryType = defaultsEntry
-		return
-	}
-	// special entry "SOA"
-	if key == "SOA" {
-		entryType = normalEntry
-		qtype = key
-		return
-	}
-	idx = strings.Index(key, keySeparator)
-	if idx < 0 {
-		err = fmt.Errorf("missing separator after qtype %q", key)
-		return
-	}
-	qtype = key[:idx]
-	key = key[idx+sepLen:]
-	// domain+QTYPE defaults
-	if qtype == defaultsKey {
-		entryType = defaultsEntry
-		idx = strings.Index(key, keySeparator)
-		if idx < 0 {
-			qtype = key
-			return
-		}
-		qtype = key[:idx]
-		key = key[idx+sepLen:]
+	qtype, key = cutKeyPart(key) // qtype is used only to save a var
+	name = splitDomainName(qtype, false)
+	// entryType, qtype
+	qtype, key = cutKeyPart(key)
+	if entryT, ok := nonQtype2entryType[qtype]; ok {
+		entryType = entryT
+		qtype, key = cutKeyPart(key)
 	} else {
 		entryType = normalEntry
 	}
+	// id
+	id = key
+	// check for forbidden combinations
 	if entryType == normalEntry && qtype == "" {
 		err = fmt.Errorf("empty qtype")
 		return
 	}
-	id = key
 	if entryType == normalEntry && qtype == "SOA" && id != "" {
 		err = fmt.Errorf("SOA cannot have an id (%q)", id)
 		return
@@ -190,7 +179,7 @@ func parseEntryKey(key string) (err error, name nameType, entryType entryType, q
 }
 
 func loadStructure(name *nameType) (*getResponseType, error) {
-	keys := getMultiLevelKeys(name, keyMultiPair{"SOA", false})
+	keys := getMultiLevelKeys(name, normalEntry, keyMultiPair{"SOA", false})
 	response, err := getall(keys, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get %v: %s", keys, err)
@@ -200,7 +189,7 @@ func loadStructure(name *nameType) (*getResponseType, error) {
 
 func readStructure(dataChan <-chan keyValuePair) error {
 	for item := range dataChan {
-		err, name, entryType, qtype, id, version := parseEntryKey(item.Key)
+		name, entryType, qtype, id, version, err := parseEntryKey(item.Key)
 		// check version first, because a new version could change the key syntax (but not prefix and version suffix)
 		if version != nil && !dataVersion.IsCompatibleTo(version) {
 			continue
@@ -242,7 +231,7 @@ func loadDomain(data *dataNode) error {
 	}
 	for item := range response.DataChan {
 		// TODO refactor, duplicated code (readStructure)
-		err, name, entryType, qtype, id, version := parseEntryKey(item.Key)
+		name, entryType, qtype, id, version, err := parseEntryKey(item.Key)
 		// check version first, because a new version could change the key syntax (but not prefix and version suffix)
 		if version != nil && !dataVersion.IsCompatibleTo(version) {
 			continue
