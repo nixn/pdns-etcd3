@@ -16,9 +16,6 @@ package main
 
 import (
 	"fmt"
-	"regexp"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -150,52 +147,3 @@ func newDataCache(revision int64, expiresAt time.Time) *dataCacheType {
 	}
 }
 
-type versionType struct {
-	isDevelopment bool
-	major, minor  uint64
-}
-
-func (version *versionType) String() string {
-	var prefix string
-	if version.isDevelopment {
-		prefix = "0."
-	}
-	return fmt.Sprintf("%s%d.%d", prefix, version.major, version.minor)
-}
-
-func (version *versionType) IsCompatibleTo(otherVersion *versionType) bool {
-	if version.isDevelopment != otherVersion.isDevelopment {
-		return false
-	}
-	if version.major != otherVersion.major {
-		return false
-	}
-	if version.minor < otherVersion.minor {
-		return false
-	}
-	return true
-}
-
-func parseEntryVersion(string string) (*versionType, error) {
-	version := versionType{}
-	developmentPrefix := "0."
-	if strings.HasPrefix(string, developmentPrefix) {
-		version.isDevelopment = true
-		string = string[len(developmentPrefix):]
-	}
-	if parts := regexp.MustCompile("^([0-9]+)(?:\\.([0-9]+))?$").FindStringSubmatch(string); parts != nil {
-		var err error
-		version.major, err = strconv.ParseUint(parts[1], 10, 8)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse major: %s", err)
-		}
-		if len(parts) == 3 {
-			version.minor, err = strconv.ParseUint(parts[2], 10, 8)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse minor: %s", err)
-			}
-		}
-		return &version, nil
-	}
-	return nil, fmt.Errorf("invalid version string")
-}
