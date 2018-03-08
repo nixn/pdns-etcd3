@@ -8,7 +8,8 @@ to get the data from the cluster. Responses are authoritative for each zone foun
 the data. Only the DNS class `IN` is supported, but that's a because of the limitation
 of PowerDNS.
 
-There is no stable release yet, even no beta. Any testing is appreciated.
+There is no stable release yet, even no beta. Currently the first development release is
+prepared, it could be called 'alpha state'. Any testing is appreciated.
 
 [pdns]: https://www.powerdns.com/
 [pdns-remote]: https://doc.powerdns.com/3/authoritative/backend-remote/
@@ -19,9 +20,9 @@ There is no stable release yet, even no beta. Any testing is appreciated.
 
 * Automatic serial for `SOA` records (based on the cluster revision).
 * Replication is handled by the ETCD cluster, no additional configuration is needed for using multiple authoritative PowerDNS servers.
-* [Multiple syntax possibilities for JSON-supported records](doc/ETCD-structure.md#syntax)
-* Support for automatically appending zone name to unqualified domain names
-* [Multi-level defaults, overridable](doc/ETCD-structure.md#defaults)
+* [Multiple syntax possibilities](doc/ETCD-structure.md#syntax) for JSON-supported records
+* Support for [automatically appending zone name to unqualified domain names](doc/ETCD-structure.md#domain-name)
+* [Multi-level defaults](doc/ETCD-structure.md#defaults), overridable
 * [Upgrade data structure](doc/ETCD-structure.md#upgrading) (if needed for new program version) without interrupting service
 
 #### Planned
@@ -35,15 +36,15 @@ There is no stable release yet, even no beta. Any testing is appreciated.
 * Override of domain name appended to unqualified names (instead of zone name)
   * useful for `PTR` records in reverse zones
 * Support more encodings for data (beside JSON)
-  * [EDN][] by [go-edn][]
-  * possibly [YAML][] by [go-yaml][]
+  * [EDN][] by [go-edn](https://github.com/go-edn/edn)
+  * [TOML][] by [pelletier/go-toml](https://github.com/pelletier/go-toml) or [BurntSushi/toml](https://github.com/BurntSushi/toml)
+  * possibly [YAML][] by [go-yaml](https://github.com/go-yaml/yaml)
   * …
 * DNSSEC support (PowerDNS DNSSEC-specific calls)
 
 [edn]: https://github.com/edn-format/edn
-[go-edn]: https://github.com/go-edn/edn
 [yaml]: http://www.yaml.org/
-[go-yaml]: https://github.com/go-yaml/yaml
+[toml]: https://github.com/toml-lang/toml
 
 ## Installation
 
@@ -61,7 +62,7 @@ Of course you need an up and running ETCD v3 cluster and a PowerDNS installation
 ### PowerDNS configuration
 ```
 launch+=remote
-remote-connection-string=pipe:command=/path/to/pdns-etcd3[,pdns-version=3|4][,<config>][,prefix=anything][,reversed-names=<boolean>][,timeout=2000]
+remote-connection-string=pipe:command=/path/to/pdns-etcd3[,pdns-version=3|4][,<config>][,prefix=<string>][,reversed-names=<boolean>][,timeout=<integer>][,min-cache-time=<duration>]
 ```
 
 `pdns-version` is `3` by default, but may be set to `4` to enable PowerDNS v4 compatibility.
@@ -93,6 +94,9 @@ The default is `false`.<br>
 
 `timeout` is optional and defaults to 2 seconds. The value must be a positive integer,
 given in milliseconds.
+
+`min-cache-time` sets the time, where the responses are taken from cache (if present)
+to avoid requests to the ETCD cluster. Defaults to 5 seconds.
 
 ### ETCD structure
 

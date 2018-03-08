@@ -4,6 +4,8 @@
 
 The structure is currently in development and may change multiple times in a
 backwards-incompatible way until a stable major release.
+Also prior to release 0.1 it can change backwards-incompatible without
+any notice or version change.
 
 For each *release* (development or stable), which changes the structure in a
 backwards-incompatible way, the structure major version changes too.
@@ -22,7 +24,8 @@ quotation marks). If an entry value begins with a `{` (no whitespace before!),
 it is parsed as a JSON object, otherwise it is taken as plain string.<br>
 There are exceptions to this rule: each JSON-supported record with a priority field
 may not be stored as plain string, due to the incompatibility of backend protocols
-of PowerDNS between versions 3 and 4.
+of PowerDNS between versions 3 and 4. Also the SOA record cannot be a plain string entry
+due to the 'serial' field.
 
 * Each record which has a JSON entry value must be supported by the program.
 Otherwise an error is emitted and the request/response fails. This is not true for plain strings,
@@ -52,6 +55,7 @@ for automatic appending to unqualified domain names beneath it. These entries
 ¹ For example to have a specific TTL on a record with the unsupported QTYPE <code>ABC</code> one can use the entry
 <code>&lt;prefix&gt;&lt;domain&gt;/-defaults-/ABC/some-id</code> → <code>{"ttl":"&lt;specific-ttl-value&gt;"}</code>
 to specify the TTL for the entry <code>&lt;prefix&gt;&lt;domain&gt;/ABC/some-id</code> → <code>&lt;plain content for ABC&gt;</code>.
+(TODO add example)
 </small>
 
 ## Structure (Entries)
@@ -84,15 +88,20 @@ so that a development data version could be `0.3.2`.
 
 The program ignores all versioned entries, which are either of a different major version
 or of a higher minor version (same major version) than the program's data version.
-All unversioned entries are read and used by all program versions.
+All unversioned entries can be read and used by all program versions (if not overridden
+by a supported¹ versioned entry).
 
 For multiple entries with an equivalent key and an equivalent version specification
 (same version or unversioned) it is not defined, which entry is taken.
-It could be any of those, but only one (no merging).
+It could be any of those, but only one (no merging applied).
 
 For multiple entries with an equivalent key and different version specifications
-the versioned entry with the highest supported version is taken.
+the versioned entry with the highest supported version is taken¹.
 If no versioned entry is supported, the unversioned entry is taken (if any).
+
+<small>
+¹ TODO perhaps it should be only the exact data version of the program
+</small>
 
 #### Upgrading
 
@@ -135,8 +144,8 @@ If it works well, restore public service and continue upgrading the other server
 
 ##### Minor version change
 
-Upgrading to a higher minor version (same major version) is a subset of the steps from above:
-1, 2 (only added entries), 4, 6, 8 and 9.
+Upgrading to a higher minor version (same major version) is a subset of the steps
+from above: 1, 2 (only added entries), 4, 6, 8 and 9.
 
 <small>(There should be a migration script or two…)</small>
 
@@ -213,12 +222,13 @@ Defaults-entries may be non-existent, which is equivalent to an empty object.
 Field names of defaults objects are the same as record field names. That means there could
 be an ambiguity in non-QTYPE defaults, if different record types define the same
 field name. The program only checks for the types of field values, not their content,
-so take care yourself.
+so take care yourself.<br>
+An example: the `ip` field from `A` is not compatible to the `ip` field from `AAAA`.
 
 ## Supported records
 
-For each of the supported record types the entry values may be JSON objects. The recognized
-specific field names and syntax are given below for each entry.
+For each of the supported record types the entry values may be JSON objects.
+The recognized specific field names and syntax are given below for each entry.
 
 All entries can have a `ttl` field, for the record TTL.
 

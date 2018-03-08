@@ -198,7 +198,7 @@ func readStructure(dataChan <-chan keyValuePair) error {
 			return fmt.Errorf("failed to parse entry key %q: %s", item.Key, err)
 		}
 		if entryType != normalEntry || qtype != "SOA" || id != "" {
-			return fmt.Errorf("not a normal SOA (no id) entry, but %v %q (%q)", entryType, qtype, id)
+			return fmt.Errorf("expected a normal SOA entry (no id), got %v %q (id %q)", entryType, qtype, id)
 		}
 		value, err := parseEntryValue(item.Value)
 		if err != nil {
@@ -218,7 +218,7 @@ func readStructure(dataChan <-chan keyValuePair) error {
 			data.records[qtype] = map[string]recordType{}
 		}
 		data.records[qtype][id] = recordType{value, version}
-		log.Printf("stored %q for %q: %#v @ %v", qtype, name.normal(), value, version)
+		log.Printf("stored %s/%s/%s@%v = %#v", name.normal(), qtype, id, version, value)
 	}
 	return nil
 }
