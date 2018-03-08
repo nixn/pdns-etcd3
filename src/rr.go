@@ -104,6 +104,7 @@ func getHostname(name string, values objectType, qtype, id string, data *dataNod
 	}
 	hostname = strings.TrimSpace(hostname)
 	hostname = fqdn(hostname, data.findZone().getQname())
+	// TODO check options for overridden zone name
 	return hostname, nil
 }
 
@@ -174,6 +175,7 @@ func soa(values objectType, id string, data *dataNode, revision int64) (string, 
 	if err != nil {
 		return "", nil, err
 	}
+	// TODO handle option 'no-aa'
 	// ttl
 	ttl, err := getDuration("ttl", values, "SOA", id, data)
 	if err != nil {
@@ -192,6 +194,7 @@ func a(values objectType, id string, data *dataNode, revision int64) (string, ob
 	if err != nil {
 		return "", nil, err
 	}
+	// TODO handle option 'ip-prefix'
 	var ip net.IP
 	switch v.(type) {
 	case string:
@@ -246,6 +249,7 @@ func a(values objectType, id string, data *dataNode, revision int64) (string, ob
 	default:
 		return "", nil, fmt.Errorf("invalid IPv4: not string or array")
 	}
+	// TODO handle option 'auto-ptr'
 	ttl, err := getDuration("ttl", values, "A", id, data)
 	if err != nil {
 		return "", nil, err
@@ -258,11 +262,12 @@ func a(values objectType, id string, data *dataNode, revision int64) (string, ob
 }
 
 func aaaa(values objectType, id string, data *dataNode, revision int64) (string, objectType, error) {
-	var ip net.IP
 	v, err := findValue("ip", values, "AAAA", id, data)
 	if err != nil {
 		return "", nil, err
 	}
+	// TODO handle option 'ip-prefix'
+	var ip net.IP
 	switch v.(type) {
 	case string:
 		v := v.(string)
@@ -333,6 +338,7 @@ func aaaa(values objectType, id string, data *dataNode, revision int64) (string,
 	default:
 		return "", nil, fmt.Errorf("invalid IPv6: not string or array")
 	}
+	// TODO handle option 'auto-ptr'
 	ttl, err := getDuration("ttl", values, "AAAA", id, data)
 	if err != nil {
 		return "", nil, err

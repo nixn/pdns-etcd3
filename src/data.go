@@ -25,25 +25,27 @@ type recordType struct {
 	version *versionType
 }
 
-type defaultsType struct {
+type valuesType struct {
 	values  objectType
 	version *versionType
 }
 
 type dataNode struct {
 	parent   *dataNode
-	lname    string                             // local name
-	loaded   bool                               // defaults and records (beside SOA)
-	defaults map[string]map[string]defaultsType // <QTYPE> or "" → (<id> → values)
-	records  map[string]map[string]recordType   // <QTYPE> → (<id> → record)
-	children map[string]*dataNode               // key = <lname of subdomain>. if children[lname] == nil, the subdomain is present, but the data is not loaded (would be a subzone?)
+	lname    string                           // local name
+	loaded   bool                             // defaults, options and records (beside SOA)
+	defaults map[string]map[string]valuesType // <QTYPE> or "" → (<id> → values)
+	options  map[string]map[string]valuesType // <QTYPE> or "" → (<id> → values)
+	records  map[string]map[string]recordType // <QTYPE> → (<id> → record)
+	children map[string]*dataNode             // key = <lname of subdomain>. if children[lname] == nil, the subdomain is present, but the data is not loaded (would be a subzone?)
 }
 
 func newDataNode(parent *dataNode, lname string) *dataNode {
 	return &dataNode{
 		parent:   parent,
 		lname:    lname,
-		defaults: map[string]map[string]defaultsType{},
+		defaults: map[string]map[string]valuesType{},
+		options:  map[string]map[string]valuesType{},
 		records:  map[string]map[string]recordType{},
 		children: map[string]*dataNode{},
 	}

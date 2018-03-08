@@ -33,6 +33,7 @@ const (
 
 const (
 	defaultsKey      = "-defaults-"
+	optionsKey       = "-options-"
 	keySeparator     = "/"
 	versionSeparator = "@"
 )

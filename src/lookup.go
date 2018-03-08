@@ -99,14 +99,17 @@ type entryType string // enum
 const (
 	normalEntry   entryType = "normal"
 	defaultsEntry entryType = "defaults"
+	optionsEntry  entryType = "options"
 )
 
 var (
 	nonQtype2entryType = map[string]entryType{
 		defaultsKey: defaultsEntry,
+		optionsKey:  optionsEntry,
 	}
 	entryType2nonQtype = map[entryType]string{
 		defaultsEntry: defaultsKey,
+		optionsEntry:  optionsKey,
 	}
 )
 
@@ -166,7 +169,6 @@ func parseEntryKey(key string) (name nameType, entryType entryType, qtype, id st
 	}
 	// id
 	id = key
-	// check for forbidden combinations
 	if entryType == normalEntry && qtype == "" {
 		err = fmt.Errorf("empty qtype")
 		return
@@ -190,12 +192,12 @@ func loadStructure(name *nameType) (*getResponseType, error) {
 func readStructure(dataChan <-chan keyValuePair) error {
 	for item := range dataChan {
 		name, entryType, qtype, id, version, err := parseEntryKey(item.Key)
+		if err != nil {
+			return fmt.Errorf("failed to parse entry key %q: %s", item.Key, err)
+		}
 		// check version first, because a new version could change the key syntax (but not prefix and version suffix)
 		if version != nil && !dataVersion.IsCompatibleTo(version) {
 			continue
-		}
-		if err != nil {
-			return fmt.Errorf("failed to parse entry key %q: %s", item.Key, err)
 		}
 		if entryType != normalEntry || qtype != "SOA" || id != "" {
 			return fmt.Errorf("expected a normal SOA entry (no id), got %v %q (id %q)", entryType, qtype, id)
@@ -261,12 +263,20 @@ func loadDomain(data *dataNode) error {
 			data.records[qtype][id] = recordType{value, version}
 			log.Printf("stored record: %s/%s/%s: %v", name.normal(), qtype, id, value)
 		case defaultsEntry:
+			fallthrough
+		case optionsEntry:
 			values := objectType{}
 			err := json.Unmarshal(item.Value, &values)
 			if err != nil {
 				return fmt.Errorf("failed to parse entry value as JSON object for %q: %s", item.Key, err)
 			}
-			if oldEntries, ok := data.defaults[qtype]; ok {
+			var vals map[string]map[string]valuesType
+			if entryType == defaultsEntry {
+				vals = data.defaults
+			} else {
+				vals = data.options
+			}
+			if oldEntries, ok := vals[qtype]; ok {
 				if oldEntry, ok := oldEntries[id]; ok {
 					if version == nil && oldEntry.version != nil {
 						continue
@@ -276,10 +286,10 @@ func loadDomain(data *dataNode) error {
 					}
 				}
 			} else {
-				data.defaults[qtype] = map[string]defaultsType{}
+				vals[qtype] = map[string]valuesType{}
 			}
-			data.defaults[qtype][id] = defaultsType{values, version}
-			log.Printf("stored defaults for %q%s%s%s%s: %v", name.normal(), keySeparator, qtype, keySeparator, id, values)
+			vals[qtype][id] = valuesType{values, version}
+			log.Printf("stored %s for %s/%s/%s: %v", entryType2nonQtype[entryType], name.normal(), qtype, id, values)
 		default:
 			log.Printf("unsupported entry type %q, ignoring entry %q", entryType, item.Key)
 		}

@@ -17,7 +17,7 @@ For details, see "Version" section below.
 
 * Entry keys with an empty `<id>` may omit the trailing slash (not regarding version suffix).
 
-* Defaults entry keys with an empty `<QTYPE>` and an empty `<id>` may omit one or both trailing slashes.
+* Defaults and options entry keys with an empty `<QTYPE>` and an empty `<id>` may omit one or both trailing slashes.
 
 * Record entry values are either JSON objects or plain strings (that is without
 quotation marks). If an entry value begins with a `{` (no whitespace before!),
@@ -44,7 +44,7 @@ One may use a default value as a workaround for this limitation¹.
 does not specify the field value itself. If no value is found for the field,
 an error is raised and the request/response fails.
 
-* Defaults are valid for their level and all levels beneath
+* Defaults and options are valid for their level and all levels beneath
 (unless overridden in some sub-level).
 
 * "Zones" are defined by domains having a `SOA` entry. The zone domain is used
