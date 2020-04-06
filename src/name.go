@@ -1,4 +1,4 @@
-/* Copyright 2016-2018 nix <https://github.com/nixn>
+/* Copyright 2016-2020 nix <https://keybase.io/nixn>
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
 
-package main
+package pdns_etcd3
 
 import "strings"
 

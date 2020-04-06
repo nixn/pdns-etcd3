@@ -12,23 +12,12 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
 
-package pdns_etcd3
+package main
 
-import (
-	"time"
-)
+import P "github.com/nixn/pdns-etcd3/src"
 
-type objectType map[string]interface{}
+var gitVersion = "GIT_VERSION_UNSET"
 
-func reversed(a []string) []string {
-	n := len(a)
-	r := make([]string, n)
-	for i := 0; i < n; i++ {
-		r[n-i-1] = a[i]
-	}
-	return r
-}
-
-func seconds(dur time.Duration) int64 {
-	return int64(dur.Seconds())
+func main() {
+	P.Main(gitVersion)
 }

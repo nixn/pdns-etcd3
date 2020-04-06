@@ -1,4 +1,4 @@
-/* Copyright 2016-2018 nix <https://github.com/nixn>
+/* Copyright 2016-2020 nix <https://keybase.io/nixn>
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
 
-package main
+package pdns_etcd3
 
 import (
 	"encoding/json"
@@ -35,8 +35,7 @@ func (req *pdnsRequest) String() string {
 
 var (
 	dataVersion    = versionType{true, 1, 0} // update this when changing data structure
-	releaseVersion = versionType{true, 1, 0} // update this when releasing a new version
-	gitVersion     = "?"
+	programVersion = versionType{true, 1, 0} // update this before a new release
 )
 
 var (
@@ -129,15 +128,15 @@ func setDurationParameterFunc(param *time.Duration, allowNegative bool, minValue
 	}
 }
 
-func main() {
+func Main(gitVersion string) {
 	// TODO handle arguments, f.e. 'show-defaults' standalone command
 	log.SetPrefix(fmt.Sprintf("pdns-etcd3[%d]: ", os.Getpid()))
 	log.SetFlags(0)
-	programVersion := fmt.Sprintf("%s/%s", &dataVersion, &releaseVersion)
-	if "v"+programVersion != gitVersion {
-		programVersion += fmt.Sprintf(" (%s)", gitVersion)
+	releaseVersion := fmt.Sprintf("%s/%s", &dataVersion, &programVersion)
+	if "v"+releaseVersion != gitVersion {
+		releaseVersion += fmt.Sprintf("+%s", gitVersion)
 	}
-	log.Printf("pdns-etcd3 %s, Copyright © 2016-2018 nix <https://github.com/nixn>", programVersion)
+	log.Printf("pdns-etcd3 %s, Copyright © 2016-2020 nix <https://keybase.io/nixn>", releaseVersion)
 	var err error
 	dec := json.NewDecoder(os.Stdin)
 	enc := json.NewEncoder(os.Stdout)

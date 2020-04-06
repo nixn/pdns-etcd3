@@ -2,21 +2,20 @@ OUT := pdns-etcd3
 GIT_VERSION := $(shell git describe --always --dirty)
 
 RM ?= rm -f
-GOPATH := $(realpath $(dir $(lastword $(MAKEFILE_LIST))))/lib
 
 .PHONY: all fmt vet clean
 
 all: $(OUT) vet
 
-$(OUT): $(wildcard src/*.go)
+$(OUT): pdns-etcd3.go $(wildcard src/*.go)
 	@$(MAKE) --no-print-directory fmt
-	CGO_ENABLED=0 go build -o $(OUT) -a -ldflags="-extldflags=-static -X main.gitVersion=${GIT_VERSION}" ./src
+	CGO_ENABLED=0 go build -o $(OUT) -a -ldflags="-extldflags=-static -X main.gitVersion=${GIT_VERSION}"
 
 fmt:
-	gofmt -l -s -w src
+	gofmt -l -s -w pdns-etcd3.go src
 
 vet:
-	-go vet ./src
+	-go vet
 
 clean:
 	$(RM) $(OUT)

@@ -5,7 +5,7 @@
 A [PowerDNS][pdns] [remote backend][pdns-remote] with [ETCD][] v3 cluster as storage.
 It uses the [official client][etcd-client]
 to get the data from the cluster. Responses are authoritative for each zone found in
-the data. Only the DNS class `IN` is supported, but that's a because of the limitation
+the data. Only the DNS class `IN` is supported, but that's because of the limitation
 of PowerDNS.
 
 There is no stable release yet, even no beta. Currently the first development release is
@@ -51,13 +51,15 @@ prepared, it could be called 'alpha state'. Any testing is appreciated.
 ```sh
 git clone https://github.com/nixn/pdns-etcd3.git
 cd pdns-etcd3
-git submodule update --init
 make
 ```
 
-Of course you need an up and running ETCD v3 cluster and a PowerDNS installation.
+NOTE: `go build` will also work, but you will get a dynamically linked executable and incomplete version information in the binary.
+The build command in `Makefile` produces a static build with setting the version string properly.
 
 ## Usage
+
+Of course you need an up and running ETCD v3 cluster and a PowerDNS installation.
 
 ### PowerDNS configuration
 ```
@@ -122,7 +124,7 @@ trace and debug different components.
 
 ## License
 
-Copyright © 2016-2018 nix <https://github.com/nixn>
+Copyright © 2016-2020 nix <https://keybase.io/nixn>
 
 Distributed under the Apache 2.0 license, available in the file [LICENSE](LICENSE).
 
