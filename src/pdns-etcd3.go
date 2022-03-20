@@ -1,4 +1,4 @@
-/* Copyright 2016-2020 nix <https://keybase.io/nixn>
+/* Copyright 2016-2022 nix <https://keybase.io/nixn>
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -138,7 +138,7 @@ func Main(gitVersion string) {
 		releaseVersion += fmt.Sprintf("[%s]", gitVersion)
 	}
 	releaseVersion += fmt.Sprintf("+%s", &dataVersion)
-	log.Printf("pdns-etcd3 %s, Copyright © 2016-2020 nix <https://keybase.io/nixn>", releaseVersion)
+	log.Printf("pdns-etcd3 %s, Copyright © 2016-2022 nix <https://keybase.io/nixn>", releaseVersion)
 	var err error
 	dec := json.NewDecoder(os.Stdin)
 	enc := json.NewEncoder(os.Stdout)
