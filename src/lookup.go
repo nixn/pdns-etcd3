@@ -12,7 +12,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
 
-package pdns_etcd3
+package src
 
 import (
 	"encoding/json"
@@ -366,9 +366,8 @@ func lookup(params objectType) (interface{}, error) {
 		log.Printf("no such domain: %q", query.name)
 		if data.findZone() == nil {
 			return false, nil
-		} else {
-			return result, nil
 		}
+		return result, nil
 	}
 	records := map[string]map[string]recordType{}
 	if query.isANY() {

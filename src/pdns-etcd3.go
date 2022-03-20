@@ -12,7 +12,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
 
-package pdns_etcd3
+package src
 
 import (
 	"encoding/json"
@@ -128,6 +128,7 @@ func setDurationParameterFunc(param *time.Duration, allowNegative bool, minValue
 	}
 }
 
+// Main is the "moved" program entrypoint, but with git version argument (which is set in real main package)
 func Main(gitVersion string) {
 	// TODO handle arguments, f.e. 'show-defaults' standalone command
 	log.SetPrefix(fmt.Sprintf("pdns-etcd3[%d]: ", os.Getpid()))

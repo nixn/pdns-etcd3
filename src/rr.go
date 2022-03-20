@@ -12,7 +12,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
 
-package pdns_etcd3
+package src
 
 import (
 	"fmt"
@@ -49,6 +49,7 @@ func fqdn(domain, qname string) string {
 }
 
 func getUint16(name string, values objectType, qtype, id string, data *dataNode) (uint16, error) {
+	var err error
 	if v, err := findValue(name, values, qtype, id, data); err == nil {
 		if v, ok := v.(float64); ok {
 			if v < 0 || v > 65535 {
@@ -57,20 +58,19 @@ func getUint16(name string, values objectType, qtype, id string, data *dataNode)
 			return uint16(v), nil
 		}
 		return 0, fmt.Errorf("'%s' is not a number", name)
-	} else {
-		return 0, err
 	}
+	return 0, err
 }
 
 func getString(name string, values objectType, qtype, id string, data *dataNode) (string, error) {
+	var err error
 	if v, err := findValue(name, values, qtype, id, data); err == nil {
 		if v, ok := v.(string); ok {
 			return v, nil
 		}
 		return "", fmt.Errorf("'%s' is not a string", name)
-	} else {
-		return "", err
 	}
+	return "", err
 }
 
 func getDuration(name string, values objectType, qtype, id string, data *dataNode) (time.Duration, error) {
