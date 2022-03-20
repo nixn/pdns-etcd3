@@ -133,10 +133,11 @@ func Main(gitVersion string) {
 	// TODO handle arguments, f.e. 'show-defaults' standalone command
 	log.SetPrefix(fmt.Sprintf("pdns-etcd3[%d]: ", os.Getpid()))
 	log.SetFlags(0)
-	releaseVersion := fmt.Sprintf("%s/%s", &dataVersion, &programVersion)
+	releaseVersion := programVersion.String()
 	if "v"+releaseVersion != gitVersion {
-		releaseVersion += fmt.Sprintf("+%s", gitVersion)
+		releaseVersion += fmt.Sprintf("[%s]", gitVersion)
 	}
+	releaseVersion += fmt.Sprintf("+%s", &dataVersion)
 	log.Printf("pdns-etcd3 %s, Copyright © 2016-2020 nix <https://keybase.io/nixn>", releaseVersion)
 	var err error
 	dec := json.NewDecoder(os.Stdin)
