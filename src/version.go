@@ -21,6 +21,14 @@ import (
 	"strings"
 )
 
+const (
+	developmentPrefix = "0."
+)
+
+var (
+	versionRegex = regexp.MustCompile("^([0-9]+)(?:\\.([0-9]+))?$")
+)
+
 type versionType struct {
 	isDevelopment bool
 	major, minor  uint64
@@ -35,32 +43,25 @@ func (version *versionType) String() string {
 }
 
 func (version *versionType) IsCompatibleTo(otherVersion *versionType) bool {
-	if version.isDevelopment != otherVersion.isDevelopment {
-		return false
+	if version.isDevelopment == otherVersion.isDevelopment && version.major == otherVersion.major && version.minor >= otherVersion.minor {
+		return true
 	}
-	if version.major != otherVersion.major {
-		return false
-	}
-	if version.minor < otherVersion.minor {
-		return false
-	}
-	return true
+	return false
 }
 
 func parseEntryVersion(string string) (*versionType, error) {
 	version := versionType{}
-	developmentPrefix := "0."
 	if strings.HasPrefix(string, developmentPrefix) {
 		version.isDevelopment = true
 		string = string[len(developmentPrefix):]
 	}
-	if parts := regexp.MustCompile("^([0-9]+)(?:\\.([0-9]+))?$").FindStringSubmatch(string); parts != nil {
+	if parts := versionRegex.FindStringSubmatch(string); parts != nil {
 		var err error
 		version.major, err = strconv.ParseUint(parts[1], 10, 8)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse major: %s", err)
 		}
-		if len(parts) == 3 {
+		if len(parts) > 2 && len(parts[2]) > 0 {
 			version.minor, err = strconv.ParseUint(parts[2], 10, 8)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse minor: %s", err)

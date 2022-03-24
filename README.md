@@ -8,11 +8,11 @@ to get the data from the cluster. Responses are authoritative for each zone foun
 the data. Only the DNS class `IN` is supported, but that's because of the limitation
 of PowerDNS.
 
-There is no stable release yet, even no beta. Currently the first development release is
-prepared, it could be called 'alpha state'. Any testing is appreciated.
+There is no stable release yet, even no beta. Currently the first development release (0.1.0)
+is being prepared, it could be called 'alpha state'. Any testing is appreciated.
 
 [pdns]: https://www.powerdns.com/
-[pdns-remote]: https://doc.powerdns.com/3/authoritative/backend-remote/
+[pdns-remote]: https://doc.powerdns.com/authoritative/backends/remote.html
 [etcd]: https://github.com/coreos/etcd/
 [etcd-client]: https://github.com/coreos/etcd/tree/master/clientv3/
 
@@ -20,10 +20,14 @@ prepared, it could be called 'alpha state'. Any testing is appreciated.
 
 * Automatic serial for `SOA` records (based on the cluster revision).
 * Replication is handled by the ETCD cluster, no additional configuration is needed for using multiple authoritative PowerDNS servers.
+  * DNS respoonses are nearly instantly up-to-date (on every server instance!) after data changes by using a watcher into ETCD (multi-master)
 * [Multiple syntax possibilities](doc/ETCD-structure.md#syntax) for JSON-supported records
+* Support for custom records (types), like those [supported by PowerDNS][qtypes] but unimplemented in pdns-etcd3
 * Support for [automatically appending zone name to unqualified domain names](doc/ETCD-structure.md#domain-name)
 * [Multi-level defaults](doc/ETCD-structure.md#defaults), overridable
 * [Upgrade data structure](doc/ETCD-structure.md#upgrading) (if needed for new program version) without interrupting service
+
+[qtypes]: https://doc.powerdns.com/authoritative/appendices/types.html
 
 #### Planned
 
@@ -35,6 +39,9 @@ prepared, it could be called 'alpha state'. Any testing is appreciated.
   * overrideable per entry
 * Override of domain name appended to unqualified names (instead of zone name)
   * useful for `PTR` records in reverse zones
+* Support for defaults, zone appending and possibly more in plain-string records (which are also JSON-supported)
+* "Collect record", automatically combining A and/or AAAA records from "server records"
+  * e.g. `etcd.example.com` based on `etcd-1.example.com`, `etcd-2.example.com`, ...
 * Support more encodings for data (beside JSON)
   * [EDN][] by [go-edn](https://github.com/go-edn/edn)
   * [TOML][] by [pelletier/go-toml](https://github.com/pelletier/go-toml) or [BurntSushi/toml](https://github.com/BurntSushi/toml)
@@ -64,10 +71,10 @@ Of course you need an up and running ETCD v3 cluster and a PowerDNS installation
 ### PowerDNS configuration
 ```
 launch+=remote
-remote-connection-string=pipe:command=/path/to/pdns-etcd3[,pdns-version=3|4][,<config>][,prefix=<string>][,reversed-names=<boolean>][,timeout=<integer>][,min-cache-time=<duration>]
+remote-connection-string=pipe:command=/path/to/pdns-etcd3[,pdns-version=3|4][,<config>][,prefix=<string>][,timeout=<integer>]
 ```
 
-`pdns-version` is `3` by default, but may be set to `4` to enable PowerDNS v4 compatibility.
+`pdns-version` is `4` by default, but may be set to `3` to enable PowerDNS v3 compatibility.
 Version 3 and 4 have incompatible protocols with the backend, so one must use the proper one.
 
 `<config>` is one of
@@ -88,17 +95,7 @@ If `<config>` is not given, it defaults to `endpoints=[::1]:2379|127.0.0.1:2379`
 
 `prefix` is optional and is empty by default.
 
-`reversed-names` controls, whether the domain names in the data are in normal or in reversed form
-(like for PTR queries). The value is a boolean and accepts the following strings:
-`y`, `n`, `yes`, `no`, `true`, `false`, `on`, `off`, `1` and `0` (case-insensitive).
-The default is `false`.<br>
-**WARNING: Currently `reversed-names` must be set to true due to the current implementation!**
-
-`timeout` is optional and defaults to 2 seconds. The value must be a positive integer,
-given in milliseconds.
-
-`min-cache-time` sets the time, where the responses are taken from cache (if present)
-to avoid requests to the ETCD cluster. Defaults to 5 seconds.
+`timeout` is optional, given in milliseconds and defaults to 2000 (2 seconds). The value must be a positive integer.
 
 ### ETCD structure
 
@@ -108,9 +105,9 @@ configured in PowerDNS (see above).
 ## Compatibility
 
 pdns-etcd3 is tested on PowerDNS versions 3 and 4, and uses an ETCD v3 cluster.
-It's currently only one version of each (pdns 3.4.1 and 4.0.3, ETCD API 3.0),
+It's currently only one version of each (pdns 3.x and 4.y, ETCD API 3.0),
 until I find a way to test it on different versions easily.
-Therefore each release shall state which versions were used for testing,
+Therefore each release shall state which exact versions were used for testing,
 so one can be sure to have a working combination for deploying,
 when using those (tested) versions.
 Most likely it will work on other "usually compatible" versions,
@@ -118,9 +115,11 @@ but that cannot be guaranteed.
 
 ## Testing / Debugging
 
-For now, there is much simple logging, as the program is in heavy development / alpha state.
+For now, there is very much simple logging, as the program is in heavy development / alpha state.
 The plan is to build a logging structure, which can be used to selectively
-trace and debug different components.
+trace and debug different components. Probably [logrus][] will be used for that.
+
+[logrus]: https://github.com/Sirupsen/logrus
 
 ## License
 

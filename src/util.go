@@ -15,6 +15,7 @@ limitations under the License. */
 package src
 
 import (
+	"strings"
 	"time"
 )
 
@@ -31,4 +32,18 @@ func reversed(a []string) []string {
 
 func seconds(dur time.Duration) int64 {
 	return int64(dur.Seconds())
+}
+
+func clearMap[K comparable, V any](m map[K]V) {
+	for k := range m {
+		delete(m, k)
+	}
+}
+
+func splitDomainName(name string, separator string) []string {
+	name = strings.TrimSuffix(name, separator)
+	if name == "" {
+		return []string(nil)
+	}
+	return strings.Split(name, separator)
 }

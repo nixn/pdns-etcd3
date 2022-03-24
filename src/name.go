@@ -16,7 +16,7 @@ package src
 
 import "strings"
 
-type nameType []string // in storage form (so take care of reversedNames)
+type nameType []string // in reversed form (storage form)
 
 func (name *nameType) String() string {
 	return name.normal()
@@ -30,35 +30,23 @@ func (name *nameType) parts() []string {
 	return *name
 }
 
-func (name *nameType) part(level int) string {
-	if level == 0 {
+func (name *nameType) part(depth int) string {
+	if depth == 0 {
 		return ""
 	}
-	i := level - 1
-	if !reversedNames {
-		i = name.len() - level
-	}
-	return name.parts()[i]
+	return name.parts()[depth-1]
 }
 
 // get the domain in normal form (with trailing dot)
 func (name *nameType) normal() string {
-	parts := name.parts()
-	if reversedNames {
-		parts = reversed(parts)
-	}
-	return strings.Join(parts, ".") + "."
+	return strings.Join(reversed(name.parts()), ".") + "."
 }
 
 // get the domain in storage form
-func (name *nameType) key(level int, withTrailingDot bool) string {
-	end := level
-	if !reversedNames {
-		end = name.len()
-	}
-	key := strings.Join(name.parts()[end-level:end], ".")
-	if withTrailingDot {
-		key += "."
+func (name *nameType) asKey(depth int, withTrailingSeparator bool) string {
+	key := strings.Join((*name)[:depth], keySeparator)
+	if withTrailingSeparator {
+		key += keySeparator
 	}
 	return key
 }

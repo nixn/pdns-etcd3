@@ -15,6 +15,7 @@ limitations under the License. */
 package src
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +23,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/coreos/etcd/clientv3"
 )
 
 type pdnsRequest struct {
@@ -39,10 +42,12 @@ var (
 )
 
 var (
-	pdnsVersion   = defaultPdnsVersion
-	prefix        = defaultPrefix
-	reversedNames = defaultReversedNames
-	minCacheTime  = defaultMinCacheTime
+	pdnsVersion = defaultPdnsVersion
+	prefix      = defaultPrefix
+)
+var (
+	dataRoot     *dataNode
+	dataRevision int64
 )
 
 func parseBoolean(s string) (bool, error) {
@@ -128,6 +133,105 @@ func setDurationParameterFunc(param *time.Duration, allowNegative bool, minValue
 	}
 }
 
+func initialize(request *pdnsRequest) (logMessages []string, err error) {
+	logMessages = []string(nil)
+	// pdns-version
+	if _, err = readParameter("pdns-version", request.Parameters, setPdnsVersionParameter(&pdnsVersion)); err != nil {
+		return
+	}
+	logMessages = append(logMessages, fmt.Sprintf("pdns-version: %d", pdnsVersion))
+	// prefix
+	if _, err = readParameter("prefix", request.Parameters, setStringParameterFunc(&prefix)); err != nil {
+		return
+	}
+	logMessages = append(logMessages, fmt.Sprintf("prefix: %q", prefix))
+	// client
+	if logMsgs, err2 := setupClient(request.Parameters); err2 == nil {
+		logMessages = append(logMessages, logMsgs...)
+	} else {
+		err = err2
+		return
+	}
+	return
+}
+
+func startReadRequests() <-chan pdnsRequest {
+	dec := json.NewDecoder(os.Stdin)
+	ch := make(chan pdnsRequest)
+	go func() {
+		defer close(ch)
+		for {
+			request := pdnsRequest{}
+			if err := dec.Decode(&request); err != nil {
+				if err == io.EOF {
+					log.Println("EOF on input stream, terminating")
+					return
+				}
+				log.Fatalln("Failed to decode request:", err)
+			} else {
+				log.Println("new request:", request)
+				ch <- request
+			}
+		}
+	}()
+	return ch
+}
+
+func handleRequest(request *pdnsRequest) {
+	log.Println("handling request:", request)
+	since := time.Now()
+	var result interface{}
+	var err error
+	switch strings.ToLower(request.Method) {
+	case "lookup":
+		result, err = lookup(request.Parameters)
+	case "getalldomainmetadata":
+		result, err = false, nil
+	default:
+		result, err = false, fmt.Errorf("unknown/unimplemented request: %s", request)
+	}
+	if err == nil {
+		respond(result)
+	} else {
+		respond(result, err.Error())
+	}
+	dur := time.Since(since)
+	log.Printf("result: %v [err %v] [dur %s]", result, err, dur)
+}
+
+func handleEvent(event *clientv3.Event) {
+	log.Println("handling event:", event)
+	entryKey := string(event.Kv.Key)
+	name, entryType, qtype, id, version, err := parseEntryKey(entryKey)
+	// check version first, because a new version could change the key syntax (but not prefix and version suffix)
+	if version != nil && !dataVersion.IsCompatibleTo(version) {
+		return
+	}
+	if err != nil {
+		log.Printf("failed to parse entry key %q, ignoring event. error: %s", entryKey, err)
+		return
+	}
+	itemData, _ := dataRoot.getChild(name.parts(), false)
+	zoneData := itemData.findZone()
+	if event.Type == clientv3.EventTypeDelete && qtype == "SOA" && id == "" && entryType == normalEntry && zoneData != nil && zoneData.parent != nil {
+		// deleting any (valid) SOA record deletes the zone (mostly), so the parent zone must be reloaded instead. this results in a full data reload for top-level zones.
+		zoneData = zoneData.parent.findZone()
+	}
+	if zoneData == nil {
+		zoneData = dataRoot
+	}
+	getResponse, err := get(prefix+zoneData.prefixKey(), true, &event.Kv.ModRevision)
+	if err != nil {
+		log.Printf("failed to get data for zone %q, not updating. error: %s", zoneData.getQname(), err)
+		return
+	}
+	qname := zoneData.getQname()
+	log.Printf("reloading zone %q", qname)
+	counts := zoneData.reload(getResponse.DataChan)
+	dataRevision = event.Kv.ModRevision
+	log.Printf("reloaded zone %q, counts=%+v. updated data revision to %v", qname, counts, dataRevision)
+}
+
 // Main is the "moved" program entrypoint, but with git version argument (which is set in real main package)
 func Main(gitVersion string) {
 	// TODO handle arguments, f.e. 'show-defaults' standalone command
@@ -139,94 +243,72 @@ func Main(gitVersion string) {
 	}
 	releaseVersion += fmt.Sprintf("+%s", &dataVersion)
 	log.Printf("pdns-etcd3 %s, Copyright © 2016-2022 nix <https://keybase.io/nixn>", releaseVersion)
-	var err error
-	dec := json.NewDecoder(os.Stdin)
-	enc := json.NewEncoder(os.Stdout)
-	var request pdnsRequest
-	if err = dec.Decode(&request); err != nil {
-		log.Fatalln("Failed to decode JSON:", err)
-	}
-	if request.Method != "initialize" {
-		log.Fatalln("Waited for 'initialize', got:", request.Method)
-	}
-	logMessages := []string(nil)
-	// pdns-version
-	if _, err := readParameter("pdns-version", request.Parameters, setPdnsVersionParameter(&pdnsVersion)); err != nil {
-		fatal(enc, err)
-	}
-	logMessages = append(logMessages, fmt.Sprintf("pdns-version: %d", pdnsVersion))
-	// prefix
-	if _, err := readParameter("prefix", request.Parameters, setStringParameterFunc(&prefix)); err != nil {
-		fatal(enc, err)
-	}
-	logMessages = append(logMessages, fmt.Sprintf("prefix: %q", prefix))
-	// reversed-names
-	if _, err := readParameter("reversed-names", request.Parameters, setBooleanParameterFunc(&reversedNames)); err != nil {
-		fatal(enc, err)
-	}
-	logMessages = append(logMessages, fmt.Sprintf("reversed-names: %v", reversedNames))
-	// min-cache-time
-	if _, err := readParameter("min-cache-time", request.Parameters, setDurationParameterFunc(&minCacheTime, false, 0)); err != nil {
-		fatal(enc, err)
-	}
-	logMessages = append(logMessages, fmt.Sprintf("min-cache-time: %s", minCacheTime))
-	// client
-	if logMsgs, err := setupClient(request.Parameters); err != nil {
-		fatal(enc, err.Error())
-	} else {
-		logMessages = append(logMessages, logMsgs...)
+	var logMessages []string
+	reqChan := startReadRequests()
+	// first request must be 'initialize'
+	{
+		initRequest := <-reqChan
+		if initRequest.Method != "initialize" {
+			log.Fatalln("Waited for 'initialize', got:", initRequest.Method)
+		}
+		log.Printf("initializing with parameters: %+v", initRequest.Parameters)
+		initMessages, err := initialize(&initRequest)
+		if err != nil {
+			fatal(err)
+		}
+		logMessages = append(logMessages, initMessages...)
 	}
 	defer closeClient()
-	dataCache = newDataCache(0, time.Time{})
-	respond(enc, true, logMessages...)
+	doneCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dataRoot = newDataNode(nil, "")
+	// populate data
+	{
+		getResponse, err := get(prefix, true, nil)
+		if err != nil {
+			fatal(err)
+		}
+		dataRevision = getResponse.Revision
+		counts := dataRoot.reload(getResponse.DataChan)
+		logMessages = append(logMessages, fmt.Sprintf("counts=%+v", counts), fmt.Sprintf("revision=%v", dataRevision))
+	}
+	log.Printf("starting data watcher")
+	eventsChan := startWatchData(doneCtx, dataRevision+1)
 	log.Println("initialized.", strings.Join(logMessages, ". "))
+	respond(true, logMessages...)
 	// main loop
 	for {
-		request := pdnsRequest{}
-		if err := dec.Decode(&request); err != nil {
-			if err == io.EOF {
-				log.Println("EOF on input stream, terminating")
+		select {
+		case event := <-eventsChan:
+			handleEvent(event)
+		case request, ok := <-reqChan:
+			if ok {
+				handleRequest(&request)
+			} else {
 				break
 			}
-			log.Fatalln("Failed to decode request:", err)
 		}
-		log.Println("request:", request)
-		since := time.Now()
-		var result interface{}
-		var err error
-		switch strings.ToLower(request.Method) {
-		case "lookup":
-			result, err = lookup(request.Parameters)
-		default:
-			result, err = false, fmt.Errorf("unknown/unimplemented request: %s", request)
-		}
-		if err == nil {
-			respond(enc, result)
-		} else {
-			respond(enc, result, err.Error())
-		}
-		dur := time.Since(since)
-		log.Printf("result: %v [err %v] [dur %s]", result, err, dur)
 	}
 }
 
-func makeResponse(result interface{}, msg ...string) objectType {
+func makeResponse(result interface{}, msgs ...string) objectType {
 	response := objectType{"result": result}
-	if len(msg) > 0 {
-		response["log"] = msg
+	if len(msgs) > 0 {
+		response["log"] = msgs
 	}
 	return response
 }
 
-func respond(enc *json.Encoder, result interface{}, msg ...string) {
-	response := makeResponse(result, msg...)
+func respond(result interface{}, msgs ...string) {
+	response := makeResponse(result, msgs...)
+	enc := json.NewEncoder(os.Stdout)
 	if err := enc.Encode(&response); err != nil {
 		log.Fatalln("Failed to encode response", response, ":", err)
 	}
 }
 
-func fatal(enc *json.Encoder, msg interface{}) {
+func fatal(msg interface{}) {
 	s := fmt.Sprintf("%s", msg)
-	respond(enc, false, s)
+	respond(false, s)
 	log.Fatalln("Fatal error:", s)
 }

@@ -16,12 +16,13 @@ package src
 
 import (
 	"fmt"
-	"github.com/coreos/etcd/clientv3"
-	"golang.org/x/net/context"
 	"log"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/coreos/etcd/clientv3"
+	"golang.org/x/net/context"
 )
 
 var _ = log.Printf // suppress compiler error when not logging anything
@@ -152,14 +153,14 @@ func get(key string, multi bool, revision *int64) (*getResponseType, error) {
 		opts = append(opts, clientv3.WithRev(*revision))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 	since := time.Now()
 	response, err := cli.Get(ctx, key, opts...)
 	dur := time.Since(since)
-	cancel()
-	log.Printf("get %q (%v) dur: %s", key, multi, dur)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("[dur %s] %s", dur, err)
 	}
+	log.Printf("get %q (%v) @%d, dur: %s, # %v more? %v", key, multi, revision, dur, response.Count, response.More)
 	return getResponse(response), nil
 }
 
@@ -192,6 +193,41 @@ func getall(keys []keyMultiPair, revision *int64) (*getResponseType, error) {
 	for _, response := range response.Responses {
 		counts = append(counts, response.GetResponseRange().Count)
 	}
-	log.Printf("get %v, dur: %s, counts: %v", keys, dur, counts)
+	log.Printf("get %v @%d, dur: %s, # %v", keys, revision, dur, counts)
 	return txnResponse(response), nil
+}
+
+func startWatchData(doneCtx context.Context, revision int64) <-chan *clientv3.Event {
+	ch := make(chan *clientv3.Event)
+	go func() {
+		defer close(ch)
+		watcher := clientv3.NewWatcher(cli)
+		defer watcher.Close()
+		for {
+			watchCtx := clientv3.WithRequireLeader(doneCtx)
+			watchChan := watcher.Watch(watchCtx, prefix, clientv3.WithPrefix(), clientv3.WithRev(revision))
+			for {
+				select {
+				case <-doneCtx.Done():
+					return
+				case watchResponse, ok := (<-watchChan):
+					if ok {
+						if watchResponse.Canceled {
+							log.Println("watch canceled:", watchResponse.Err())
+							break
+						} else {
+							log.Println("watch event. compact revision:", watchResponse.CompactRevision, "[#events]", len(watchResponse.Events), "[revision]", watchResponse.Header.Revision)
+							for _, ev := range watchResponse.Events {
+								ch <- ev
+							}
+						}
+					} else {
+						log.Println("watch failed:", watchResponse.Err())
+						break
+					}
+				}
+			}
+		}
+	}()
+	return ch
 }

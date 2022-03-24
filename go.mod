@@ -1,6 +1,6 @@
 module github.com/nixn/pdns-etcd3
 
-go 1.12
+go 1.18
 
 require (
 	github.com/coreos/etcd v3.0.4+incompatible

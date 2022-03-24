@@ -15,14 +15,13 @@ limitations under the License. */
 package src
 
 import (
+	"regexp"
 	"time"
 )
 
 const (
-	defaultPdnsVersion   = 3
-	defaultPrefix        = ""
-	defaultReversedNames = false
-	defaultMinCacheTime  = 5 * time.Second
+	defaultPdnsVersion = 4
+	defaultPrefix      = ""
 )
 
 const (
@@ -35,5 +34,10 @@ const (
 	defaultsKey      = "-defaults-"
 	optionsKey       = "-options-"
 	keySeparator     = "/"
+	idSeparator      = "#"
 	versionSeparator = "@"
+)
+
+var (
+	qtypeRegex = regexp.MustCompile("^[A-Z]+$")
 )
