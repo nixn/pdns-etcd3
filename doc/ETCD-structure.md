@@ -99,7 +99,7 @@ without interrupting service while adjusting the entries.
 
 The program's data version is given in the release notes and also in the version string logged at program start.
 The full version string ("release version") is `<program version>+<data version>` (with a literal `+`).
-The `<program version>` is appended by a detailed git version string, if it is not a tagged release.
+The default version string is appended by a detailed git version string, if it differs from the release tag.
 
 #### Syntax and rules
 
