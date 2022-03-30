@@ -18,15 +18,15 @@ For details, see "Version" section below.
 ### Structure
 
 The DNS data is a logically hierarchical (by domain) collection of resource record entries ("normal")
-and optional entries for default values ("defaults") and "options" (affecting value interpretations).
+and optional entries for default field values ("defaults") and "options" (affecting value interpretations).
 
 * `<prefix>` is the global prefix from configuration (see [README](../README.md)).
 All entry keys for pdns-etcd3 must begin with that `<prefix>`, otherwise they are ignored.
 The following sections do not mention `<prefix>` any more, but it always must go first.
 
 * "Zones" are defined by domains having a `SOA` record. The zone domain is used
-for automatic appending to unqualified domain names beneath it. These entries
-(beneath a zone) are served with the 'authoritative answer' bit (AA) set.<br>
+for automatic appending to unqualified domain names beneath it.
+The entries beneath a zone are served with the 'authoritative answer' bit (AA) set.<br>
 (TODO `non-auth` option)
 
 * Defaults and options are valid for their level and all levels beneath
@@ -35,7 +35,7 @@ for automatic appending to unqualified domain names beneath it. These entries
 ### Resource Record keys
 
 Resource record keys consist of the concatenated parts `<domain>`, `/<QTYPE>`
-and the optional parts `#<id>` and `@<version>`. `/`, `#` and `@` are literals.
+and the optional parts `#<id>` and `@<version>` (in that order). `/`, `#` and `@` are literal.
 
 * `<domain>` is the full domain name of a resource record, but in reversed form, with the subdomains separated by `.` or `/` (can be mixed).
 The `/` is allowed to support (graphical) tools which apply a logical structure to the flat key namespace in ETCDv3
@@ -46,9 +46,9 @@ and the program does not change any names from the entries or queries.
 * `<QTYPE>` are the record types, such as `A`, `MX`, and so on.
 They must be all uppercase, otherwise they will be mistaken for a domain name part.<br>
 `ANY` is not a real record type, so there is nothing to store for it.<br>
-(TODO ignore and warn about mixed case names)
+(TODO ignore and/or warn about mixed case names)
 
-* `<id>` can be anything but `@` (the version separator). The content of `<id>` is not interpreted in any way,
+* `<id>` can be anything but must not contain `@` or `#` (the version and id separators). The content of `<id>` is not interpreted in any way,
 but the id as a whole plays a part in defaults and options resolution. See below for details.<br>
 It is also *the* way to store multiple values for a resource record (multiple entries with equal domain and QTYPE, but different ids).
 
@@ -94,8 +94,8 @@ an error message is logged and the record entry is ignored.
 
 ### Version (versioned entries)
 
-Versioned entries are used for upgrading the program to a higher version
-without interrupting service when adjusting the entries.
+Versioned entries are used when upgrading to a higher data version
+without interrupting service while adjusting the entries.
 
 The program's data version is given in the release notes and also in the version string logged at program start.
 The full version string ("release version") is `<program version>+<data version>` (with a literal `+`).
@@ -210,7 +210,7 @@ override the QTYPE-only values.
 
 For example, for the query `www.example.com` with qtype `A`, the following lists all
 defaults entries, with the former overriding the latter. Same goes for options.<br>
-The defaults/options with the `<id>` part are only used for the `www.example.com/A/<id>` normal entry.
+The defaults/options with an `#<id>` part are only used for the corresponding `www.example.com`, qtype `A`, id `<id>` normal entry (if any).
 
 * `com/example/www/-defaults-/A#<id>`
 * `com/example/www/-defaults-/#<id>`
