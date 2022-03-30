@@ -14,9 +14,12 @@ limitations under the License. */
 
 package src
 
-import "strings"
+type namePart struct {
+	name      string
+	keyPrefix string
+}
 
-type nameType []string // in reversed form (storage form)
+type nameType []namePart // in reversed form (storage form)
 
 func (name *nameType) String() string {
 	return name.normal()
@@ -26,26 +29,53 @@ func (name *nameType) len() int {
 	return len(*name)
 }
 
-func (name *nameType) parts() []string {
-	return *name
-}
-
-func (name *nameType) part(depth int) string {
+func (name *nameType) name(depth int) string {
 	if depth == 0 {
 		return ""
 	}
-	return name.parts()[depth-1]
+	return (*name)[depth-1].name
+}
+
+func (name *nameType) keyPrefix(depth int) string {
+	if depth == 0 {
+		return ""
+	}
+	return (*name)[depth-1].keyPrefix
+}
+
+func (name *nameType) fromDepth(depth int) nameType {
+	if depth == 0 {
+		return *name
+	}
+	var parts []namePart
+	for ; depth <= name.len(); depth++ {
+		parts = append(parts, (*name)[depth-1])
+	}
+	return nameType(parts)
 }
 
 // get the domain in normal form (with trailing dot)
 func (name *nameType) normal() string {
-	return strings.Join(reversed(name.parts()), ".") + "."
+	if name.len() == 0 {
+		return "."
+	}
+	ret := ""
+	for depth := name.len(); depth > 0; depth-- {
+		ret += name.name(depth) + "."
+	}
+	return ret
 }
 
 // get the domain in storage form
-func (name *nameType) asKey(depth int, withTrailingSeparator bool) string {
-	key := strings.Join((*name)[:depth], keySeparator)
-	if withTrailingSeparator {
+func (name *nameType) asKey(withTrailingKeySeparator bool) string {
+	if name.len() == 0 {
+		return ""
+	}
+	key := ""
+	for depth := 1; depth <= name.len(); depth++ {
+		key += name.keyPrefix(depth) + name.name(depth)
+	}
+	if withTrailingKeySeparator {
 		key += keySeparator
 	}
 	return key

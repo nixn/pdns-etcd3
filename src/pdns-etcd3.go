@@ -211,7 +211,7 @@ func handleEvent(event *clientv3.Event) {
 		log.Printf("failed to parse entry key %q, ignoring event. error: %s", entryKey, err)
 		return
 	}
-	itemData, _ := dataRoot.getChild(name.parts(), false)
+	itemData := dataRoot.getChild(name, false)
 	zoneData := itemData.findZone()
 	if event.Type == clientv3.EventTypeDelete && qtype == "SOA" && id == "" && entryType == normalEntry && zoneData != nil && zoneData.parent != nil {
 		// deleting any (valid) SOA record deletes the zone (mostly), so the parent zone must be reloaded instead. this results in a full data reload for top-level zones.
@@ -261,7 +261,7 @@ func Main(gitVersion string) {
 	defer closeClient()
 	doneCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	dataRoot = newDataNode(nil, "")
+	dataRoot = newDataNode(nil, "", "")
 	// populate data
 	{
 		getResponse, err := get(prefix, true, nil)

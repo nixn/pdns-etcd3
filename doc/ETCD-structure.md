@@ -37,8 +37,8 @@ for automatic appending to unqualified domain names beneath it. These entries
 Resource record keys consist of the concatenated parts `<domain>`, `/<QTYPE>`
 and the optional parts `#<id>` and `@<version>`. `/`, `#` and `@` are literals.
 
-* `<domain>` is the full domain name of a resource record, but in reversed form, with the subdomains separated by `/`.
-These choices were made to support (graphical) tools which apply a logical structure to the flat key namespace in ETCDv3
+* `<domain>` is the full domain name of a resource record, but in reversed form, with the subdomains separated by `.` or `/` (can be mixed).
+The `/` is allowed to support (graphical) tools which apply a logical structure to the flat key namespace in ETCDv3
 like in directories and files. (It's really easier to browse it then!)<br>
 `<domain>` must be all lowercase, because the queries from PowerDNS are normalized to lowercase;
 and the program does not change any names from the entries or queries.
@@ -57,9 +57,10 @@ Normally one need not to give a version to any entry. After such an upgrade ther
 
 Examples:
 * `com/example/www/A`
-* `com/example/NS#1`
-* `com/example/SOA@1.1`
-* `com/example/TXT#spf@2`
+* `com/example/NS#1` (record entry with id `1`)
+* `com/example/SOA@1.1` (record entry with version `1.1`)
+* `com/example/TXT#spf@2` (record entry with id `spf` and version `2`)
+* `com.example/dept.fin/SOA` (mixed `.` and `/`, resulting domain is `fin.dept.example.com.`)
 
 ### Resource Record values
 

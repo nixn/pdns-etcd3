@@ -21,9 +21,9 @@ import (
 
 type objectType map[string]interface{}
 
-func reversed(a []string) []string {
+func reversed[T any](a []T) []T {
 	n := len(a)
-	r := make([]string, n)
+	r := make([]T, n)
 	for i := 0; i < n; i++ {
 		r[n-i-1] = a[i]
 	}
@@ -46,4 +46,14 @@ func splitDomainName(name string, separator string) []string {
 		return []string(nil)
 	}
 	return strings.Split(name, separator)
+}
+
+// Map takes a slice of type T, maps every element of it to type R through the mapper function and returns the mapped elements in a new slice of type R
+func Map[T any, R any](slice []T, mapper func(T, int) R) []R {
+	len := len(slice)
+	r := make([]R, len)
+	for i := 0; i < len; i++ {
+		r[i] = mapper(slice[i], i)
+	}
+	return r
 }

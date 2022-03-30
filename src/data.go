@@ -33,22 +33,24 @@ type valuesType struct {
 }
 
 type dataNode struct {
-	parent   *dataNode
-	lname    string                           // local name
-	defaults map[string]map[string]valuesType // <QTYPE> or "" → (<id> → values)
-	options  map[string]map[string]valuesType // <QTYPE> or "" → (<id> → values)
-	records  map[string]map[string]recordType // <QTYPE> → (<id> → record)
-	children map[string]*dataNode             // key = <lname of subdomain>. if children[lname] == nil, the subdomain is present, but the data is not loaded (would be a subzone?)
+	parent    *dataNode
+	lname     string // local name
+	keyPrefix string
+	defaults  map[string]map[string]valuesType // <QTYPE> or "" → (<id> → values)
+	options   map[string]map[string]valuesType // <QTYPE> or "" → (<id> → values)
+	records   map[string]map[string]recordType // <QTYPE> → (<id> → record)
+	children  map[string]*dataNode             // key = <lname of subdomain>. if children[lname] == nil, the subdomain is present, but the data is not loaded (would be a subzone?)
 }
 
-func newDataNode(parent *dataNode, lname string) *dataNode {
+func newDataNode(parent *dataNode, lname, keyPrefix string) *dataNode {
 	return &dataNode{
-		parent:   parent,
-		lname:    lname,
-		defaults: map[string]map[string]valuesType{},
-		options:  map[string]map[string]valuesType{},
-		records:  map[string]map[string]recordType{},
-		children: map[string]*dataNode{},
+		parent:    parent,
+		lname:     lname,
+		keyPrefix: keyPrefix,
+		defaults:  map[string]map[string]valuesType{},
+		options:   map[string]map[string]valuesType{},
+		records:   map[string]map[string]recordType{},
+		children:  map[string]*dataNode{},
 	}
 }
 
@@ -68,7 +70,7 @@ func (dn *dataNode) prefixKey() string {
 	if dn.isRoot() {
 		return ""
 	}
-	return dn.getName().asKey(dn.depth(), true)
+	return dn.getName().asKey(true)
 }
 
 func (dn *dataNode) isRoot() bool {
@@ -111,30 +113,33 @@ func (dn *dataNode) getRoot() *dataNode {
 }
 
 func (dn *dataNode) getName() *nameType {
-	parts := []string(nil)
+	var parts []namePart
 	for dn := dn; dn.lname != ""; dn = dn.parent {
-		parts = append(parts, dn.lname)
+		parts = append(parts, namePart{dn.lname, dn.keyPrefix})
 	}
 	name := nameType(reversed(parts))
 	return &name
 }
 
-func (dn *dataNode) getChild(nameParts []string, create bool) (data *dataNode, depth int) {
-	data = dn
-	for _, lname := range nameParts {
+func (dn *dataNode) getChild(name nameType, create bool) *dataNode {
+	if name.len() == 0 {
+		return dn
+	}
+	data := dn
+	for depth := 1; depth <= name.len(); depth++ {
+		lname := name.name(depth)
 		childData, ok := data.children[lname]
 		if !ok || childData == nil {
 			if create {
-				childData = newDataNode(data, lname)
+				childData = newDataNode(data, lname, name.keyPrefix(depth))
 				data.children[lname] = childData
 			} else {
-				return
+				return data
 			}
 		}
 		data = childData
-		depth++
 	}
-	return
+	return data
 }
 
 func cutKey(key, separator string) (string, string) {
@@ -187,7 +192,22 @@ func parseEntryKey(key string) (name nameType, entryType entryType, qtype, id st
 		}
 	}
 	// name
-	name = nameType(parts)
+	var nameParts []namePart
+	for _, part := range parts {
+		subParts := splitDomainName(part, ".")
+		for i := 0; i < len(subParts); i++ {
+			var keyPrefix string
+			if len(nameParts) == 0 { // first part has no prefix
+				keyPrefix = ""
+			} else if i == 0 { // otherwise first sub-part was separated by keySeparator (splitted earlier)
+				keyPrefix = keySeparator
+			} else { // other sub-parts were separated by a dot
+				keyPrefix = "."
+			}
+			nameParts = append(nameParts, namePart{subParts[i], keyPrefix})
+		}
+	}
+	name = nameType(nameParts)
 	// validation
 	if entryType == normalEntry && qtype == "" {
 		err = fmt.Errorf("empty qtype")
@@ -240,11 +260,11 @@ ITEMS:
 			continue ITEMS
 		}
 		for dn := dn; dn != nil; dn = dn.parent {
-			if name.part(dn.depth()) != dn.lname {
+			if name.name(dn.depth()) != dn.lname {
 				continue ITEMS
 			}
 		}
-		itemData, _ := dn.getChild(name.parts()[dn.depth():], true)
+		itemData := dn.getChild(name.fromDepth(dn.depth()+1), true)
 		if version != nil {
 			// check version against a possibly already stored value, overwrite value only if it's a "better" version
 			var currVersion *versionType

@@ -57,11 +57,12 @@ var (
 
 func lookup(params objectType) (interface{}, error) {
 	query := queryType{
-		name:  nameType(reversed(splitDomainName(params["qname"].(string), "."))),
+		name:  nameType(Map(reversed(splitDomainName(params["qname"].(string), ".")), func(name string, _ int) namePart { return namePart{name, ""} })), // the keyPrefix from query.name will not be used, so it could be anything
 		qtype: params["qtype"].(string),
 	}
-	data, depth := dataRoot.getChild(query.name.parts(), false)
-	if depth < query.name.len() {
+	data := dataRoot.getChild(query.name, false)
+	if data.depth() < query.name.len() {
+		log.Printf("search for %q returned %q", query.name.normal(), data.getQname()) // TRACE
 		log.Printf("no such domain: %q", query.name.normal())
 		return false, nil // need to return false to cause NXDOMAIN, returning an empty array causes PDNS error: "Backend reported condition which prevented lookup (Exception caught when receiving: No 'result' field in response from remote process) sending out servfail"
 	}
