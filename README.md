@@ -3,18 +3,18 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/nixn/pdns-etcd3)](https://goreportcard.com/report/github.com/nixn/pdns-etcd3)
 
 A [PowerDNS][pdns] [remote backend][pdns-remote] with [ETCD][] v3 cluster as storage.
-It uses the [official client][etcd-client]
-to get the data from the cluster. Responses are authoritative for each zone found in
-the data. Only the DNS class `IN` is supported, but that's because of the limitation
-of PowerDNS.
+It uses the [official client][etcd-client] to get the data from the cluster.
+Responses are authoritative for each zone found in the data.
+Only the DNS class `IN` is supported, but that's because of the limitation of PowerDNS.
 
-There is no stable release yet, even no beta. Currently the first development release (0.1.0)
-is being prepared, it could be called 'alpha state'. Any testing is appreciated.
+There is no stable release yet, even no beta. The last release (and first ever) was [0.1.0+0.1.0][v0.1.0],
+the first development release considered alpha quality. Any testing is appreciated.
 
 [pdns]: https://www.powerdns.com/
 [pdns-remote]: https://doc.powerdns.com/authoritative/backends/remote.html
 [etcd]: https://github.com/coreos/etcd/
 [etcd-client]: https://github.com/coreos/etcd/tree/master/clientv3/
+[v0.1.0]: https://github.com/nixn/pdns-etcd3/releases/tag/v0.1.0%2B0.1.0
 
 ## Features
 
