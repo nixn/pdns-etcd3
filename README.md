@@ -24,7 +24,7 @@ is being prepared, it could be called 'alpha state'. Any testing is appreciated.
 * [Multiple syntax possibilities](doc/ETCD-structure.md#syntax) for JSON-supported records
 * Support for custom records (types), like those [supported by PowerDNS][qtypes] but unimplemented in pdns-etcd3
 * Support for [automatically appending zone name to unqualified domain names](doc/ETCD-structure.md#domain-name)
-* [Multi-level defaults](doc/ETCD-structure.md#defaults-and-options), overridable
+* [Multi-level defaults and options](doc/ETCD-structure.md#defaults-and-options), overridable
 * [Upgrade data structure](doc/ETCD-structure.md#upgrading) (if needed for new program version) without interrupting service
 
 [qtypes]: https://doc.powerdns.com/authoritative/appendices/types.html
@@ -39,24 +39,28 @@ is being prepared, it could be called 'alpha state'. Any testing is appreciated.
   * overrideable per entry
 * Override of domain name appended to unqualified names (instead of zone name)
   * useful for `PTR` records in reverse zones
-* Support for defaults, zone appending and possibly more in plain-string records (those which are also JSON-supported/implemented)
+* Support for defaults and zone appending (and possibly more) in plain-string records (those which are also JSON-supported/implemented)
 * "Collect record", automatically combining A and/or AAAA records from "server records"
   * e.g. `etcd.example.com` based on `etcd-1.example.com`, `etcd-2.example.com`, …
-* Possibly "labels" for selectively applying defaults and/or options to record entries
-  * e.g. `com/example/-options-+ptr` → `{"auto-ptr": true}` and `com/example/WWW-options-+collect` → `{"collect": …}` for `com/example/www-1/A+ptr+collect` without global options
-  * precedence betweeen QTYPE and id (id > label > QTYPE)
 * Support more encodings for values (beside JSON)
-  * [JSON5][]
+  * [JSON5][] by [flynn/json5](https://github.com/flynn/json5) (replace default JSON, b/c JSON5 is a superset of JSON)
   * [EDN][] by [go-edn](https://github.com/go-edn/edn)
-  * [TOML][] by [pelletier/go-toml](https://github.com/pelletier/go-toml) or [BurntSushi/toml](https://github.com/BurntSushi/toml)
-  * possibly [YAML][] by [go-yaml](https://github.com/go-yaml/yaml)
-  * …
 * DNSSEC support ([PowerDNS DNSSEC-specific calls][pdns-dnssec])
 * Run standalone for usage as a [Unix connector][pdns-unix-conn]
   * This could be needed for big data sets, b/c the initialization from PowerDNS is done lazily on first request (which possibly could timeout on "big data"…) :-(
-* Perhaps [DNS update support][pdns-update-support], if needed by me or wished by the community
 
-When the required features are done, I should open polls for the optional features ("possibly", "perhaps").
+#### Optional
+
+* "Labels" for selectively applying defaults and/or options to record entries
+  * sth. like `com/example/-options-+ptr` → `{"auto-ptr": true}` and `com/example/www/-options-+collect` → `{"collect": …}` for `com/example/www-1/A+ptr+collect` without global options
+  * precedence betweeen QTYPE and id (id > label > QTYPE)
+* Further encodings
+  * [TOML][] by [pelletier/go-toml](https://github.com/pelletier/go-toml) or [BurntSushi/toml](https://github.com/BurntSushi/toml)
+  * [YAML][] by [go-yaml](https://github.com/go-yaml/yaml)
+  * …
+* [DNS update support][pdns-update-support]
+
+I should open polls for the optional features.
 
 [json5]: https://json5.org/
 [edn]: https://github.com/edn-format/edn
