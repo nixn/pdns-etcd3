@@ -92,8 +92,10 @@ Of course you need an up and running ETCD v3 cluster and a PowerDNS installation
 ### PowerDNS configuration
 ```
 launch+=remote
-remote-connection-string=pipe:command=/path/to/pdns-etcd3[,pdns-version=3|4][,<config>][,prefix=<string>][,timeout=<integer>]
+remote-connection-string=pipe:command=/path/to/pdns-etcd3[,pdns-version=3|4][,<config>][,prefix=<string>][,timeout=<integer>][,log-<level>=<components>]
 ```
+
+NOTE: Every option name must be given exactly as denoted here (no case changes allowed).
 
 `pdns-version` is `4` by default, but may be set to `3` to enable PowerDNS v3 compatibility.
 Version 3 and 4 have incompatible protocols with the backend, so one must use the proper one.
@@ -118,6 +120,10 @@ If `<config>` is not given, it defaults to `endpoints=[::1]:2379|127.0.0.1:2379`
 
 `timeout` is optional, given in milliseconds and defaults to 2000 (2 seconds). The value must be a positive integer.
 
+`log-<level>=<components>` - `<level>` is one of the logging levels (see below), `<components>` is one or more of the components names (see below),
+separated by `+`. Component names must be all lowercase. That option can be repeated for different logging levels.<br>
+Example: `log-debug=main+pdns,log-trace=etcd+data`
+
 ### ETCD structure
 
 See [ETCD structure](doc/ETCD-structure.md). The structure lies beneath the `prefix`
@@ -136,11 +142,28 @@ but that cannot be guaranteed.
 
 ## Testing / Debugging
 
-For now, there is very much simple logging, as the program is in heavy development / alpha state.
-The plan is to build a logging structure, which can be used to selectively
-trace and debug different components. Probably [logrus][] will be used for that.
+There is much logging in the program for being able to test and debug it properly.
+It is structured and leveled, utilizing [logrus][]. The structure consists of different components,
+namely `main`, `pdns`, `etcd` and `data`; the (seven) logging levels are [taken from logrus][logrus-levels].
+For each component an own logging level can be set, so that one can debug only the component(s) of interest.
+
+The components in detail:
+* `main` - The main thread / loop of the program, e.g. setting up logging, creating data objects, processing signals and events, etc.
+* `pdns` - The communication with PowerDNS, e.g. incoming requests and sending results.
+* `etcd` - The communication with ETCD, e.g. real queries against it, connection issues, watchers, etc.
+* `data` - Everything concerning the values (records, ...), parsing data from ETCD, searching records for requests etc.
+
+The levels in detail:
+* `panic` - Something like the world's end. Actually not used.
+* `fatal` - Errors which prevent the program to continue service. After a fatal error the program exits. (Mostly in `main` component.)
+* `error` - Errors which don't prevent the program to continue service. Different meanings for different components.
+* `warning` (or `warn`) - Not errors, but situations where it could be done better. An admin should take care of those.
+* `info` - Useful information on the program, something like "initialized, ready for service". This is the default level for each component.
+* `debug` - "Big steps", like "sending request to ETCD", "Handling event" or "default value not found for X" (perhaps this one should be an error?)
+* `trace` - Small steps and all values, e.g. "found default value for X in Y" or "record: www.example.com./A#some-id = 192.0.2.12"
 
 [logrus]: https://github.com/Sirupsen/logrus
+[logrus-levels]: https://github.com/sirupsen/logrus#level-logging
 
 ## License
 

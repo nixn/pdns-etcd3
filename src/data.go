@@ -17,7 +17,6 @@ package src
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 )
 
@@ -245,14 +244,14 @@ func (dn *dataNode) reload(dataChan <-chan keyValuePair) (counts counts) {
 ITEMS:
 	for item := range dataChan {
 		name, entryType, qtype, id, version, err := parseEntryKey(item.Key)
-		log.Printf("parsed %q into name %q type %q qtype %q id %q version %q err %q", item.Key, name.normal(), entryType, qtype, id, version, err)
+		log.data.Tracef("parsed %q into name %q type %q qtype %q id %q version %q err %q", item.Key, name.normal(), entryType, qtype, id, version, err)
 		// check version first, because a higher version (than our current dataVersion) could change the key syntax (but not prefix and version suffix)
 		if version != nil && !dataVersion.IsCompatibleTo(version) {
-			log.Printf("ignoring %q due to version incompatibility (my: %s, their: %s)", item.Key, dataVersion.String(), version.String())
+			log.data.Infof("ignoring %q due to version incompatibility (my: %s, their: %s)", item.Key, dataVersion.String(), version.String())
 			continue ITEMS
 		}
 		if err != nil {
-			log.Printf("failed to parse entry key %q: %s", item.Key, err)
+			log.data.WithError(err).Errorf("failed to parse entry key %q: %s", item.Key, err)
 			continue ITEMS
 		}
 		// check if the entry belongs to this domain
@@ -297,7 +296,7 @@ ITEMS:
 		// handle content
 		value, err := parseEntryContent(item.Value, entryType == normalEntry)
 		if err != nil {
-			log.Printf("failed to parse content of %q: %s", item.Key, err)
+			log.data.WithError(err).Errorf("failed to parse content of %q", item.Key)
 			continue ITEMS
 		}
 		switch entryType {
@@ -317,7 +316,7 @@ ITEMS:
 			}
 			itemData.records[qtype][id] = recordType{value, version}
 			counts.records++
-			log.Printf("stored record %s%s%s%s%s: %v", name.normal(), keySeparator, qtype, idSeparator, id, value)
+			log.data.Tracef("stored record %s%s%s%s%s: %v", name.normal(), keySeparator, qtype, idSeparator, id, value)
 		case defaultsEntry:
 			fallthrough
 		case optionsEntry:
@@ -337,9 +336,9 @@ ITEMS:
 				vals[qtype] = map[string]valuesType{}
 			}
 			vals[qtype][id] = valuesType{value.(objectType), version}
-			log.Printf("stored %s for %s%s%s%s%s: %v", entryType2key[entryType], name.normal(), keySeparator, qtype, idSeparator, id, value)
+			log.data.Tracef("stored %s for %s%s%s%s%s: %v", entryType2key[entryType], name.normal(), keySeparator, qtype, idSeparator, id, value)
 		default:
-			log.Printf("unsupported entry type %q, ignoring entry %q", entryType, item.Key)
+			log.data.Warnf("unsupported entry type %q, ignoring entry %q", entryType, item.Key)
 		}
 	}
 	return

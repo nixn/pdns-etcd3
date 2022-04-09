@@ -16,16 +16,14 @@ package src
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 )
-
-var _ = log.Printf // suppress compiler error when not logging anything
 
 var (
 	cli     *clientv3.Client
@@ -145,6 +143,7 @@ func txnResponse(response *clientv3.TxnResponse) *getResponseType {
 }
 
 func get(key string, multi bool, revision *int64) (*getResponseType, error) {
+	log.etcd.WithFields(logrus.Fields{"multi": multi, "rev": revision}).Tracef("get %q", key)
 	opts := []clientv3.OpOption(nil)
 	if multi {
 		opts = append(opts, clientv3.WithPrefix())
@@ -160,7 +159,7 @@ func get(key string, multi bool, revision *int64) (*getResponseType, error) {
 	if err != nil {
 		return nil, fmt.Errorf("[dur %s] %s", dur, err)
 	}
-	log.Printf("get %q (%v) @%d, dur: %s, # %v more? %v", key, multi, revision, dur, response.Count, response.More)
+	log.etcd.WithFields(logrus.Fields{"multi": multi, "dur": dur, "rev": revision, "#": response.Count, "more": response.More}).Tracef("got %q", key)
 	return getResponse(response), nil
 }
 
@@ -193,7 +192,7 @@ func getall(keys []keyMultiPair, revision *int64) (*getResponseType, error) {
 	for _, response := range response.Responses {
 		counts = append(counts, response.GetResponseRange().Count)
 	}
-	log.Printf("get %v @%d, dur: %s, # %v", keys, revision, dur, counts)
+	log.etcd.Printf("get %v @%d, dur: %s, # %v", keys, revision, dur, counts)
 	return txnResponse(response), nil
 }
 
@@ -213,16 +212,16 @@ func startWatchData(doneCtx context.Context, revision int64) <-chan *clientv3.Ev
 				case watchResponse, ok := (<-watchChan):
 					if ok {
 						if watchResponse.Canceled {
-							log.Println("watch canceled:", watchResponse.Err())
+							log.etcd.WithError(watchResponse.Err()).Error("watch canceled")
 							break
 						} else {
-							log.Println("watch event. compact revision:", watchResponse.CompactRevision, "[#events]", len(watchResponse.Events), "[revision]", watchResponse.Header.Revision)
+							log.etcd.WithFields(logrus.Fields{"compact-rev": watchResponse.CompactRevision, "#events": len(watchResponse.Events), "rev": watchResponse.Header.Revision}).Debug("watch event")
 							for _, ev := range watchResponse.Events {
 								ch <- ev
 							}
 						}
 					} else {
-						log.Println("watch failed:", watchResponse.Err())
+						log.etcd.WithError(watchResponse.Err()).Errorf("watch failed")
 						break
 					}
 				}

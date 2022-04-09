@@ -19,12 +19,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
+	"github.com/sirupsen/logrus"
 )
 
 type pdnsRequest struct {
@@ -38,7 +38,7 @@ func (req *pdnsRequest) String() string {
 
 var (
 	dataVersion    = versionType{true, 1, 0} // update this when changing data structure
-	programVersion = versionType{true, 1, 0} // update this before a new release
+	programVersion = versionType{true, 1, 1} // update this before a new release
 )
 
 var (
@@ -152,6 +152,15 @@ func initialize(request *pdnsRequest) (logMessages []string, err error) {
 		err = err2
 		return
 	}
+	// logging levels
+	for _, level := range logrus.AllLevels {
+		if _, err = readParameter(fmt.Sprintf("log-%s", level), request.Parameters, func(value string) error {
+			setLoggingLevel(value, level)
+			return nil
+		}); err != nil {
+			return
+		}
+	}
 	return
 }
 
@@ -164,12 +173,12 @@ func startReadRequests() <-chan pdnsRequest {
 			request := pdnsRequest{}
 			if err := dec.Decode(&request); err != nil {
 				if err == io.EOF {
-					log.Println("EOF on input stream, terminating")
+					log.pdns.Debug("EOF on input stream, terminating")
 					return
 				}
-				log.Fatalln("Failed to decode request:", err)
+				log.pdns.Fatal("Failed to decode request:", err)
 			} else {
-				log.Println("new request:", request)
+				log.pdns.WithField("request", request).Debug("received new request")
 				ch <- request
 			}
 		}
@@ -178,7 +187,7 @@ func startReadRequests() <-chan pdnsRequest {
 }
 
 func handleRequest(request *pdnsRequest) {
-	log.Println("handling request:", request)
+	log.main.Debug("handling request:", request)
 	since := time.Now()
 	var result interface{}
 	var err error
@@ -196,11 +205,11 @@ func handleRequest(request *pdnsRequest) {
 		respond(result, err.Error())
 	}
 	dur := time.Since(since)
-	log.Printf("result: %v [err %v] [dur %s]", result, err, dur)
+	log.main.WithFields(logrus.Fields{"dur": dur, "err": err, "val": result}).Trace("result")
 }
 
 func handleEvent(event *clientv3.Event) {
-	log.Println("handling event:", event)
+	log.etcd.WithField("event", event).Debug("handling event")
 	entryKey := string(event.Kv.Key)
 	name, entryType, qtype, id, version, err := parseEntryKey(entryKey)
 	// check version first, because a new version could change the key syntax (but not prefix and version suffix)
@@ -208,7 +217,7 @@ func handleEvent(event *clientv3.Event) {
 		return
 	}
 	if err != nil {
-		log.Printf("failed to parse entry key %q, ignoring event. error: %s", entryKey, err)
+		log.data.WithError(err).Errorf("failed to parse entry key %q, ignoring event", entryKey)
 		return
 	}
 	itemData := dataRoot.getChild(name, false)
@@ -222,35 +231,35 @@ func handleEvent(event *clientv3.Event) {
 	}
 	getResponse, err := get(prefix+zoneData.prefixKey(), true, &event.Kv.ModRevision)
 	if err != nil {
-		log.Printf("failed to get data for zone %q, not updating. error: %s", zoneData.getQname(), err)
+		log.data.WithError(err).Warnf("failed to get data for zone %q, not updating", zoneData.getQname())
 		return
 	}
 	qname := zoneData.getQname()
-	log.Printf("reloading zone %q", qname)
+	log.data.Tracef("reloading zone %q", qname)
 	counts := zoneData.reload(getResponse.DataChan)
 	dataRevision = event.Kv.ModRevision
-	log.Printf("reloaded zone %q, counts=%+v. updated data revision to %v", qname, counts, dataRevision)
+	log.data.WithFields(logrus.Fields{"counts": counts, "dataRevision": dataRevision}).Debugf("reloaded zone %q and updated data revision", qname)
 }
 
 // Main is the "moved" program entrypoint, but with git version argument (which is set in real main package)
 func Main(gitVersion string) {
 	// TODO handle arguments, f.e. 'show-defaults' standalone command
-	log.SetPrefix(fmt.Sprintf("pdns-etcd3[%d]: ", os.Getpid()))
-	log.SetFlags(0)
+	initLogging()
 	releaseVersion := programVersion.String() + "+" + dataVersion.String()
 	if "v"+releaseVersion != gitVersion {
 		releaseVersion += fmt.Sprintf("[%s]", gitVersion)
 	}
-	log.Printf("pdns-etcd3 %s, Copyright © 2016-2022 nix <https://keybase.io/nixn>", releaseVersion)
+	log.main.Printf("pdns-etcd3 %s, Copyright © 2016-2022 nix <https://keybase.io/nixn>", releaseVersion)
 	var logMessages []string
 	reqChan := startReadRequests()
 	// first request must be 'initialize'
 	{
 		initRequest := <-reqChan
+		log.pdns.WithField("request", initRequest).Traceln("Received request")
 		if initRequest.Method != "initialize" {
-			log.Fatalln("Waited for 'initialize', got:", initRequest.Method)
+			log.pdns.WithField("method", initRequest.Method).Fatalln("Wrong request method (waited for 'initialize')")
 		}
-		log.Printf("initializing with parameters: %+v", initRequest.Parameters)
+		log.main.WithField("parameters", initRequest.Parameters).Info("initializing")
 		initMessages, err := initialize(&initRequest)
 		if err != nil {
 			fatal(err)
@@ -271,9 +280,9 @@ func Main(gitVersion string) {
 		counts := dataRoot.reload(getResponse.DataChan)
 		logMessages = append(logMessages, fmt.Sprintf("counts=%+v", counts), fmt.Sprintf("revision=%v", dataRevision))
 	}
-	log.Printf("starting data watcher")
+	log.main.Debugln("starting data watcher")
 	eventsChan := startWatchData(doneCtx, dataRevision+1)
-	log.Println("initialized.", strings.Join(logMessages, ". "))
+	log.main.Infoln("initialized.", strings.Join(logMessages, ". "))
 	respond(true, logMessages...)
 	// main loop
 	for {
@@ -302,12 +311,12 @@ func respond(result interface{}, msgs ...string) {
 	response := makeResponse(result, msgs...)
 	enc := json.NewEncoder(os.Stdout)
 	if err := enc.Encode(&response); err != nil {
-		log.Fatalln("Failed to encode response", response, ":", err)
+		log.pdns.WithError(err).WithField("response", response).Fatal("failed to encode response")
 	}
 }
 
 func fatal(msg interface{}) {
 	s := fmt.Sprintf("%s", msg)
 	respond(false, s)
-	log.Fatalln("Fatal error:", s)
+	log.main.Fatal("Fatal error:", s)
 }

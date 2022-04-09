@@ -16,7 +16,6 @@ package src
 
 import (
 	"fmt"
-	"log"
 	"time"
 )
 
@@ -62,8 +61,8 @@ func lookup(params objectType) (interface{}, error) {
 	}
 	data := dataRoot.getChild(query.name, false)
 	if data.depth() < query.name.len() {
-		log.Printf("search for %q returned %q", query.name.normal(), data.getQname()) // TRACE
-		log.Printf("no such domain: %q", query.name.normal())
+		log.data.Tracef("search for %q returned %q", query.name.normal(), data.getQname())
+		log.data.Debugf("no such domain: %q", query.name.normal())
 		return false, nil // need to return false to cause NXDOMAIN, returning an empty array causes PDNS error: "Backend reported condition which prevented lookup (Exception caught when receiving: No 'result' field in response from remote process) sending out servfail"
 	}
 	var result []objectType
@@ -100,9 +99,9 @@ func lookup(params objectType) (interface{}, error) {
 					"ttl": ttl,
 				}
 			default:
-				log.Fatalf("invalid record type: %T (%v)", record, record)
+				log.data.WithField("record", record).Fatalf("invalid record type: %T", record)
 			}
-			log.Printf("%s%s%s%s%s: %v → content: %v, meta: %v", data.getQname(), keySeparator, qtype, idSeparator, id, record, content, meta)
+			log.data.Tracef("%s%s%s%s%s: %v → content: %v, meta: %v", data.getQname(), keySeparator, qtype, idSeparator, id, record, content, meta)
 			result = append(result, makeResultItem(qtype, data, content, meta))
 		}
 	}
@@ -136,13 +135,13 @@ func findValue(name string, values objectType, qtype, id string, data *dataNode)
 			if defaults, ok := dn.defaults[path.qtype]; ok {
 				if defaults, ok := defaults[path.id]; ok {
 					if v, ok := defaults.values[name]; ok {
-						log.Printf("found default value for %s:%s (%v) in %s%s%s%s%s", data.getQname(), name, v, dn.getQname(), keySeparator, path.qtype, idSeparator, path.id)
+						log.data.Tracef("found default value for %s:%s (%v) in %s%s%s%s%s", data.getQname(), name, v, dn.getQname(), keySeparator, path.qtype, idSeparator, path.id)
 						return v, nil
 					}
 				}
 			}
 		}
 	}
-	log.Printf("not found default value for %s:%s", data.getQname(), name)
+	log.data.Debugf("default value not found for %s:%s", data.getQname(), name)
 	return nil, fmt.Errorf("missing %q", name)
 }

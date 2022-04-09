@@ -15,6 +15,7 @@ limitations under the License. */
 package src
 
 import (
+	"os"
 	"regexp"
 	"time"
 )
@@ -39,5 +40,6 @@ const (
 )
 
 var (
+	pid        = os.Getpid()
 	qtypeRegex = regexp.MustCompile("^[A-Z]+$")
 )
