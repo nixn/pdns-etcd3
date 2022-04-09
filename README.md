@@ -1,6 +1,7 @@
 # pdns-etcd3
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/nixn/pdns-etcd3)](https://goreportcard.com/report/github.com/nixn/pdns-etcd3)
+![GitHub release (latest by date including pre-releases)](https://img.shields.io/github/v/release/nixn/pdns-etcd3?include_prereleases&sort=semver&label=latest%20(pre-)release)
 
 A [PowerDNS][pdns] [remote backend][pdns-remote] with [ETCD][] v3 cluster as storage.
 It uses the [official client][etcd-client] to get the data from the cluster.
@@ -39,6 +40,8 @@ the first development release considered alpha quality. Any testing is appreciat
   * overrideable per entry
 * Override of domain name appended to unqualified names (instead of zone name)
   * useful for `PTR` records in reverse zones
+* Short syntax for single-value objects
+  * or for the only value left when using defaults (e.g. `target` in `SRV`)
 * Support for defaults and zone appending (and possibly more) in plain-string records (those which are also JSON-supported/implemented)
 * "Collect record", automatically combining A and/or AAAA records from "server records"
   * e.g. `etcd.example.com` based on `etcd-1.example.com`, `etcd-2.example.com`, …
@@ -49,6 +52,9 @@ the first development release considered alpha quality. Any testing is appreciat
 * Run standalone for usage as a [Unix connector][pdns-unix-conn]
   * This could be needed for big data sets, b/c the initialization from PowerDNS is done lazily on first request (which possibly could timeout on "big data"…) :-(
 
+[pdns-dnssec]: https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dnssec-support
+[pdns-unix-conn]: https://doc.powerdns.com/authoritative/backends/remote.html#unix-connector
+
 #### Optional
 
 * "Labels" for selectively applying defaults and/or options to record entries
@@ -58,7 +64,8 @@ the first development release considered alpha quality. Any testing is appreciat
   * [TOML][] by [pelletier/go-toml](https://github.com/pelletier/go-toml) or [BurntSushi/toml](https://github.com/BurntSushi/toml)
   * [YAML][] by [go-yaml](https://github.com/go-yaml/yaml)
   * …
-* [DNS update support][pdns-update-support]
+* [DNS update support](https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dns-update-support)
+* [Prometheus exporter](https://prometheus.io/docs/guides/go-application/)
 
 I should open polls for the optional features.
 
@@ -66,9 +73,6 @@ I should open polls for the optional features.
 [edn]: https://github.com/edn-format/edn
 [yaml]: http://www.yaml.org/
 [toml]: https://github.com/toml-lang/toml
-[pdns-dnssec]: https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dnssec-support
-[pdns-unix-conn]: https://doc.powerdns.com/authoritative/backends/remote.html#unix-connector
-[pdns-update-support]: https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dns-update-support
 
 ## Installation
 
