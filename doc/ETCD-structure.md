@@ -4,12 +4,8 @@
 
 The structure is currently in development and may change multiple times in a
 backwards-incompatible way until a stable major release.
-Also prior to release 0.1.0 it can (and probably will) change backwards-incompatible
-without any notice or version change.
-
-For each *release* (development or stable), which changes the structure in a
-backwards-incompatible way, the structure major version changes too.
-This is not true for a *commit*.
+For each *release* (development or stable, since 0.1.0), which changes the structure in such a way,
+the structure major version changes too. This is not true for a *commit*.
 
 For details, see "Version" section below.
 

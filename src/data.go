@@ -22,13 +22,12 @@ import (
 
 // TODO use more object-oriented style
 type recordType struct {
-	value   interface{} // objectType (from JSON) or string (plain entry)
-	version *versionType
+	version *VersionType
 }
 
 type valuesType struct {
 	values  objectType
-	version *versionType
+	version *VersionType
 }
 
 type dataNode struct {
@@ -160,7 +159,7 @@ func cutParts(parts []string, predicate func(string) bool) ([]string, string) {
 	return parts, ""
 }
 
-func parseEntryKey(key string) (name nameType, entryType entryType, qtype, id string, version *versionType, err error) {
+func parseEntryKey(key string) (name nameType, entryType entryType, qtype, id string, version *VersionType, err error) {
 	key = strings.TrimPrefix(key, prefix)
 	// note: qtype is also used as temp variable until it is set itself
 	// version
@@ -246,7 +245,7 @@ ITEMS:
 		name, entryType, qtype, id, version, err := parseEntryKey(item.Key)
 		log.data.Tracef("parsed %q into name %q type %q qtype %q id %q version %q err %q", item.Key, name.normal(), entryType, qtype, id, version, err)
 		// check version first, because a higher version (than our current dataVersion) could change the key syntax (but not prefix and version suffix)
-		if version != nil && !dataVersion.IsCompatibleTo(version) {
+		if version != nil && !dataVersion.isCompatibleTo(version) {
 			log.data.Infof("ignoring %q due to version incompatibility (my: %s, their: %s)", item.Key, dataVersion.String(), version.String())
 			continue ITEMS
 		}
@@ -266,7 +265,7 @@ ITEMS:
 		itemData := dn.getChild(name.fromDepth(dn.depth()+1), true)
 		if version != nil {
 			// check version against a possibly already stored value, overwrite value only if it's a "better" version
-			var currVersion *versionType
+			var currVersion *VersionType
 			switch entryType {
 			case normalEntry:
 				if curr, ok := itemData.records[qtype]; ok {
@@ -289,7 +288,7 @@ ITEMS:
 					}
 				}
 			}
-			if currVersion != nil && version.minor <= currVersion.minor {
+			if currVersion != nil && version.Minor <= currVersion.Minor {
 				continue ITEMS
 			}
 		}
@@ -304,7 +303,7 @@ ITEMS:
 			// if entry already present, only overwrite it if version dictates it, otherwise ignore
 			if curr, ok := itemData.records[qtype]; ok {
 				if curr, ok := curr[id]; ok {
-					if version != nil && curr.version != nil && version.minor <= curr.version.minor {
+					if version != nil && curr.version != nil && version.Minor <= curr.version.Minor {
 						continue ITEMS
 					}
 				}
@@ -328,7 +327,7 @@ ITEMS:
 			}
 			if curr, ok := vals[qtype]; ok {
 				if curr, ok := curr[id]; ok {
-					if version != nil && curr.version != nil && version.minor <= curr.version.minor {
+					if version != nil && curr.version != nil && version.Minor <= curr.version.Minor {
 						continue ITEMS
 					}
 				}

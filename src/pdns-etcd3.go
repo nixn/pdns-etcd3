@@ -37,8 +37,8 @@ func (req *pdnsRequest) String() string {
 }
 
 var (
-	dataVersion    = versionType{true, 1, 0} // update this when changing data structure
-	programVersion = versionType{true, 1, 1} // update this before a new release
+	// update this when changing data structure (only major/minor, patch is always 0)
+	dataVersion = VersionType{IsDevelopment: true, Major: 1, Minor: 1}
 )
 
 var (
@@ -213,7 +213,7 @@ func handleEvent(event *clientv3.Event) {
 	entryKey := string(event.Kv.Key)
 	name, entryType, qtype, id, version, err := parseEntryKey(entryKey)
 	// check version first, because a new version could change the key syntax (but not prefix and version suffix)
-	if version != nil && !dataVersion.IsCompatibleTo(version) {
+	if version != nil && !dataVersion.isCompatibleTo(version) {
 		return
 	}
 	if err != nil {
@@ -242,7 +242,7 @@ func handleEvent(event *clientv3.Event) {
 }
 
 // Main is the "moved" program entrypoint, but with git version argument (which is set in real main package)
-func Main(gitVersion string) {
+func Main(programVersion VersionType, gitVersion string) {
 	// TODO handle arguments, f.e. 'show-defaults' standalone command
 	initLogging()
 	releaseVersion := programVersion.String() + "+" + dataVersion.String()

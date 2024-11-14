@@ -16,8 +16,11 @@ package main
 
 import P "github.com/nixn/pdns-etcd3/src"
 
-var gitVersion = "GIT_VERSION_UNSET"
+var (
+	programVersion = P.VersionType{IsDevelopment: true} // update this in a release branch
+	gitVersion     = "GIT_VERSION_UNSET"
+)
 
 func main() {
-	P.Main(gitVersion)
+	P.Main(programVersion, gitVersion)
 }
