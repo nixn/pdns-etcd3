@@ -1,4 +1,4 @@
-/* Copyright 2016-2022 nix <https://keybase.io/nixn>
+/* Copyright 2016-2024 nix <https://keybase.io/nixn>
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -249,7 +249,7 @@ func Main(gitVersion string) {
 	if "v"+releaseVersion != gitVersion {
 		releaseVersion += fmt.Sprintf("[%s]", gitVersion)
 	}
-	log.main.Printf("pdns-etcd3 %s, Copyright © 2016-2022 nix <https://keybase.io/nixn>", releaseVersion)
+	log.main.Printf("pdns-etcd3 %s, Copyright © 2016-2024 nix <https://keybase.io/nixn>", releaseVersion)
 	var logMessages []string
 	reqChan := startReadRequests()
 	// first request must be 'initialize'

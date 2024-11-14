@@ -167,7 +167,7 @@ The levels in detail:
 
 ## License
 
-Copyright © 2016-2022 nix <https://keybase.io/nixn>
+Copyright © 2016-2024 nix <https://keybase.io/nixn>
 
 Distributed under the Apache 2.0 license, available in the file [LICENSE](LICENSE).
 
