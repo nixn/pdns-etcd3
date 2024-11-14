@@ -223,7 +223,7 @@ func handleEvent(event *clientv3.Event) {
 	itemData := dataRoot.getChild(name, false)
 	zoneData := itemData.findZone()
 	if event.Type == clientv3.EventTypeDelete && qtype == "SOA" && id == "" && entryType == normalEntry && zoneData != nil && zoneData.parent != nil {
-		// deleting any (valid) SOA record deletes the zone (mostly), so the parent zone must be reloaded instead. this results in a full data reload for top-level zones.
+		// deleting the SOA record deletes the zone, so the parent zone must be reloaded instead. this results in a full data reload for top-level zones.
 		zoneData = zoneData.parent.findZone()
 	}
 	if zoneData == nil {

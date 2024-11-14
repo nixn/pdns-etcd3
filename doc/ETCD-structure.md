@@ -18,7 +18,7 @@ and optional entries for default field values ("defaults") and "options" (affect
 
 * `<prefix>` is the global prefix from configuration (see [README](../README.md)).
 All entry keys for pdns-etcd3 must begin with that `<prefix>`, otherwise they are ignored.
-The following sections do not mention `<prefix>` any more, but it always must go first.
+The following sections do not mention `<prefix>` anymore, but it always must go first.
 
 * "Zones" are defined by domains having a `SOA` record. The zone domain is used
 for automatic appending to unqualified domain names beneath it.
@@ -26,7 +26,7 @@ The entries beneath a zone are served with the 'authoritative answer' bit (AA) s
 (TODO `non-auth` option)
 
 * Defaults and options are valid for their level and all levels beneath
-(unless overridden in some sub-level).
+(unless overridden in some sublevel).
 
 ### Resource Record keys
 
@@ -49,7 +49,7 @@ but the id as a whole plays a part in defaults and options resolution. See below
 It is also *the* way to store multiple values for a resource record (multiple entries with equal domain and QTYPE, but different ids).
 
 * `<version>` is only relevant when upgrading the program which upgrades the data structure to a newer version.
-Normally one need not to give a version to any entry. After such an upgrade there should be no versioned entries any more. See below for details.
+Normally one need not give a version to any entry. After such an upgrade there should be no versioned entries anymore. See below for details.
 
 Examples:
 * `com/example/www/A`
@@ -69,7 +69,7 @@ If the content value begins with a `{` (no whitespace before!), it is parsed as 
 There are exceptions to this rule: For PowerDNS v3 each JSON-supported record with a priority field
 may not be stored as plain string, because the priority of such a record must be reported in a
 separate field in the backend protocol. As of PowerDNS v4 the priority field is given in the content
-and is not a separate field any more. Thus such records could then be given as plain strings.<br>
+and is not a separate field anymore. Thus, such records could then be given as plain strings.<br>
 Also the SOA record cannot be given as a plain string due to the automatically handled 'serial' field.
 
 Not all records are implemented, thus are not JSON-supported. But the list shall be ever-growing.
@@ -100,7 +100,7 @@ The default version string is appended by a detailed git version string, if it d
 #### Syntax and rules
 
 A versioned entry has a version number appended to the regular key,
-prefixed by `@`: `com/example/www/NS#1@0.1`.
+prefixed by `@`: `com/example/NS#1@0.1`.
 
 A version number has the syntax `<major>` or `<major>.<minor>` (`.<minor>` is optional, if minor is zero)
 with `<major>` and `<minor>` being non-negative integers.
@@ -112,7 +112,7 @@ Otherwise a change (which should be only additions) increases only `<minor>`.
 
 During the development of first stable release (`1` or `1.0`) the `<major>` number
 is `0`, the minor number starts with `1` and acts as the major number regarding
-changes. Therefore there may be another minor number (usually called *patch*),
+changes. Therefore, there may be another minor number (usually called *patch*),
 so that a development data version could be `0.3.2`.
 
 The program ignores all versioned entries, which are either of a different major version
@@ -194,7 +194,7 @@ Default key: `<domain>/-defaults-/<QTYPE>`<br>
 Options key: `<domain>/-options-/<QTYPE>`<br>
 3. id<br>
 Defaults key: `<domain>/-defaults-/#<id>`<br>
-Options key: `<domain>/-defaults-/#<id>`<br>
+Options key: `<domain>/-options-/#<id>`<br>
 4. QTYPE + id<br>
 Defaults key: `<domain>/-defaults-/<QTYPE>#<id>`<br>
 Options key: `<domain>/-options-/<QTYPE>#<id>`<br>
@@ -254,7 +254,7 @@ All entries can have a `ttl` field, for the record TTL. There must be a TTL valu
 
 Domain names undergo a check whether to append the zone name.
 The rule is the same as in [BIND][] zone files: if a name ends with a dot, the zone
-name is not appended, otherwise it is. This is only possible for JSON-entries (planned to be changed).
+name is not appended, otherwise it is. This is only possible for JSON-entries.
 
 [bind]: https://www.isc.org/downloads/bind/
 
@@ -383,7 +383,7 @@ DNS/net/example/_tcp/_kerberos/SRV#2 → '{"target": "kerberos2"}'
 DNS/net/example/kerberos-master/CNAME → '{"target": "kerberos1"}'
 ```
 
-Reverse zone for IPv4:
+Reverse zone for `192.0.2.0/24`:
 ```
 DNS/arpa/in-addr/192/0/2/SOA → '{"primary": "ns1.example.net.", "mail": "horst.master@example.net."}'
 DNS/arpa/in-addr/192/0/2/NS#a → '{"hostname": "ns1.example.net."}'
@@ -395,7 +395,7 @@ DNS/arpa/in-addr/192/0/2/15/PTR → 'kerberos1.example.net.'
 DNS/arpa/in-addr/192/0/2/25/PTR → 'kerberos2.example.net.'
 ```
 
-Reverse zone for IPv6:
+Reverse zone for `2001:db8::/32`:
 ```
 DNS/arpa/ip6/2/0/0/1/0/d/b/8/SOA → '{"primary":"ns1.example.net.", "mail":"horst.master@example.net."}'
 DNS/arpa/ip6/2/0/0/1/0/d/b/8/NS#1 → 'ns1.example.net.'
@@ -407,7 +407,7 @@ DNS/arpa/ip6/2/0/0/1/0/d/b/8/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/1/5/PTR
 DNS/arpa/ip6/2/0/0/1/0/d/b/8/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/2/5/PTR → 'kerberos2.example.net.'
 ```
 
-Delegation and glue records:
+Delegation and glue records for `subunit.example.net.`:
 ```
 DNS/net/example/subunit/NS#1 → '{"hostname": "ns1.subunit"}'
 DNS/net/example/subunit/NS#2 → '{"hostname": "ns2.subuint"}'

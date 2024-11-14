@@ -21,7 +21,7 @@ the first development release, considered alpha quality. Any testing is apprecia
 
 * Automatic serial for `SOA` records (based on the cluster revision).
 * Replication is handled by the ETCD cluster, no additional configuration is needed for using multiple authoritative PowerDNS servers.
-  * DNS respoonses are nearly instantly up-to-date (on every server instance!) after data changes by using a watcher into ETCD (multi-master)
+  * DNS responses are nearly instantly up-to-date (on every server instance!) after data changes by using a watcher into ETCD (multi-master)
 * [Multiple syntax possibilities](doc/ETCD-structure.md#syntax) for JSON-supported records
 * Support for custom records (types), like those [supported by PowerDNS][qtypes] but unimplemented in pdns-etcd3
 * Support for [automatically appending zone name to unqualified domain names](doc/ETCD-structure.md#domain-name)
@@ -101,7 +101,7 @@ NOTE: Every option name must be given exactly as denoted here (no case changes a
 Version 3 and 4 have incompatible protocols with the backend, so one must use the proper one.
 
 `<config>` is one of
-* `configFile=/path/to/etcd-config-file`
+* `config-file=/path/to/etcd-config-file`
 * `endpoints=192.168.1.7:2379|192.168.1.8:2379`
 * MAYBE LATER (see below) `discovery-srv=example.com`
 
@@ -134,7 +134,7 @@ configured in PowerDNS (see above).
 pdns-etcd3 is tested on PowerDNS versions 3 and 4, and uses an ETCD v3 cluster.
 It's currently only one version of each (pdns 3.x and 4.y, ETCD API 3.0),
 until I find a way to test it on different versions easily.
-Therefore each release shall state which exact versions were used for testing,
+Therefore, each release shall state which exact versions were used for testing,
 so one can be sure to have a working combination for deploying,
 when using those (tested) versions.
 Most likely it will work on other "usually compatible" versions,

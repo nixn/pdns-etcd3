@@ -21,6 +21,7 @@ import (
 )
 
 // TODO use more object-oriented style
+
 type recordType struct {
 	version *VersionType
 }
