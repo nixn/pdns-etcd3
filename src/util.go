@@ -15,11 +15,14 @@ limitations under the License. */
 package src
 
 import (
+	"cmp"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
 
-type objectType map[string]interface{}
+type objectType[T any] map[string]T
 
 func reversed[T any](a []T) []T {
 	n := len(a)
@@ -48,12 +51,53 @@ func splitDomainName(name string, separator string) []string {
 	return strings.Split(name, separator)
 }
 
+func startsWith(str, prefix string) bool {
+	return str[:len(prefix)] == prefix
+}
+
+func endsWith(str string, suffix string) bool {
+	strLen := len(str)
+	sufLen := len(suffix)
+	if strLen < sufLen {
+		return false
+	}
+	return str[strLen-sufLen:] == suffix
+}
+
 // Map takes a slice of type T, maps every element of it to type R through the mapper function and returns the mapped elements in a new slice of type R
 func Map[T any, R any](slice []T, mapper func(T, int) R) []R {
-	len := len(slice)
-	r := make([]R, len)
-	for i := 0; i < len; i++ {
+	l := len(slice)
+	r := make([]R, l)
+	for i := 0; i < l; i++ {
 		r[i] = mapper(slice[i], i)
 	}
 	return r
+}
+
+func ptr2str[T any](ptr *T) string {
+	if ptr == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("&%v", *ptr)
+}
+
+func err2str(err error) string {
+	if err == nil {
+		return "<nil>"
+	}
+	return err.Error()
+}
+
+func float2int(n float64) (int64, error) {
+	return strconv.ParseInt(fmt.Sprintf("%.0f", n), 10, 64)
+}
+
+func maxOf[T cmp.Ordered](first T, more ...T) T {
+	result := first
+	for _, item := range more {
+		if item > result {
+			result = item
+		}
+	}
+	return result
 }

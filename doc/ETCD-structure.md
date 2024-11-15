@@ -75,6 +75,7 @@ Also the SOA record cannot be given as a plain string due to the automatically h
 Not all records are implemented, thus are not JSON-supported. But the list shall be ever-growing.
 For the other types there is always the possibility to store them as plain strings.<br>
 If a record content is given as a JSON object, but is not supported by the program, it is warned about and ignored.
+(TODO unsupported entries with values starting with markers like `{` or `=`)
 
 The record TTL is a regular field in case of a JSON object entry (key `ttl`), but there
 is no way to directly define a record-specific TTL for a plain string entry.
@@ -180,7 +181,7 @@ from above: 1, 2 (only added entries), 4, 6, 8 and 9.
 
 #### Current version
 
-The current data version is `0.1` and is described in this document.
+The current data version is `0.1.1` and is described in this document.
 
 ### Defaults and options
 
@@ -276,18 +277,28 @@ Values must be positive (that is >= 1 second).
     * `"::ffff:192.168.1.2"`
     * `"::ffff:c0a8:0102"`
     * `"c0a80102"`
-* array of bytes or number strings, length 4
-    * `[192, "168", 1, 2]`
+    * the hexadecimal IP string (without "." or ":" separators) can be shorter when the option `ip-prefix` is used, but the length always must be a multiple of 2
+    * the other options are not eligible for prefix handling
+* array of bytes or number strings
+    * length 1 - 4
+    * `[192, "0xa8", 1, "2"]`
+* number
+    * is taken as the last octet of the IP
+    * `2`
 
 ###### "IPv6 address"
 * string
     * `"2001:0db8::1"`
     * `"2001:db8:0:0:0000:0:0:1"`
     * `"20010db8000000000000000000000001"`
-* array of numbers (uint16) or strings (of numbers), length 8
-    * `[8193, "0xdb8", "0", 0, 0, 0, 0, 1]`
-* array of numbers (uint8) or strings (of numbers), length 16
-    * `[32, 1, 13, "0xb8", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]`
+    * the hexadecimal IP string (without ":" separators) can be shorter when the option `ip-prefix` is used, but the length must always be a multiple of 2
+    * the other options are not eligible for prefix handling
+* array of numbers (uint8) or strings (of numbers)
+    * length 1 - 16
+    * `[32, "1", "0xd", "0xb8", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]`
+* number
+    * is taken as the last octet of the IP
+    * `2`
 
 ###### "uint16"
 * number
@@ -302,9 +313,8 @@ Values must be positive (that is >= 1 second).
 ### QTYPEs
 
 #### `SOA`
-
 * `primary`: domain name
-* `mail`: an e-mail address, in regular syntax (`mail@example.net.`), but the domain name undergoes the zone append check, as described in syntax for "domain name"!
+* `mail`: an e-mail address, in regular syntax (`mail@example.net.`), but the domain name undergoes the zone append check, as described in syntax for "domain name"! It also can be only the local part (without `@<domain>`), then the zone domain name is appended.
 * `refresh`: duration
 * `retry`: duration
 * `expire`: duration
@@ -313,14 +323,32 @@ Values must be positive (that is >= 1 second).
 There is no serial field, because the program takes the cluster revision as serial.
 This way the operator does not have to increase it manually each time he/she changes DNS data.
 
+Options:
+* `no-aa` or `not-authoritative`: boolean
+    * don't set the AA-bit for this zone, when set to true
+    * not yet implemented
+* `zone-append-domain`: domain name
+    * when performing zone append checks, take this value (domain) instead of the FQDN
+    * undergoes itself a zone append check with the parent zone (if not ending with a `.`)
+    * this option can be applied to any QTYPE with a domain name in its value, but is mostly useful here
+        * currently `NS`, `PTR`, `CNAME`, `DNAME`, `MX` and `SRV`
+
 #### `NS`
 * `hostname`: domain name
 
 #### `A`
 * `ip`: IPv4 address
 
+Options:
+* `ip-prefix`: IPv4 address
+    * prefix octets are used in the front, value octets are used at the back, middle is padded with zeroes up to the total length of 4 octets (prefix + middle + value)
+
 #### `AAAA`
 * `ip`: IPv6 address
+
+Options:
+* `ip-prefix`: IPv6 address
+    * prefix octets are used in the front, value octets are used at the back, middle is padded with zeroes up to the total length of 16 octets (prefix + middle + value)
 
 #### `PTR`
 * `hostname`: domain name
@@ -360,57 +388,59 @@ DNS/-defaults-/SOA → '{"refresh": "1h", "retry": "30m", "expire": 604800, "neg
 
 Forward zone for `example.net`:
 ```
-DNS/net/example/SOA → '{"primary": "ns1", "mail": "horst.master"}'
-DNS/net/example/NS#first → '{"hostname": "ns1"}'
-DNS/net/example/NS#second → '{"hostname": "ns2"}'
-DNS/net/example/ns1/A → '{"ip": [192, 0, 2, 2]}'
-DNS/net/example/ns1/AAAA → '{"ip": "2001:db8::2"}'
-DNS/net/example/ns2/A → '{"ip": "192.0.2.3"}'
-DNS/net/example/ns2/AAAA → '{"ip": "2001:db8::3"}'
-DNS/net/example/-defaults-/MX → '{"ttl": "2h"}'
-DNS/net/example/MX#1 → '{"priority": 10, "target": "mail"}'
-DNS/net/example/mail/A → '{"ip": [192,0,2,10]}'
-DNS/net/example/mail/AAAA → '2001:db8::10'
-DNS/net/example/TXT#1 → 'v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all'
-DNS/net/example/TXT#sth → '{"text":"{text which begins with a curly brace}"}'
-DNS/net/example/kerberos1/A#1 → '192.0.2.15'
-DNS/net/example/kerberos1/AAAA#1 → '2001:db8::15'
-DNS/net/example/kerberos2/A# → '192.0.2.25'
-DNS/net/example/kerberos2/AAAA# → '2001:db8::25'
-DNS/net/example/_tcp/_kerberos/-defaults-/SRV → '{"port": 88}'
-DNS/net/example/_tcp/_kerberos/SRV#1 → '{"target": "kerberos1"}'
-DNS/net/example/_tcp/_kerberos/SRV#2 → '{"target": "kerberos2"}'
-DNS/net/example/kerberos-master/CNAME → '{"target": "kerberos1"}'
+DNS/net.example/SOA → '{"primary": "ns1", "mail": "horst.master"}'
+DNS/net.example/NS#first → '{"hostname": "ns1"}'
+DNS/net.example/NS#second → '="ns2"'
+DNS/net.example/-options-/A → '{"ip-prefix": [192, 0, 2]}'
+DNS/net.example/-options-/AAAA → '{"ip-prefix": "20010db8"}'
+DNS/net.example/ns1/A → '=2'
+DNS/net.example/ns1/AAAA → '="02"'
+DNS/net.example/ns2/A → '{"ip": "192.0.2.3"}'
+DNS/net.example/ns2/AAAA → '{"ip": [3]}'
+DNS/net.example/-defaults-/MX → '{"ttl": "2h"}'
+DNS/net.example/MX#1 → '{"priority": 10, "target": "mail"}'
+DNS/net.example/mail/A → '{"ip": [192,0,2,10]}'
+DNS/net.example/mail/AAAA → '2001:db8::10'
+DNS/net.example/TXT#spf → 'v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all'
+DNS/net.example/TXT#{} → '{"text":"{text which begins with a curly brace (the id too)}"}'
+DNS/net.example/kerberos1/A#1 → '192.0.2.15'
+DNS/net.example/kerberos1/AAAA#1 → '2001:db8::15'
+DNS/net.example/kerberos2/A# → '192.0.2.25'
+DNS/net.example/kerberos2/AAAA# → '2001:db8::25'
+DNS/net.example/_tcp/_kerberos/-defaults-/SRV → '{"port": 88}'
+DNS/net.example/_tcp/_kerberos/SRV#1 → '{"target": "kerberos1"}'
+DNS/net.example/_tcp/_kerberos/SRV#2 → '="kerberos2"'
+DNS/net.example/kerberos-master/CNAME → '{"target": "kerberos1"}'
 ```
 
 Reverse zone for `192.0.2.0/24`:
 ```
-DNS/arpa/in-addr/192/0/2/SOA → '{"primary": "ns1.example.net.", "mail": "horst.master@example.net."}'
-DNS/arpa/in-addr/192/0/2/NS#a → '{"hostname": "ns1.example.net."}'
-DNS/arpa/in-addr/192/0/2/NS#b → 'ns2.example.net.'
-DNS/arpa/in-addr/192/0/2/2/PTR → '{"hostname": "ns1.example.net."}'
-DNS/arpa/in-addr/192/0/2/3/PTR → 'ns2.example.net.'
-DNS/arpa/in-addr/192/0/2/10/PTR → '{"hostname": "mail.example.net."}'
-DNS/arpa/in-addr/192/0/2/15/PTR → 'kerberos1.example.net.'
-DNS/arpa/in-addr/192/0/2/25/PTR → 'kerberos2.example.net.'
+DNS/arpa.in-addr/192.0.2/SOA → '{"primary": "ns1.example.net.", "mail": "horst.master@example.net."}'
+DNS/arpa.in-addr/192.0.2/NS#a → '{"hostname": "ns1.example.net."}'
+DNS/arpa.in-addr/192.0.2/NS#b → 'ns2.example.net.'
+DNS/arpa.in-addr/192.0.2/2/PTR → '{"hostname": "ns1.example.net."}'
+DNS/arpa.in-addr/192.0.2/3/PTR → 'ns2.example.net.'
+DNS/arpa.in-addr/192.0.2/10/PTR → '{"hostname": "mail.example.net."}'
+DNS/arpa.in-addr/192.0.2/15/PTR → 'kerberos1.example.net.'
+DNS/arpa.in-addr/192.0.2/25/PTR → 'kerberos2.example.net.'
 ```
 
 Reverse zone for `2001:db8::/32`:
 ```
-DNS/arpa/ip6/2/0/0/1/0/d/b/8/SOA → '{"primary":"ns1.example.net.", "mail":"horst.master@example.net."}'
-DNS/arpa/ip6/2/0/0/1/0/d/b/8/NS#1 → 'ns1.example.net.'
-DNS/arpa/ip6/2/0/0/1/0/d/b/8/NS#2 → 'ns2.example.net.'
-DNS/arpa/ip6/2/0/0/1/0/d/b/8/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/2/PTR → 'ns1.example.net.'
-DNS/arpa/ip6/2/0/0/1/0/d/b/8/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/3/PTR → 'ns2.example.net.'
-DNS/arpa/ip6/2/0/0/1/0/d/b/8/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/1/0/PTR → 'mail.example.net.'
-DNS/arpa/ip6/2/0/0/1/0/d/b/8/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/1/5/PTR → 'kerberos1.example.net.'
-DNS/arpa/ip6/2/0/0/1/0/d/b/8/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/2/5/PTR → 'kerberos2.example.net.'
+DNS/arpa.ip6/2.0.0.1.0.d.b.8/SOA → '{"primary":"ns1.example.net.", "mail":"horst.master@example.net."}'
+DNS/arpa.ip6/2.0.0.1.0.d.b.8/NS#1 → 'ns1.example.net.'
+DNS/arpa.ip6/2.0.0.1.0.d.b.8/NS#2 → 'ns2.example.net.'
+DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.2/PTR → 'ns1.example.net.'
+DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.3/PTR → 'ns2.example.net.'
+DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.1.0/PTR → 'mail.example.net.'
+DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.1.5/PTR → 'kerberos1.example.net.'
+DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.2.5/PTR → 'kerberos2.example.net.'
 ```
 
 Delegation and glue records for `subunit.example.net.`:
 ```
-DNS/net/example/subunit/NS#1 → '{"hostname": "ns1.subunit"}'
-DNS/net/example/subunit/NS#2 → '{"hostname": "ns2.subuint"}'
-DNS/net/example/subunit/ns1/A → '192.0.3.2'
-DNS/net/example/subunit/ns2/A → '192.0.3.3'
+DNS/net.example/subunit/NS#1 → '{"hostname": "ns1.subunit"}'
+DNS/net.example/subunit/NS#2 → '="ns2.subunit"'
+DNS/net.example/subunit/ns1/A → '192.0.3.2'
+DNS/net.example/subunit/ns2/A → '192.0.3.3'
 ```

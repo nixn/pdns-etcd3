@@ -21,20 +21,30 @@ import (
 )
 
 const (
-	defaultPdnsVersion = 4
-	defaultPrefix      = ""
-)
-
-const (
+	defaultPdnsVersion  = 4
 	defaultEndpointIPv4 = "127.0.0.1:2379"
 	defaultEndpointIPv6 = "[::1]:2379"
 	defaultDialTimeout  = 2 * time.Second
+)
+
+var (
+	minimumDialTimeout = 10 * time.Millisecond
+)
+
+const (
+	pdnsVersionParam = "pdns-version"
+	prefixParam      = "prefix"
+	logParamPrefix   = "log-"
+	configFileParam  = "config-file"
+	endpointsParam   = "endpoints"
+	dialTimeoutParam = "timeout"
 )
 
 const (
 	defaultsKey      = "-defaults-"
 	optionsKey       = "-options-"
 	keySeparator     = "/"
+	labelPrefix      = "+"
 	idSeparator      = "#"
 	versionSeparator = "@"
 )
@@ -42,4 +52,12 @@ const (
 var (
 	pid        = os.Getpid()
 	qtypeRegex = regexp.MustCompile("^[A-Z]+$")
+	ipLen      = map[int]int{4: 4, 6: 16}
+	ipHexRE    = regexp.MustCompile("^(?:[0-9a-fA-F]{2})+$")
+)
+
+const (
+	autoPtrOption          = "auto-ptr"
+	ipPrefixOption         = "ip-prefix"
+	zoneAppendDomainOption = "zone-append-domain"
 )

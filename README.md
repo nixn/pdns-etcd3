@@ -23,12 +23,16 @@ the first development release, considered alpha quality. Any testing is apprecia
 * Replication is handled by the ETCD cluster, no additional configuration is needed for using multiple authoritative PowerDNS servers.
   * DNS responses are nearly instantly up-to-date (on every server instance!) after data changes by using a watcher into ETCD (multi-master)
 * [Multiple syntax possibilities](doc/ETCD-structure.md#syntax) for JSON-supported records
-* Support for custom records (types), like those [supported by PowerDNS][qtypes] but unimplemented in pdns-etcd3
+* Short syntax for single-value objects
+  * or for the only value left when using defaults (e.g. `target` in `SRV`)
+* Support for custom records (types), like those [supported by PowerDNS][pdns-qtypes] but unimplemented in pdns-etcd3
 * Support for [automatically appending zone name to unqualified domain names](doc/ETCD-structure.md#domain-name)
 * [Multi-level defaults and options](doc/ETCD-structure.md#defaults-and-options), overridable
 * [Upgrade data structure](doc/ETCD-structure.md#upgrading) (if needed for new program version) without interrupting service
+* Run standalone for usage as a [Unix connector][pdns-unix-conn]
+  * This could be needed for big data sets, b/c the initialization from PowerDNS is done lazily (at least in v4) on first request (which possibly could time out on "big data"…) :-(
 
-[qtypes]: https://doc.powerdns.com/authoritative/appendices/types.html
+[pdns-qtypes]: https://doc.powerdns.com/authoritative/appendices/types.html
 
 #### Planned
 
@@ -40,27 +44,26 @@ the first development release, considered alpha quality. Any testing is apprecia
   * overrideable per entry
 * Override of domain name appended to unqualified names (instead of zone name)
   * useful for `PTR` records in reverse zones
-* Short syntax for single-value objects
-  * or for the only value left when using defaults (e.g. `target` in `SRV`)
 * Support for defaults and zone appending (and possibly more) in plain-string records (those which are also JSON-supported/implemented)
 * "Collect record", automatically combining A and/or AAAA records from "server records"
   * e.g. `etcd.example.com` based on `etcd-1.example.com`, `etcd-2.example.com`, …
-* Support more encodings for values (beside JSON)
-  * [JSON5][] by [flynn/json5](https://github.com/flynn/json5) (replace default JSON, b/c JSON5 is a superset of JSON)
-  * [EDN][] by [go-edn](https://github.com/go-edn/edn)
+* "Labels" for selectively applying defaults and/or options to record entries
+  * sth. like `com/example/-options-ptr` → `{"auto-ptr": true}` and `com/example/www/-options-collect` → `{"collect": …}` for `com/example/www-1/A+ptr+collect` without global options
+  * precedence betweeen QTYPE and id (id > label > QTYPE)
+* Support [JSON5][] by [flynn/json5](https://github.com/flynn/json5) (replace default JSON, b/c JSON5 is a superset of JSON)
 * DNSSEC support ([PowerDNS DNSSEC-specific calls][pdns-dnssec])
-* Run standalone for usage as a [Unix connector][pdns-unix-conn]
-  * This could be needed for big data sets, b/c the initialization from PowerDNS is done lazily on first request (which possibly could timeout on "big data"…) :-(
+* Implement [`getAllDomains`][pdns-getall] backend call for enabling PowerDNS caching (for performance)
+  * setting [`zone-cache-refresh-interval`][pdns-zone-cache]
 
 [pdns-dnssec]: https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dnssec-support
 [pdns-unix-conn]: https://doc.powerdns.com/authoritative/backends/remote.html#unix-connector
+[pdns-getall]: https://doc.powerdns.com/authoritative/backends/remote.html#getalldomains
+[pdns-zone-cache]: https://doc.powerdns.com/authoritative/settings.html#setting-zone-cache-refresh-interval
 
 #### Optional
 
-* "Labels" for selectively applying defaults and/or options to record entries
-  * sth. like `com/example/-options-+ptr` → `{"auto-ptr": true}` and `com/example/www/-options-+collect` → `{"collect": …}` for `com/example/www-1/A+ptr+collect` without global options
-  * precedence betweeen QTYPE and id (id > label > QTYPE)
-* Further encodings
+* Support more encodings for values (beside JSON)
+  * [EDN][] by [go-edn](https://github.com/go-edn/edn)
   * [TOML][] by [pelletier/go-toml](https://github.com/pelletier/go-toml) or [BurntSushi/toml](https://github.com/BurntSushi/toml)
   * [YAML][] by [go-yaml](https://github.com/go-yaml/yaml)
   * …
@@ -87,12 +90,18 @@ The build command in `Makefile` produces a static build with setting the version
 
 ## Usage
 
-Of course you need an up and running ETCD v3 cluster and a PowerDNS installation.
+Of course, you need an up and running ETCD v3 cluster and a PowerDNS installation.
 
 ### PowerDNS configuration
 ```
 launch+=remote
 remote-connection-string=pipe:command=/path/to/pdns-etcd3[,pdns-version=3|4][,<config>][,prefix=<string>][,timeout=<integer>][,log-<level>=<components>]
+
+# currently the backend call "getAllDomains" is not implemented, so for now the following must be set:
+zone-cache-refresh-interval=0
+
+# in pipe mode every instance connects to ETCD and loads the data (uses memory), so possibly do this:
+#distributor-threads=1
 ```
 
 NOTE: Every option name must be given exactly as denoted here (no case changes allowed).

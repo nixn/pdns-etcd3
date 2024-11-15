@@ -16,13 +16,15 @@ package src
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
 
 type logFormatter struct {
-	Component string
+	component string
 }
 
 var logLevelChars = map[logrus.Level]string{
@@ -36,9 +38,32 @@ var logLevelChars = map[logrus.Level]string{
 }
 
 func (f *logFormatter) Format(entry *logrus.Entry) ([]byte, error) {
-	str := fmt.Sprintf("pdns-etcd3[%d] %-4s %s: %s", pid, f.Component, logLevelChars[entry.Level], entry.Message)
+	var fmt1 string
+	var arg1 any
+	if standalone {
+		fmt1 = "[%s]"
+		arg1 = time.Now().Format(time.StampMilli)
+	} else {
+		fmt1 = "pdns-etcd3[%d]"
+		arg1 = pid
+	}
+	str := fmt.Sprintf(fmt1+" %-4s %s: %s", arg1, f.component, logLevelChars[entry.Level], entry.Message)
+	if len(entry.Data) > 0 {
+		str += " |"
+	}
 	for k, v := range entry.Data {
-		str += fmt.Sprintf(" %s=%+v", k, v)
+		rv := reflect.ValueOf(v)
+		if rv.Kind() == reflect.Pointer {
+			if rv.IsNil() {
+				str += fmt.Sprintf(" *%s=<nil>", k)
+			} else {
+				str += fmt.Sprintf(" *%s=%+v", k, rv.Elem())
+			}
+		} else if rv.Kind() == reflect.String {
+			str += fmt.Sprintf(" %s=%q", k, v)
+		} else {
+			str += fmt.Sprintf(" %s=%+v", k, v)
+		}
 	}
 	str += "\n"
 	return []byte(str), nil
@@ -49,6 +74,7 @@ var log struct {
 	pdns *logrus.Logger
 	etcd *logrus.Logger
 	data *logrus.Logger
+	// TODO time logger (print durations)
 }
 var loggers = map[string]*logrus.Logger{}
 
@@ -62,7 +88,7 @@ func initLogging() {
 	loggers["etcd"] = log.etcd
 	loggers["data"] = log.data
 	for component, logger := range loggers {
-		logger.SetFormatter(&logFormatter{Component: component})
+		logger.SetFormatter(&logFormatter{component: component})
 	}
 }
 
@@ -75,4 +101,21 @@ func setLoggingLevel(components string, level logrus.Level) {
 			log.main.WithFields(logrus.Fields{"component": component, "level": level}).Warn("setLoggingLevel(): invalid component")
 		}
 	}
+}
+
+func logFrom(logger *logrus.Logger, fieldsArgs ...any) *logrus.Entry {
+	fields := logrus.Fields{}
+	var name string
+	for i, v := range fieldsArgs {
+		if i%2 == 0 {
+			if v, ok := v.(string); ok {
+				name = v
+			} else {
+				name = fmt.Sprintf("%d", (i/2)+1)
+			}
+		} else {
+			fields[name] = v
+		}
+	}
+	return logger.WithFields(fields)
 }

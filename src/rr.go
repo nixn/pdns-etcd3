@@ -17,11 +17,55 @@ package src
 import (
 	"fmt"
 	"net"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
+
+type rrParams struct {
+	values         objectType[any]
+	lastFieldValue *any
+	qtype          string
+	id             string
+	version        *VersionType
+	data           *dataNode
+	ttl            time.Duration
+}
+
+func (p *rrParams) Target() string {
+	return fmt.Sprintf("%s%s%s%s%s", p.data.getQname(), keySeparator, p.qtype, idSeparator, p.id)
+}
+
+func (p *rrParams) SetContent(content string, priority *uint16) {
+	// p.data.records was set in dataNode.processValues(), no need to check it here
+	if _, ok := p.data.records[p.qtype]; !ok {
+		p.data.records[p.qtype] = map[string]recordType{}
+	}
+	p.data.records[p.qtype][p.id] = recordType{content, priority, p.ttl, p.version}
+	str := fmt.Sprintf("stored record content: %q", content)
+	if priority != nil {
+		str += fmt.Sprintf(" !%d", *priority)
+	}
+	if p.version != nil {
+		str += fmt.Sprintf(" @%s", p.version)
+	}
+	str += fmt.Sprintf(" (%s)", p.ttl)
+	p.log().Trace(str)
+}
+
+func (p *rrParams) log(args ...any) *logrus.Entry {
+	logArgs := []any{"target", p.Target(), "version", p.version, "ttl", p.ttl}
+	logArgs = append(logArgs, args...)
+	return p.data.log(logArgs...)
+}
+
+func (p *rrParams) exlog(args ...any) *logrus.Entry {
+	return p.log(args...).WithField("lastFieldValue?", p.lastFieldValue != nil)
+}
+
+type rrFunc func(params *rrParams)
 
 var rr2func = map[string]rrFunc{
 	"A":     a,
@@ -36,108 +80,145 @@ var rr2func = map[string]rrFunc{
 	"TXT":   txt,
 }
 
-func fqdn(domain, qname string) string {
-	l := len(domain)
-	if l == 0 || domain[l-1] != '.' {
-		domain += "." + qname
-		l = len(domain)
-		if domain[l-1] != '.' {
-			domain += "."
+func fqdn(domain string, params *rrParams) (string, error) {
+	qSOA := params.qtype == "SOA"
+	for data := params.data; !endsWith(domain, "."); data = data.parent {
+		zoneAppendDomain, valuePath, err := findOptionValue[string](zoneAppendDomainOption, params.qtype, params.id, data, true)
+		if err != nil {
+			return domain, fmt.Errorf("failed to get option %q (dn=%s, vp=%s): %s", zoneAppendDomain, data.getQname(), (valuePath), err)
+		}
+		if valuePath != nil {
+			zoneAppendDomain = strings.TrimSpace(zoneAppendDomain)
+			if zoneAppendDomain[0] != '.' {
+				domain += "."
+			}
+			domain += zoneAppendDomain
+		}
+		if !endsWith(domain, ".") && (qSOA || data.hasSOA()) {
+			if !data.isRoot() {
+				domain += "."
+			}
+			domain += data.getQname()
+			break
+		}
+		if data.parent == nil {
+			return domain, fmt.Errorf("unfinished appending of zone domain (currently %q)", domain)
 		}
 	}
-	return domain
+	return domain, nil
 }
 
-func getUint16(name string, values objectType, qtype, id string, data *dataNode) (uint16, error) {
-	v, err := findValue(name, values, qtype, id, data)
+func getValue[T any](key string, params *rrParams) (T, *valuePath, error) {
+	value, vPath, err := findValueOrDefault[T](key, params.values, params.qtype, params.id, params.data)
 	if err != nil {
-		return 0, err
+		return value, vPath, fmt.Errorf("failed to get value %s.%s (or default): %s", params.Target(), key, err)
 	}
-	if v, ok := v.(float64); ok {
-		if v < 0 || v > 65535 {
-			return 0, fmt.Errorf("%q out of range (0-65535)", name)
+	qPath := valuePath{params.data, &searchOrderElement{params.qtype, params.id}}
+	if vPath == nil {
+		if params.lastFieldValue != nil {
+			if lastFieldValue, ok := (*params.lastFieldValue).(T); ok {
+				params.values[key] = lastFieldValue
+				logFrom(log.data, "value", lastFieldValue).Tracef("using last-field-value for %s:%s", params.Target(), key)
+				params.lastFieldValue = nil
+				return lastFieldValue, &qPath, nil
+			}
+			return value, &qPath, fmt.Errorf("invalid value type: %T", *params.lastFieldValue)
 		}
-		return uint16(v), nil
+		return value, nil, nil
 	}
-	return 0, fmt.Errorf("%q is not a number", name)
+	return value, &qPath, nil
 }
 
-func getString(name string, values objectType, qtype, id string, data *dataNode) (string, error) {
-	v, err := findValue(name, values, qtype, id, data)
+func getUint16(key string, params *rrParams) (uint16, *valuePath, error) {
+	valueF, vPath, err := getValue[float64](key, params)
 	if err != nil {
-		return "", err
+		return 0, vPath, fmt.Errorf("failed to get %s.%s as float64: %s", params.Target(), key, err)
 	}
-	if v, ok := v.(string); ok {
-		return v, nil
+	if vPath == nil {
+		return 0, nil, nil
 	}
-	return "", fmt.Errorf("%q is not a string", name)
+	valueI, err := float2int(valueF)
+	if err != nil {
+		return 0, vPath, fmt.Errorf("failed to convert float (%v) to int: %s", valueF, err)
+	}
+	if valueI < 0 || valueI > 65535 {
+		return 0, vPath, fmt.Errorf("out of range (0-65535)")
+	}
+	return uint16(valueI), vPath, nil
 }
 
-func getDuration(name string, values objectType, qtype, id string, data *dataNode) (time.Duration, error) {
-	v, err := findValue(name, values, qtype, id, data)
+func getDuration(key string, params *rrParams) (time.Duration, *valuePath, error) {
+	value, vPath, err := getValue[any](key, params)
 	if err != nil {
-		return 0, err
+		return 0, vPath, fmt.Errorf("failed to get %s.%s: %s", params.Target(), key, err)
+	}
+	if vPath == nil {
+		return 0, nil, nil
 	}
 	var dur time.Duration
-	switch v.(type) {
+	switch value := value.(type) {
 	case float64:
-		dur = time.Duration(int64(v.(float64))) * time.Second
+		valueI, err := float2int(value)
+		if err != nil {
+			return 0, vPath, fmt.Errorf("failed to convert float (%v) to int: %s", value, err)
+		}
+		dur = time.Duration(valueI) * time.Second
 	case string:
-		if v, err := time.ParseDuration(v.(string)); err == nil {
+		if v, err := time.ParseDuration(value); err == nil {
 			dur = v
 		} else {
-			return 0, fmt.Errorf("%q parse error: %s", name, err)
+			return 0, vPath, fmt.Errorf("parse error: %s", err)
 		}
 	default:
-		return 0, fmt.Errorf("%q is neither a number nor a string", name)
+		return 0, vPath, fmt.Errorf("invalid value type (neither a number nor a string): %T", value)
 	}
 	if dur < time.Second {
-		return 0, fmt.Errorf("%q must be positive", name)
+		return 0, vPath, fmt.Errorf("must be >= 1s")
 	}
-	return dur, nil
+	return dur, vPath, nil
 }
 
-func getHostname(name string, values objectType, qtype, id string, data *dataNode) (string, error) {
-	hostname, err := getString(name, values, qtype, id, data)
-	if err != nil {
-		return "", err
+func getHostname(key string, params *rrParams) (string, *valuePath, error) {
+	hostname, vPath, err := getValue[string](key, params)
+	if vPath == nil || err != nil {
+		return "", vPath, fmt.Errorf("failed to get %s.%s as string: vp=%s, err=%s", params.Target(), key, ptr2str(vPath), err)
 	}
 	hostname = strings.TrimSpace(hostname)
-	hostname = fqdn(hostname, data.findZone().getQname())
-	// TODO check options for overridden zone name
-	return hostname, nil
+	hostname, err = fqdn(hostname, params)
+	if err != nil {
+		return "", vPath, fmt.Errorf("failed to append zone domain to %s.%s: %s", params.Target(), key, err)
+	}
+	return hostname, vPath, nil
 }
 
-func domainName(qtype, fieldName string) rrFunc {
-	return func(values objectType, id string, data *dataNode, revision int64) (string, objectType, error) {
-		name, err := getHostname(fieldName, values, qtype, id, data)
-		if err != nil {
-			return "", nil, err
+func domainName(qtype, key string) rrFunc {
+	return func(params *rrParams) {
+		name, vPath, err := getHostname(key, params)
+		if vPath == nil || err != nil {
+			params.exlog("vp", vPath, "error", err).Errorf("failed to get %s.%s", params.Target(), key)
+			return
 		}
-		ttl, err := getDuration("ttl", values, qtype, id, data)
-		if err != nil {
-			return "", nil, err
-		}
-		meta := objectType{
-			"ttl": ttl,
-		}
-		return name, meta, nil
+		params.SetContent(name, nil)
 	}
 }
 
-func soa(values objectType, id string, data *dataNode, revision int64) (string, objectType, error) {
+func soa(params *rrParams) {
 	// primary
-	primary, err := getString("primary", values, "SOA", id, data)
-	if err != nil {
-		return "", nil, err
+	primary, vPath, err := getValue[string]("primary", params)
+	if vPath == nil || err != nil {
+		params.exlog("vp", vPath, "error", err).Error("failed to get value for 'primary'")
+		return
 	}
-	zone := data.findZone().getQname()
 	primary = strings.TrimSpace(primary)
-	primary = fqdn(primary, zone)
-	// mail
-	mail, err := getString("mail", values, "SOA", id, data)
+	primary, err = fqdn(primary, params)
 	if err != nil {
-		return "", nil, err
+		params.exlog("vp", vPath, "error", err).Error("failed to append zone domain to 'primary'")
+	}
+	// mail
+	mail, vPath, err := getValue[string]("mail", params)
+	if vPath == nil || err != nil {
+		params.exlog("vp", vPath, "error", err).Error("failed to get value for 'mail'")
+		return
 	}
 	mail = strings.TrimSpace(mail)
 	atIndex := strings.Index(mail, "@")
@@ -152,286 +233,217 @@ func soa(values objectType, id string, data *dataNode, revision int64) (string, 
 		localpart = strings.Replace(localpart, ".", "\\.", -1)
 		mail = localpart + "." + domain
 	}
-	mail = fqdn(mail, zone)
-	// serial
-	serial := revision
-	// refresh
-	refresh, err := getDuration("refresh", values, "SOA", id, data)
+	mail, err = fqdn(mail, params)
 	if err != nil {
-		return "", nil, err
+		params.exlog("vp", vPath, "error", err).Error("failed to append zone domain to 'mail'")
+	}
+	// serial
+	serial := params.data.zoneRev() // no need for findZone(), because SOA defines the zone
+	// refresh
+	refresh, vPath, err := getDuration("refresh", params)
+	if vPath == nil || err != nil {
+		params.exlog("vp", vPath, "error", err).Error("failed to get value for 'refresh'")
+		return
 	}
 	// retry
-	retry, err := getDuration("retry", values, "SOA", id, data)
-	if err != nil {
-		return "", nil, err
+	retry, vPath, err := getDuration("retry", params)
+	if vPath == nil || err != nil {
+		params.exlog("vp", vPath, "error", err).Error("failed to get value for 'retry'")
+		return
 	}
 	// expire
-	expire, err := getDuration("expire", values, "SOA", id, data)
-	if err != nil {
-		return "", nil, err
+	expire, vPath, err := getDuration("expire", params)
+	if vPath == nil || err != nil {
+		params.exlog("vp", vPath, "error", err).Error("failed to get value for 'expire'")
+		return
 	}
 	// negative ttl
-	negativeTTL, err := getDuration("neg-ttl", values, "SOA", id, data)
-	if err != nil {
-		return "", nil, err
+	negativeTTL, vPath, err := getDuration("neg-ttl", params)
+	if vPath == nil || err != nil {
+		params.exlog("vp", vPath, "error", err).Error("failed to get value for 'neg-ttl'")
+		return
 	}
-	// TODO handle option 'no-aa'
-	// ttl
-	ttl, err := getDuration("ttl", values, "SOA", id, data)
-	if err != nil {
-		return "", nil, err
-	}
+	// TODO handle option 'not-authoritative' (alias 'not-aa'?)
 	// (done)
 	content := fmt.Sprintf("%s %s %d %d %d %d %d", primary, mail, serial, seconds(refresh), seconds(retry), seconds(expire), seconds(negativeTTL))
-	meta := objectType{
-		"ttl": ttl,
-	}
-	return content, meta, nil
+	params.SetContent(content, nil)
 }
 
-func a(values objectType, id string, data *dataNode, revision int64) (string, objectType, error) {
-	v, err := findValue("ip", values, "A", id, data)
-	if err != nil {
-		return "", nil, err
-	}
-	// TODO handle option 'ip-prefix'
-	var ip net.IP
-	switch v.(type) {
+func parseOctets(value any, ipVer int) ([]byte, error) {
+	values := []any{}
+	switch valueT := value.(type) {
+	case float64:
+		values = append(values, valueT)
 	case string:
-		v := v.(string)
-		ipv4HexRE := regexp.MustCompile("^([0-9a-fA-F]{2}){4}$")
-		if ipv4HexRE.MatchString(v) {
-			ip = net.IP{0, 0, 0, 0}
-			for i := 0; i < 4; i++ {
-				v, err := strconv.ParseUint(v[i*2:i*2+2], 16, 8)
-				if err != nil {
-					return "", nil, err
-				}
-				ip[i] = byte(v)
+		if ipHexRE.MatchString(valueT) {
+			numOctets := len(valueT) / 2
+			if numOctets >= ipLen[ipVer] {
+				return nil, fmt.Errorf("too many octets")
+			}
+			for i := 0; i < numOctets; i++ { // length is a multiple of 2 (b/c regex matched)
+				v, _ := strconv.ParseUint(valueT[i*2:i*2+2], 16, 8) // errors are not possible, b/c regex matched
+				values = append(values, byte(v))
 			}
 		} else {
-			ip = net.ParseIP(v)
-			if ip == nil {
-				return "", nil, fmt.Errorf("invalid IPv4: failed to parse")
+			ip := net.ParseIP(valueT)
+			if ip != nil {
+				if ipVer == 4 {
+					ip = ip.To4()
+				} else if ipVer == 6 {
+					ip = ip.To16()
+				} else {
+					ip = nil
+				}
 			}
-			ip = ip.To4()
-			if ip == nil {
-				return "", nil, fmt.Errorf("invalid IPv4: parsed, but not as IPv4")
+			if ip == nil || len(ip) != ipLen[ipVer] {
+				return nil, fmt.Errorf("failed to parse as an IP address")
 			}
-		}
-	case []interface{}:
-		v := v.([]interface{})
-		if len(v) != 4 {
-			return "", nil, fmt.Errorf("invalid IPv4: array length not 4")
-		}
-		ip = net.IP{0, 0, 0, 0}
-		for i, v := range v {
-			switch v.(type) {
-			case float64:
-				v := int64(v.(float64))
-				if v < 0 || v > 255 {
-					return "", nil, fmt.Errorf("invalid IPv4: part %d out of range", i+1)
-				}
-				ip[i] = byte(v)
-			case string:
-				v, err := strconv.ParseUint(v.(string), 0, 8)
-				if err != nil {
-					return "", nil, err
-				}
-				if v > 255 {
-					return "", nil, fmt.Errorf("invalid IPv4: part %d out of range", i+1)
-				}
-				ip[i] = byte(v)
-			default:
-				return "", nil, fmt.Errorf("invalid IPv4: part neither number nor string")
+			for _, octet := range ip {
+				values = append(values, octet)
 			}
 		}
+	case []any:
+		values = valueT
 	default:
-		return "", nil, fmt.Errorf("invalid IPv4: not string or array")
+		return nil, fmt.Errorf("invalid value type: %T", value)
 	}
-	// TODO handle option 'auto-ptr'
-	ttl, err := getDuration("ttl", values, "A", id, data)
-	if err != nil {
-		return "", nil, err
-	}
-	content := ip.String()
-	meta := objectType{
-		"ttl": ttl,
-	}
-	return content, meta, nil
-}
-
-func aaaa(values objectType, id string, data *dataNode, revision int64) (string, objectType, error) {
-	v, err := findValue("ip", values, "AAAA", id, data)
-	if err != nil {
-		return "", nil, err
-	}
-	// TODO handle option 'ip-prefix'
-	var ip net.IP
-	switch v.(type) {
-	case string:
-		v := v.(string)
-		ipv6HexRE := regexp.MustCompile("^([0-9a-fA-F]{2}){16}$")
-		if ipv6HexRE.MatchString(v) {
-			ip = net.IP{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-			for i := 0; i < 16; i++ {
-				v, err := strconv.ParseUint(v[i*2:i*2+2], 16, 8)
-				if err != nil {
-					return "", nil, err
-				}
-				ip[i] = byte(v)
+	octets := []byte{}
+	for i, v := range values {
+		switch v := v.(type) {
+		case byte:
+			octets = append(octets, v)
+		case float64:
+			vI, err := float2int(v)
+			if err != nil {
+				return nil, fmt.Errorf("octet #%d(%v): failed to convert from float to int: %s", i, v, err)
 			}
-		} else {
-			ip = net.ParseIP(v)
-			if ip == nil {
-				return "", nil, fmt.Errorf("invalid IPv6: failed to parse")
+			if vI < 0 || v > 255 {
+				return nil, fmt.Errorf("octet #%d(%v): value out of range (0-255)", i, vI)
 			}
-			ip = ip.To16()
-			if ip == nil {
-				return "", nil, fmt.Errorf("invalid IPv6: parsed, but no IPv6")
+			octets = append(octets, byte(vI))
+		case string:
+			vB, err := strconv.ParseUint(v, 0, 8)
+			if err != nil {
+				return nil, fmt.Errorf("octet #%d(%v): failed to parse from string: %s", i, v, err)
 			}
-		}
-	case []interface{}:
-		v := v.([]interface{})
-		var bytesPerPart int
-		switch len(v) {
-		case 8:
-			bytesPerPart = 2
-		case 16:
-			bytesPerPart = 1
+			// value range is already checked by ParseUint() above (bitSize argument)
+			octets = append(octets, byte(vB))
 		default:
-			return "", nil, fmt.Errorf("invalid IPv6: array length neither 8 nor 16")
+			return nil, fmt.Errorf("octet #%d: invalid type: %T", i, v)
 		}
-		bitSize := bytesPerPart * 8
-		maxVal := uint64(1<<uint(bitSize) - 1)
-		ip = net.IP{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-		setPart := func(i int, v uint64) {
-			for j := 0; j < bytesPerPart; j++ {
-				v := (v >> uint((bytesPerPart-1-j)*8)) & 0xFF
-				ip[i*bytesPerPart+j] = byte(v)
-			}
-		}
-		for i, v := range v {
-			switch v.(type) {
-			case float64:
-				if v.(float64) < 0 {
-					return "", nil, fmt.Errorf("invalid IPv6: part out of range")
-				}
-				v := uint64(v.(float64))
-				if v > maxVal {
-					return "", nil, fmt.Errorf("invalid IPv6: part out of range")
-				}
-				setPart(i, v)
-			case string:
-				v, err := strconv.ParseUint(v.(string), 0, bitSize)
-				if err != nil {
-					return "", nil, fmt.Errorf("invalid IPv6: %s", err)
-				}
-				if v > maxVal {
-					return "", nil, fmt.Errorf("invalid IPv6: part out of range")
-				}
-				setPart(i, v)
-			default:
-				return "", nil, fmt.Errorf("invalid IPv6: not string or number")
-			}
-		}
-	default:
-		return "", nil, fmt.Errorf("invalid IPv6: not string or array")
 	}
-	// TODO handle option 'auto-ptr'
-	ttl, err := getDuration("ttl", values, "AAAA", id, data)
+	return octets, nil
+}
+
+func ipRR(params *rrParams, ipVer int) {
+	value, vPath, err := getValue[any]("ip", params)
+	if vPath == nil || err != nil {
+		params.exlog("vp", vPath, "error", err).Error("failed to get value for 'ip'")
+		return
+	}
+	var prefix []byte
+	prefixAny, oPath, err := findOptionValue[any](ipPrefixOption, params.qtype, params.id, params.data, false)
 	if err != nil {
-		return "", nil, err
+		params.exlog("vp", vPath, "error", err).Errorf("failed to get option %q", ipPrefixOption)
+		return
+	}
+	if oPath != nil {
+		octets, err := parseOctets(prefixAny, ipVer)
+		if err != nil {
+			params.log("field", "ip", "option", ipPrefixOption).Errorf("failed to parse octets: %s", err)
+			return
+		}
+		prefix = octets
+		params.log("field", "ip", "option", ipPrefixOption, "value", prefix).Trace("option value")
+	} else {
+		params.log("field", "ip").Tracef("option %q not found", ipPrefixOption)
+	}
+	octets, err := parseOctets(value, ipVer)
+	if err != nil {
+		params.exlog("field", "ip", "value", value).Errorf("failed to parse value to octets: %s", err)
+		return
+	}
+	vLen := len(octets)
+	pLen := len(prefix)
+	if pLen == 0 && vLen < ipLen[ipVer] {
+		params.exlog("field", "ip", "value", octets).Errorf("too few octets")
+		return
+	}
+	ip := net.IP(prefix)
+	for i := pLen; i < ipLen[ipVer]; i++ {
+		ip = append(ip, 0)
+	}
+	offset := ipLen[ipVer] - vLen
+	for i, octet := range octets {
+		ip[offset+i] = octet
 	}
 	content := ip.String()
-	meta := objectType{
-		"ttl": ttl,
-	}
-	return content, meta, nil
+	params.SetContent(content, nil)
+	// TODO handle option 'auto-ptr': save the (hostname, ip) pair for later processing, b/c here the reverse zone could be not present yet (later it also could be not present, need to deal with it somehow)
 }
 
-func srv(values objectType, id string, data *dataNode, revision int64) (string, objectType, error) {
-	priority, err := getUint16("priority", values, "SRV", id, data)
-	if err != nil {
-		return "", nil, err
-	}
-	weight, err := getUint16("weight", values, "SRV", id, data)
-	if err != nil {
-		return "", nil, err
-	}
-	port, err := getUint16("port", values, "SRV", id, data)
-	if err != nil {
-		return "", nil, err
-	}
-	target, err := getHostname("target", values, "SRV", id, data)
-	if err != nil {
-		return "", nil, err
-	}
-	ttl, err := getDuration("ttl", values, "SRV", id, data)
-	if err != nil {
-		return "", nil, err
-	}
-	format := ""
-	params := []interface{}(nil)
-	if pdnsVersion == 4 {
-		format += "%d "
-		params = append(params, priority)
-	}
-	format += "%d %d %s"
-	params = append(params, weight, port, target)
-	content := fmt.Sprintf(format, params...)
-	meta := objectType{
-		"ttl": ttl,
-	}
-	if pdnsVersion == 3 {
-		meta["priority"] = priority
-	}
-	return content, meta, nil
+func a(params *rrParams) {
+	ipRR(params, 4)
 }
 
-func mx(values objectType, id string, data *dataNode, revision int64) (string, objectType, error) {
-	priority, err := getUint16("priority", values, "MX", id, data)
-	if err != nil {
-		return "", nil, err
-	}
-	target, err := getHostname("target", values, "MX", id, data)
-	if err != nil {
-		return "", nil, err
-	}
-	ttl, err := getDuration("ttl", values, "MX", id, data)
-	if err != nil {
-		return "", nil, err
-	}
-	format := ""
-	params := []interface{}(nil)
-	if pdnsVersion == 4 {
-		format += "%d "
-		params = append(params, priority)
-	}
-	format += "%s"
-	params = append(params, target)
-	content := fmt.Sprintf(format, params...)
-	meta := objectType{
-		"ttl": ttl,
-	}
-	if pdnsVersion == 3 {
-		meta["priority"] = priority
-	}
-	return content, meta, nil
+func aaaa(params *rrParams) {
+	ipRR(params, 6)
 }
 
-func txt(values objectType, id string, data *dataNode, revision int64) (string, objectType, error) {
-	text, err := getString("text", values, "TXT", id, data)
-	if err != nil {
-		return "", nil, err
+func srv(params *rrParams) {
+	priority, vPath, err := getUint16("priority", params)
+	if vPath == nil || err != nil {
+		params.log("vp", vPath, "error", err).Error("failed to get value for 'priority'")
+		return
 	}
-	ttl, err := getDuration("ttl", values, "MX", id, data)
-	if err != nil {
-		return "", nil, err
+	weight, vPath, err := getUint16("weight", params)
+	if vPath == nil || err != nil {
+		params.log("vp", vPath, "error", err).Error("failed to get value for 'weight'")
+		return
 	}
-	content := text
-	meta := objectType{
-		"ttl": ttl,
+	port, vPath, err := getUint16("port", params)
+	if vPath == nil || err != nil {
+		params.log("vp", vPath, "error", err).Error("failed to get value for 'port'")
+		return
 	}
-	return content, meta, nil
+	target, vPath, err := getHostname("target", params)
+	if vPath == nil || err != nil {
+		params.log("vp", vPath, "error", err).Error("failed to get value for 'target'")
+		return
+	}
+	content := fmt.Sprintf("%d %d %s", weight, port, target)
+	if *args.PdnsVersion == 3 {
+		params.SetContent(content, &priority)
+	} else {
+		content = fmt.Sprintf("%d %s", priority, content)
+		params.SetContent(content, nil)
+	}
+}
+
+func mx(params *rrParams) {
+	priority, vPath, err := getUint16("priority", params)
+	if vPath == nil || err != nil {
+		params.exlog("vp", vPath, "error", err).Error("failed to get value for 'priority'")
+		return
+	}
+	target, vPath, err := getHostname("target", params)
+	if vPath == nil || err != nil {
+		params.log("vp", vPath, "error", err).Error("failed to get value for 'target'")
+		return
+	}
+	if *args.PdnsVersion == 3 {
+		params.SetContent(target, &priority)
+	} else {
+		content := fmt.Sprintf("%d %s", priority, target)
+		params.SetContent(content, nil)
+	}
+}
+
+func txt(params *rrParams) {
+	text, vPath, err := getValue[string]("text", params)
+	if vPath == nil || err != nil {
+		params.log("vp", vPath, "error", err).Error("failed to get value for 'text' (as string)")
+		return
+	}
+	params.SetContent(text, nil)
 }

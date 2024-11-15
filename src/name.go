@@ -29,7 +29,7 @@ func (name *nameType) len() int {
 	return len(*name)
 }
 
-func (name *nameType) name(depth int) string {
+func (name *nameType) lname(depth int) string {
 	if depth == 0 {
 		return ""
 	}
@@ -61,7 +61,7 @@ func (name *nameType) normal() string {
 	}
 	ret := ""
 	for depth := name.len(); depth > 0; depth-- {
-		ret += name.name(depth) + "."
+		ret += name.lname(depth) + "."
 	}
 	return ret
 }
@@ -73,7 +73,7 @@ func (name *nameType) asKey(withTrailingKeySeparator bool) string {
 	}
 	key := ""
 	for depth := 1; depth <= name.len(); depth++ {
-		key += name.keyPrefix(depth) + name.name(depth)
+		key += name.keyPrefix(depth) + name.lname(depth)
 	}
 	if withTrailingKeySeparator {
 		key += keySeparator
