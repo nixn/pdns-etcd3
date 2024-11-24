@@ -384,6 +384,7 @@ ITEMS:
 			id:      id,
 			data:    itemData,
 			version: version,
+			//logger:  log.data(), // TODO remove?
 		}
 		switch entryType {
 		case normalEntry:
@@ -446,6 +447,7 @@ func (dn *dataNode) processValues() {
 				id:      id,
 				version: values.version,
 				data:    dn,
+				//logger:  log.data(), // TODO remove?
 			}
 			processValuesEntry(&rrParams, &values)
 		}
@@ -460,6 +462,7 @@ func (dn *dataNode) processValues() {
 				id:      id,
 				version: values.version,
 				data:    dn,
+				//logger:  log.data(), // TODO remove?
 			}
 			processValuesEntry(&rrParams, &values)
 		}

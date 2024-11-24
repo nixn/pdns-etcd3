@@ -32,6 +32,7 @@ type rrParams struct {
 	version        *VersionType
 	data           *dataNode
 	ttl            time.Duration
+	//logger         *logrus.Logger // TODO remove?
 }
 
 func (p *rrParams) Target() string {

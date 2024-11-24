@@ -19,19 +19,21 @@ the first development release, considered alpha quality. Any testing is apprecia
 
 ## Features
 
-* Automatic serial for `SOA` records (based on the cluster revision).
+* Automatic serial for [`SOA` records](doc/ETCD-structure.md#soa) (based on the cluster revision).
 * Replication is handled by the ETCD cluster, no additional configuration is needed for using multiple authoritative PowerDNS servers.
   * DNS responses are nearly instantly up-to-date (on every server instance!) after data changes by using a watcher into ETCD (multi-master)
 * [Multiple syntax possibilities](doc/ETCD-structure.md#syntax) for object-supported records
-* Short syntax for single-value objects
+* [Short syntax for single-value objects](doc/ETCD-structure.md#resource-record-values)
   * or for the last value left when using defaults (e.g. `target` in `SRV`)
-* Default prefix for IP addresses
+* [Default prefix for IP addresses](doc/ETCD-structure.md#a)
   * overrideable per entry
-* Support for custom records (types), like those [supported by PowerDNS][pdns-qtypes] but unimplemented in pdns-etcd3
+* Support for [custom records (types)](doc/ETCD-structure.md#resource-record-values), like those [supported by PowerDNS][pdns-qtypes] but unimplemented in pdns-etcd3
 * Support for [automatically appending zone name to unqualified domain names](doc/ETCD-structure.md#domain-name)
+* Override of domain name appended to unqualified names (instead of zone name)
+  * useful for [`PTR` records](doc/ETCD-structure.md#ptr) in reverse zones
 * [Multi-level defaults and options](doc/ETCD-structure.md#defaults-and-options), overridable
 * [Upgrade data structure](doc/ETCD-structure.md#upgrading) (if needed for new program version) without interrupting service
-* Run standalone for usage as a [Unix connector][pdns-unix-conn]
+* Run [standalone](#unix-mode) for usage as a [Unix connector][pdns-unix-conn]
   * This could be needed for big data sets, because the initialization from PowerDNS is done lazily (at least in v4) on first request (which possibly could time out on "big data"…) :-(
 
 [pdns-qtypes]: https://doc.powerdns.com/authoritative/appendices/types.html
@@ -42,8 +44,6 @@ the first development release, considered alpha quality. Any testing is apprecia
   * `A` ⇒ `PTR` (`in-addr.arpa`)
   * `AAAA` ⇒ `PTR` (`ip6.arpa`)
   * …
-* Override of domain name appended to unqualified names (instead of zone name)
-  * useful for `PTR` records in reverse zones
 * Support for defaults and zone appending (and possibly more) in plain-string records (those which are also object-supported)
 * "Collect record", automatically combining A and/or AAAA records from "server records"
   * e.g. `etcd.example.com` based on `etcd-1.example.com`, `etcd-2.example.com`, …
@@ -51,6 +51,7 @@ the first development release, considered alpha quality. Any testing is apprecia
   * sth. like `com/example/-options-ptr` → `{"auto-ptr": true}` and `com/example/www/-options-collect` → `{"collect": …}` for `com/example/www-1/A+ptr+collect` without global options
   * precedence betweeen QTYPE and id (id > label > QTYPE)
 * Support [JSON5][] by [flynn/json5](https://github.com/flynn/json5) (replace default JSON, b/c JSON5 is a superset of JSON)
+* Support [YAML][] by [go-yaml](https://github.com/go-yaml/yaml)
 * DNSSEC support ([PowerDNS DNSSEC-specific calls][pdns-dnssec])
 * Implement [`getAllDomains`][pdns-getall] backend call for enabling PowerDNS caching (for performance)
   * setting [`zone-cache-refresh-interval`][pdns-zone-cache]
@@ -59,22 +60,19 @@ the first development release, considered alpha quality. Any testing is apprecia
 [pdns-unix-conn]: https://doc.powerdns.com/authoritative/backends/remote.html#unix-connector
 [pdns-getall]: https://doc.powerdns.com/authoritative/backends/remote.html#getalldomains
 [pdns-zone-cache]: https://doc.powerdns.com/authoritative/settings.html#setting-zone-cache-refresh-interval
+[json5]: https://json5.org/
+[yaml]: http://www.yaml.org/
 
 #### Optional
 
-* Support more encodings for values (beside JSON)
+* Support more encodings for values
   * [EDN][] by [go-edn](https://github.com/go-edn/edn)
   * [TOML][] by [pelletier/go-toml](https://github.com/pelletier/go-toml) or [BurntSushi/toml](https://github.com/BurntSushi/toml)
-  * [YAML][] by [go-yaml](https://github.com/go-yaml/yaml)
   * …
 * [DNS update support](https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dns-update-support)
 * [Prometheus exporter](https://prometheus.io/docs/guides/go-application/)
 
-I should open polls for the optional features.
-
-[json5]: https://json5.org/
 [edn]: https://github.com/edn-format/edn
-[yaml]: http://www.yaml.org/
 [toml]: https://github.com/toml-lang/toml
 
 ## Installation
