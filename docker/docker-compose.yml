@@ -4,8 +4,8 @@ services:
   backend:
     build:
       context: .
-      dockerfile: Dockerfile
-    command: -prefix=DNS/ -log-debug=main+etcd+data
+      dockerfile: Dockerfile-backend
+    command: -prefix=/DNS/ -log-debug=main+etcd+data
     volumes:
       - ../pdns-etcd3:/pdns-etcd3:ro
       - common:/common
@@ -111,6 +111,17 @@ services:
     ports:
       - "${ETCD_PUBLIC_CLIENT_PORT:-}:2379"
     restart: unless-stopped
+  etcdkeeper:
+    build:
+      context: .
+      dockerfile: Dockerfile-etcdkeeper
+    command: etcd:2379
+    ports:
+      - "${ETCDKEEPER_PORT:-}:8080"
+    depends_on:
+      - etcd
+    profiles:
+      - etcdkeeper
 
 volumes:
   etcd-data:
