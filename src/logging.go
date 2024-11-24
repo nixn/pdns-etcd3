@@ -24,6 +24,7 @@ import (
 )
 
 type logFormatter struct {
+	msgPrefix string
 	component string
 }
 
@@ -38,16 +39,13 @@ var logLevelChars = map[logrus.Level]string{
 }
 
 func (f *logFormatter) Format(entry *logrus.Entry) ([]byte, error) {
-	var fmt1 string
-	var arg1 any
+	var arg1 string
 	if standalone {
-		fmt1 = "[%s]"
-		arg1 = time.Now().Format(time.StampMilli)
+		arg1 = fmt.Sprintf("[%s]", time.Now().Format(time.StampMilli))
 	} else {
-		fmt1 = "pdns-etcd3[%d]"
-		arg1 = pid
+		arg1 = fmt.Sprintf("pdns-etcd3[%d]", pid)
 	}
-	str := fmt.Sprintf(fmt1+" %-4s %s: %s", arg1, f.component, logLevelChars[entry.Level], entry.Message)
+	str := fmt.Sprintf("%s %-4s %s: %s%s", arg1, f.component, logLevelChars[entry.Level], f.msgPrefix, entry.Message)
 	if len(entry.Data) > 0 {
 		str += " |"
 	}
@@ -69,36 +67,44 @@ func (f *logFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	return []byte(str), nil
 }
 
-var log struct {
-	main *logrus.Logger
-	pdns *logrus.Logger
-	etcd *logrus.Logger
-	data *logrus.Logger
-	// TODO time logger (print durations)
-}
-var loggers = map[string]*logrus.Logger{}
+type logType map[string]*logrus.Logger
 
-func initLogging() {
-	log.main = logrus.New()
-	log.pdns = logrus.New()
-	log.etcd = logrus.New()
-	log.data = logrus.New()
-	loggers["main"] = log.main
-	loggers["pdns"] = log.pdns
-	loggers["etcd"] = log.etcd
-	loggers["data"] = log.data
-	for component, logger := range loggers {
-		logger.SetFormatter(&logFormatter{component: component})
+func newLog(msgPrefix string, components ...string) logType {
+	newLogger := func(component string) *logrus.Logger {
+		logger := logrus.New()
+		logger.SetFormatter(&logFormatter{msgPrefix, component})
+		return logger
 	}
+	log := logType{}
+	for _, comp := range components {
+		log[comp] = newLogger(comp)
+	}
+	return log
 }
 
-func setLoggingLevel(components string, level logrus.Level) {
+func (log *logType) main() *logrus.Logger {
+	return (*log)["main"]
+}
+
+func (log *logType) pdns() *logrus.Logger {
+	return (*log)["pdns"]
+}
+
+func (log *logType) etcd() *logrus.Logger {
+	return (*log)["etcd"]
+}
+
+func (log *logType) data() *logrus.Logger {
+	return (*log)["data"]
+}
+
+func (log *logType) setLoggingLevel(components string, level logrus.Level) {
 	for _, component := range strings.Split(components, "+") {
-		if logger, ok := loggers[component]; ok {
-			log.main.Printf("Setting log level of %s to %s", component, level)
+		if logger, ok := (*log)[component]; ok {
+			log.main().Printf("Setting log level of %s to %s", component, level)
 			logger.SetLevel(level)
 		} else {
-			log.main.WithFields(logrus.Fields{"component": component, "level": level}).Warn("setLoggingLevel(): invalid component")
+			logFrom(log.main(), "component", component, "level", level).Warnf("setLoggingLevel(): invalid component")
 		}
 	}
 }

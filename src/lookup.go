@@ -48,7 +48,7 @@ var (
 	}
 )
 
-func lookup(params objectType[any]) (interface{}, error) {
+func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 	query := queryType{
 		name:  nameType(Map(reversed(splitDomainName(params["qname"].(string), ".")), func(name string, _ int) namePart { return namePart{name, ""} })), // the keyPrefix from query.name will not be used, so it could be anything
 		qtype: params["qtype"].(string),
@@ -56,8 +56,8 @@ func lookup(params objectType[any]) (interface{}, error) {
 	data := dataRoot.getChild(query.name, true)
 	defer data.rUnlockUpwards(nil)
 	if data.depth() < query.name.len() {
-		log.data.Tracef("search for %q returned %q", query.name.normal(), data.getQname())
-		log.data.Debugf("no such domain: %q", query.name.normal())
+		client.log.data().Tracef("search for %q returned %q", query.name.normal(), data.getQname())
+		client.log.data().Debugf("no such domain: %q", query.name.normal())
 		return false, nil // need to return false to cause NXDOMAIN, returning an empty array causes PDNS error: "Backend reported condition which prevented lookup (Exception caught when receiving: No 'result' field in response from remote process) sending out servfail"
 	}
 	var result []objectType[any]
@@ -69,28 +69,37 @@ func lookup(params objectType[any]) (interface{}, error) {
 	}
 	for qtype, records := range records {
 		for _, record := range records {
-			item := makeResultItem(qtype, data, &record)
-			log.pdns.WithField("item", item).Trace("adding result item")
+			item := makeResultItem(qtype, data, &record, client)
+			client.log.pdns().WithField("item", item).Trace("adding result item")
 			result = append(result, item)
 		}
 	}
-	log.pdns.WithField("#", len(result)).Debug("request result items count")
+	client.log.pdns().WithField("#", len(result)).Debug("request result items count")
 	if len(result) == 0 {
 		return false, nil // see above for reasoning
 	}
 	return result, nil
 }
 
-func makeResultItem(qtype string, data *dataNode, record *recordType) objectType[any] {
+func makeResultItem(qtype string, data *dataNode, record *recordType, client *pdnsClient) objectType[any] {
+	content := record.content
+	if record.priority != nil {
+		content = priorityRE.ReplaceAllStringFunc(content, func(placeholder string) string {
+			if client.PdnsVersion == 3 {
+				return ""
+			}
+			return fmt.Sprintf(priorityRE.FindStringSubmatch(placeholder)[1], record.priority)
+		})
+	}
 	zoneNode := data.findZone()
 	result := objectType[any]{
 		"qname":   data.getQname(),
 		"qtype":   qtype,
-		"content": record.content,
+		"content": content,
 		"ttl":     seconds(record.ttl),
 		"auth":    zoneNode != nil,
 	}
-	if record.priority != nil {
+	if record.priority != nil && client.PdnsVersion == 3 {
 		result["priority"] = record.priority
 	}
 	return result
@@ -136,10 +145,10 @@ func findValue[T any](key, qtype, id string, data *dataNode, values func(*dataNo
 					if value, ok := values.values[key]; ok {
 						valuePath := valuePath{dn, &soe}
 						if value, ok := value.(T); ok {
-							logFrom(log.data, "value", value, "area", valuesArea).Tracef("found value for %s:%s in %s", queryPath.String(), key, valuePath.String())
+							logFrom(log.data(), "value", value, "area", valuesArea).Tracef("found value for %s:%s in %s", queryPath.String(), key, valuePath.String())
 							return value, &valuePath, nil
 						}
-						logFrom(log.data, "value", value, "area", valuesArea, "found-in", valuePath.String()).Tracef("invalid type of value for %s.%s: %T", queryPath.String(), key, value)
+						logFrom(log.data(), "value", value, "area", valuesArea, "found-in", valuePath.String()).Tracef("invalid type of value for %s.%s: %T", queryPath.String(), key, value)
 						return zeroValue, &valuePath, fmt.Errorf("invalid value type: %T", value)
 					}
 				}
@@ -156,10 +165,10 @@ func findValueOrDefault[V any](key string, values objectType[any], qtype, id str
 	if value, ok := values[key]; ok {
 		queryPath := valuePath{data, &searchOrderElement{qtype, id}}
 		if value, ok := value.(V); ok {
-			logFrom(log.data, "value", value).Tracef("found value for %s:%s directly", queryPath.String(), key)
+			logFrom(log.data(), "value", value).Tracef("found value for %s:%s directly", queryPath.String(), key)
 			return value, &queryPath, nil
 		}
-		logFrom(log.data, "value", value).Tracef("invalid type of value for %s.%s: %T (found directly)", queryPath.String(), key, value)
+		logFrom(log.data(), "value", value).Tracef("invalid type of value for %s.%s: %T (found directly)", queryPath.String(), key, value)
 		var zeroValue V
 		return zeroValue, &queryPath, fmt.Errorf("invalid type: %T", value)
 	}

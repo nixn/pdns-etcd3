@@ -126,7 +126,7 @@ func (dn *dataNode) findZone() *dataNode {
 }
 
 func (dn *dataNode) log(args ...any) *logrus.Entry {
-	return logFrom(log.data, append([]any{"dn", dn.getQname()}, args...)...)
+	return logFrom(log.data(), append([]any{"dn", dn.getQname()}, args...)...)
 }
 
 func (dn *dataNode) getName() *nameType {
@@ -450,9 +450,11 @@ func (dn *dataNode) processValues() {
 			}
 			processValuesEntry(&rrParams, &values)
 		}
-		delete(dn.values, "SOA")
 	}
 	for qtype, values := range dn.values {
+		if qtype == "SOA" {
+			continue
+		}
 		for id, values := range values {
 			rrParams := rrParams{
 				qtype:   qtype,
@@ -471,14 +473,14 @@ func (dn *dataNode) processValues() {
 func processValuesEntry(rrParams *rrParams, values *valuesType) {
 	ttl, vPath, err := getDuration("ttl", rrParams)
 	if vPath == nil || err != nil {
-		logFrom(log.data, "vp", vPath, "error", err).Errorf("failed to get TTL for entry %q, ignoring", values.key)
+		logFrom(log.data(), "vp", vPath, "error", err).Errorf("failed to get TTL for entry %q, ignoring", values.key)
 		return
 	}
 	rrParams.ttl = ttl
 	if values.isLastFieldValue {
 		rrFunc := rr2func[rrParams.qtype]
 		if rrFunc == nil {
-			log.data.WithField("entry", values.key).Errorf("record type %q is not object-supported (tried to use last-field-value syntax)", rrParams.qtype)
+			log.data().WithField("entry", values.key).Errorf("record type %q is not object-supported (tried to use last-field-value syntax)", rrParams.qtype)
 			return
 		}
 		rrParams.values = objectType[any]{}
@@ -487,23 +489,23 @@ func processValuesEntry(rrParams *rrParams, values *valuesType) {
 	} else {
 		switch value := values.value.(type) {
 		case string:
-			if rrParams.qtype == "SOA" || (*args.PdnsVersion == 3 && (rrParams.qtype == "MX" || rrParams.qtype == "SRV")) {
-				log.data.Errorf("ignoring plain string entry %q, because it is a SOA record, or pdnsVersion is 3 and it is a record with a priority field, both of which must be of object type then", values.key)
+			if rrParams.qtype == "SOA" {
+				log.data().Errorf("ignoring plain string entry %q, because it is a SOA record, which must be of object type", values.key)
 				return
 			}
-			logFrom(log.data, "value", value).Tracef("found plain string value for %s", rrParams.Target())
+			logFrom(log.data(), "value", value).Tracef("found plain string value for %s", rrParams.Target())
 			rrParams.SetContent(value, nil)
 		case objectType[any]:
 			rrFunc := rr2func[rrParams.qtype]
 			if rrFunc == nil {
-				log.data.WithField("entry", values.key).Errorf("record type %q is not object-supported", rrParams.qtype)
+				log.data().WithField("entry", values.key).Errorf("record type %q is not object-supported", rrParams.qtype)
 				return
 			}
 			rrParams.values = value
 			rrParams.lastFieldValue = nil
 			rrFunc(rrParams)
 		default:
-			log.data.Errorf("ignoring entry %q, has unhandled content data type %T", values.key, value)
+			log.data().Errorf("ignoring entry %q, has unhandled content data type %T", values.key, value)
 		}
 	}
 }

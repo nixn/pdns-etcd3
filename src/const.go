@@ -25,10 +25,7 @@ const (
 	defaultEndpointIPv4 = "127.0.0.1:2379"
 	defaultEndpointIPv6 = "[::1]:2379"
 	defaultDialTimeout  = 2 * time.Second
-)
-
-var (
-	minimumDialTimeout = 10 * time.Millisecond
+	minimumDialTimeout  = 10 * time.Millisecond
 )
 
 const (

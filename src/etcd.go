@@ -82,7 +82,7 @@ func getResponse(response *clientv3.GetResponse) *getResponseType {
 }
 
 func get(key string, multi bool, revision *int64) (*getResponseType, error) {
-	log.etcd.WithFields(logrus.Fields{"multi": multi, "rev": revision}).Tracef("get %q", key)
+	log.etcd().WithFields(logrus.Fields{"multi": multi, "rev": revision}).Tracef("get %q", key)
 	opts := []clientv3.OpOption(nil)
 	if multi {
 		opts = append(opts, clientv3.WithPrefix())
@@ -98,42 +98,38 @@ func get(key string, multi bool, revision *int64) (*getResponseType, error) {
 	if err != nil {
 		return nil, fmt.Errorf("[dur %s] %s", dur, err)
 	}
-	log.etcd.WithFields(logrus.Fields{"multi": multi, "dur": dur, "rev": revision, "#": response.Count, "more": response.More}).Tracef("got %q", key)
+	log.etcd().WithFields(logrus.Fields{"multi": multi, "dur": dur, "rev": revision, "#": response.Count, "more": response.More}).Tracef("got %q", key)
 	return getResponse(response), nil
 }
 
-func startWatchData(doneCtx context.Context, revision int64) <-chan *clientv3.Event {
-	ch := make(chan *clientv3.Event)
-	go func() {
-		defer close(ch)
-		watcher := clientv3.NewWatcher(cli)
-		defer watcher.Close()
+func watchData(doneCtx context.Context, revision int64) {
+	watcher := clientv3.NewWatcher(cli)
+	defer watcher.Close()
+WATCH:
+	for {
+		watchCtx := clientv3.WithRequireLeader(doneCtx)
+		watchChan := watcher.Watch(watchCtx, *args.Prefix, clientv3.WithPrefix(), clientv3.WithRev(revision))
+	SELECT:
 		for {
-			watchCtx := clientv3.WithRequireLeader(doneCtx)
-			watchChan := watcher.Watch(watchCtx, *args.Prefix, clientv3.WithPrefix(), clientv3.WithRev(revision))
-		SELECT:
-			for {
-				select {
-				case <-doneCtx.Done():
-					return
-				case watchResponse, ok := <-watchChan:
-					if ok {
-						if watchResponse.Canceled {
-							log.etcd.WithError(watchResponse.Err()).Error("watch canceled")
-							break
-						} else {
-							log.etcd.WithFields(logrus.Fields{"compact-rev": watchResponse.CompactRevision, "#events": len(watchResponse.Events), "rev": watchResponse.Header.Revision}).Debug("watch event")
-							for _, ev := range watchResponse.Events {
-								ch <- ev
-							}
-						}
+			select {
+			case <-doneCtx.Done():
+				break WATCH
+			case watchResponse, ok := <-watchChan:
+				if ok {
+					if watchResponse.Canceled {
+						log.etcd().WithError(watchResponse.Err()).Error("watch canceled")
+						break
 					} else {
-						log.etcd.WithError(watchResponse.Err()).Errorf("watch failed")
-						break SELECT
+						log.etcd().WithFields(logrus.Fields{"compact-rev": watchResponse.CompactRevision, "#events": len(watchResponse.Events), "rev": watchResponse.Header.Revision}).Debug("watch event")
+						for _, ev := range watchResponse.Events {
+							handleEvent(ev)
+						}
 					}
+				} else {
+					log.etcd().WithError(watchResponse.Err()).Errorf("watch failed")
+					break SELECT
 				}
 			}
 		}
-	}()
-	return ch
+	}
 }

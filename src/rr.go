@@ -70,11 +70,11 @@ type rrFunc func(params *rrParams)
 var rr2func = map[string]rrFunc{
 	"A":     a,
 	"AAAA":  aaaa,
-	"CNAME": domainName("CNAME", "target"),
-	"DNAME": domainName("DNAME", "name"),
+	"CNAME": domainName("target"),
+	"DNAME": domainName("name"),
 	"MX":    mx,
-	"NS":    domainName("NS", "hostname"),
-	"PTR":   domainName("PTR", "hostname"),
+	"NS":    domainName("hostname"),
+	"PTR":   domainName("hostname"),
 	"SOA":   soa,
 	"SRV":   srv,
 	"TXT":   txt,
@@ -118,7 +118,7 @@ func getValue[T any](key string, params *rrParams) (T, *valuePath, error) {
 		if params.lastFieldValue != nil {
 			if lastFieldValue, ok := (*params.lastFieldValue).(T); ok {
 				params.values[key] = lastFieldValue
-				logFrom(log.data, "value", lastFieldValue).Tracef("using last-field-value for %s:%s", params.Target(), key)
+				logFrom(log.data(), "value", lastFieldValue).Tracef("using last-field-value for %s:%s", params.Target(), key)
 				params.lastFieldValue = nil
 				return lastFieldValue, &qPath, nil
 			}
@@ -191,7 +191,7 @@ func getHostname(key string, params *rrParams) (string, *valuePath, error) {
 	return hostname, vPath, nil
 }
 
-func domainName(qtype, key string) rrFunc {
+func domainName(key string) rrFunc {
 	return func(params *rrParams) {
 		name, vPath, err := getHostname(key, params)
 		if vPath == nil || err != nil {
@@ -411,13 +411,8 @@ func srv(params *rrParams) {
 		params.log("vp", vPath, "error", err).Error("failed to get value for 'target'")
 		return
 	}
-	content := fmt.Sprintf("%d %d %s", weight, port, target)
-	if *args.PdnsVersion == 3 {
-		params.SetContent(content, &priority)
-	} else {
-		content = fmt.Sprintf("%d %s", priority, content)
-		params.SetContent(content, nil)
-	}
+	content := fmt.Sprintf("{priority:%%d }%d %d %s", weight, port, target)
+	params.SetContent(content, &priority)
 }
 
 func mx(params *rrParams) {
@@ -431,12 +426,8 @@ func mx(params *rrParams) {
 		params.log("vp", vPath, "error", err).Error("failed to get value for 'target'")
 		return
 	}
-	if *args.PdnsVersion == 3 {
-		params.SetContent(target, &priority)
-	} else {
-		content := fmt.Sprintf("%d %s", priority, target)
-		params.SetContent(content, nil)
-	}
+	content := fmt.Sprintf("{priority:%%d }%s", target)
+	params.SetContent(content, &priority)
 }
 
 func txt(params *rrParams) {
