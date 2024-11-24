@@ -51,19 +51,6 @@ func splitDomainName(name string, separator string) []string {
 	return strings.Split(name, separator)
 }
 
-func startsWith(str, prefix string) bool {
-	return str[:len(prefix)] == prefix
-}
-
-func endsWith(str string, suffix string) bool {
-	strLen := len(str)
-	sufLen := len(suffix)
-	if strLen < sufLen {
-		return false
-	}
-	return str[strLen-sufLen:] == suffix
-}
-
 // Map takes a slice of type T, maps every element of it to type R through the mapper function and returns the mapped elements in a new slice of type R
 func Map[T any, R any](slice []T, mapper func(T, int) R) []R {
 	l := len(slice)

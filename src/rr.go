@@ -82,7 +82,7 @@ var rr2func = map[string]rrFunc{
 
 func fqdn(domain string, params *rrParams) (string, error) {
 	qSOA := params.qtype == "SOA"
-	for data := params.data; !endsWith(domain, "."); data = data.parent {
+	for data := params.data; !strings.HasSuffix(domain, "."); data = data.parent {
 		zoneAppendDomain, valuePath, err := findOptionValue[string](zoneAppendDomainOption, params.qtype, params.id, data, true)
 		if err != nil {
 			return domain, fmt.Errorf("failed to get option %q (dn=%s, vp=%s): %s", zoneAppendDomain, data.getQname(), (valuePath), err)
@@ -94,7 +94,7 @@ func fqdn(domain string, params *rrParams) (string, error) {
 			}
 			domain += zoneAppendDomain
 		}
-		if !endsWith(domain, ".") && (qSOA || data.hasSOA()) {
+		if !strings.HasSuffix(domain, ".") && (qSOA || data.hasSOA()) {
 			if !data.isRoot() {
 				domain += "."
 			}
@@ -269,23 +269,56 @@ func soa(params *rrParams) {
 	params.SetContent(content, nil)
 }
 
-func parseOctets(value any, ipVer int) ([]byte, error) {
+func parseOctets(value any, ipVer int, asPrefix bool) ([]byte, error) {
 	values := []any{}
-	switch valueT := value.(type) {
+	sepFirst := false
+	sepLast := false
+	switch value := value.(type) {
 	case float64:
-		values = append(values, valueT)
+		values = append(values, value)
 	case string:
-		if ipHexRE.MatchString(valueT) {
-			numOctets := len(valueT) / 2
-			if numOctets >= ipLen[ipVer] {
-				return nil, fmt.Errorf("too many octets")
+		if value == "" {
+			return nil, fmt.Errorf("invalid value: empty string")
+		}
+		if match := ipHexRE.FindStringSubmatch(value); match != nil {
+			if ipVer == 4 && match[1] == "" && ip4OctetRE.MatchString(match[2]) {
+				values = append(values, value)
+				break
 			}
-			for i := 0; i < numOctets; i++ { // length is a multiple of 2 (b/c regex matched)
-				v, _ := strconv.ParseUint(valueT[i*2:i*2+2], 16, 8) // errors are not possible, b/c regex matched
-				values = append(values, byte(v))
+			value = match[2]
+			ls := len(value)
+			if ls%2 == 1 {
+				value = "0" + value
+				ls++
 			}
-		} else {
-			ip := net.ParseIP(valueT)
+			for i := 0; i < ls; i += 2 {
+				b, _ := strconv.ParseUint(value[i:i+2], 16, 8)
+				values = append(values, byte(b))
+			}
+			break
+		}
+		sep := ipMeta[ipVer].separator
+		sepFirstIndex := strings.Index(value, sep)
+		doubleColonIndex := strings.Index(value, "::")
+		sepFirst = sepFirstIndex == 0 && (ipVer != 6 || doubleColonIndex != 0)
+		ls := len(value)
+		sepLast = strings.LastIndex(value, sep) == ls-1 && (ipVer != 6 || ls < 2 || /*(*)*/ doubleColonIndex != ls-2)
+		// (*) if there are multiple double colons and the last one is at the end, sepLast should be false but would be true
+		// this is not a problem though, because net.ParseIP() would be still called, which would fail then, leading to returning an error
+		if sepFirst {
+			if asPrefix {
+				return nil, fmt.Errorf("can't have a separator first in a prefix IP")
+			}
+			value = "0" + value
+		}
+		if sepLast {
+			if !asPrefix {
+				return nil, fmt.Errorf("can't have a separator last in an IP value")
+			}
+			value += "0"
+		}
+		if doubleColonIndex >= 0 || strings.Contains(value, ":") {
+			ip := net.ParseIP(value)
 			if ip != nil {
 				if ipVer == 4 {
 					ip = ip.To4()
@@ -295,17 +328,70 @@ func parseOctets(value any, ipVer int) ([]byte, error) {
 					ip = nil
 				}
 			}
-			if ip == nil || len(ip) != ipLen[ipVer] {
-				return nil, fmt.Errorf("failed to parse as an IP address")
+			if ip != nil {
+				for _, octet := range ip {
+					values = append(values, octet)
+				}
+				break
 			}
-			for _, octet := range ip {
+			if ipVer != 6 || doubleColonIndex >= 0 {
+				return nil, fmt.Errorf("failed to parse as an IPv%d address", ipVer)
+			}
+			parts := strings.Split(value, sep)
+			for i, n := 0, len(parts); i < n; i++ {
+				part := parts[i]
+				doubleOctet, err := strconv.ParseUint(part, 16, 16)
+				if err != nil {
+					iDisplay := i
+					if sepFirst {
+						iDisplay--
+					}
+					return nil, fmt.Errorf("double octet #%d (%v): failed to parse as uint16: %s", iDisplay, part, err)
+				}
+				hi, lo := func() (bool, bool) {
+					lp := len(part)
+					if asPrefix {
+						if i+1 < n {
+							return true, true
+						}
+						for i := 4; i > lp; i-- {
+							doubleOctet <<= 4
+						}
+						return true, sepLast || lp > 2
+					}
+					// else
+					if i > 0 {
+						return true, true
+					}
+					return sepFirst || lp > 2, true
+				}()
+				if hi {
+					values = append(values, byte(doubleOctet>>8))
+				}
+				if lo {
+					values = append(values, byte(doubleOctet&0xff))
+				}
+			}
+		} else if ipVer == 4 && sepFirstIndex >= 0 {
+			for _, octet := range strings.Split(value, sep) {
 				values = append(values, octet)
 			}
+		} else {
+			return nil, fmt.Errorf("invalid syntax")
 		}
 	case []any:
-		values = valueT
+		values = value
 	default:
 		return nil, fmt.Errorf("invalid value type: %T", value)
+	}
+	if lv := len(values); lv == 0 || lv > ipMeta[ipVer].totalOctets {
+		return nil, fmt.Errorf("invalid count of octets (found %d, need 1 - %d)", lv, ipMeta[ipVer].totalOctets)
+	}
+	if sepFirst {
+		values = values[ipMeta[ipVer].partOctets:]
+	}
+	if sepLast {
+		values = values[:len(values)-ipMeta[ipVer].partOctets]
 	}
 	octets := []byte{}
 	for i, v := range values {
@@ -315,13 +401,16 @@ func parseOctets(value any, ipVer int) ([]byte, error) {
 		case float64:
 			vI, err := float2int(v)
 			if err != nil {
-				return nil, fmt.Errorf("octet #%d(%v): failed to convert from float to int: %s", i, v, err)
+				return nil, fmt.Errorf("octet #%d (%v): failed to convert from float to int: %s", i, v, err)
 			}
 			if vI < 0 || v > 255 {
-				return nil, fmt.Errorf("octet #%d(%v): value out of range (0-255)", i, vI)
+				return nil, fmt.Errorf("octet #%d (%v): value out of range (0-255)", i, vI)
 			}
 			octets = append(octets, byte(vI))
 		case string:
+			if v == "" {
+				return nil, fmt.Errorf("octet #%d: empty string", i)
+			}
 			vB, err := strconv.ParseUint(v, 0, 8)
 			if err != nil {
 				return nil, fmt.Errorf("octet #%d(%v): failed to parse from string: %s", i, v, err)
@@ -348,7 +437,7 @@ func ipRR(params *rrParams, ipVer int) {
 		return
 	}
 	if oPath != nil {
-		octets, err := parseOctets(prefixAny, ipVer)
+		octets, err := parseOctets(prefixAny, ipVer, true)
 		if err != nil {
 			params.log("field", "ip", "option", ipPrefixOption).Errorf("failed to parse octets: %s", err)
 			return
@@ -358,22 +447,22 @@ func ipRR(params *rrParams, ipVer int) {
 	} else {
 		params.log("field", "ip").Tracef("option %q not found", ipPrefixOption)
 	}
-	octets, err := parseOctets(value, ipVer)
+	octets, err := parseOctets(value, ipVer, false)
 	if err != nil {
 		params.exlog("field", "ip", "value", value).Errorf("failed to parse value to octets: %s", err)
 		return
 	}
 	vLen := len(octets)
 	pLen := len(prefix)
-	if pLen == 0 && vLen < ipLen[ipVer] {
+	if pLen == 0 && vLen < ipMeta[ipVer].totalOctets {
 		params.exlog("field", "ip", "value", octets).Errorf("too few octets")
 		return
 	}
 	ip := net.IP(prefix)
-	for i := pLen; i < ipLen[ipVer]; i++ {
+	for i := pLen; i < ipMeta[ipVer].totalOctets; i++ {
 		ip = append(ip, 0)
 	}
-	offset := ipLen[ipVer] - vLen
+	offset := ipMeta[ipVer].totalOctets - vLen
 	for i, octet := range octets {
 		ip[offset+i] = octet
 	}

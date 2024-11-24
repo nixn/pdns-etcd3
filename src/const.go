@@ -46,11 +46,22 @@ const (
 	versionSeparator = "@"
 )
 
+type ipMetaT map[int]struct {
+	totalOctets int
+	partOctets  int
+	separator   string
+}
+
 var (
 	pid        = os.Getpid()
 	qtypeRegex = regexp.MustCompile("^[A-Z]+$")
-	ipLen      = map[int]int{4: 4, 6: 16}
-	ipHexRE    = regexp.MustCompile("^(?:[0-9a-fA-F]{2})+$")
+	ipMeta     = ipMetaT{
+		4: {4, 1, `.`},
+		6: {16, 2, `:`},
+	}
+	ipHexRE    = regexp.MustCompile("^(0[xX])?([0-9a-fA-F]+)$")
+	ip4OctetRE = regexp.MustCompile("^[0-9]{1,3}$")
+	priorityRE = regexp.MustCompile("{priority:(.*?)}")
 )
 
 const (

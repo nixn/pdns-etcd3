@@ -27,10 +27,9 @@ import (
 // TODO use more object-oriented style
 
 type recordType struct {
-	// TODO need key here? would be the result of rrParams.Target(). perhaps useful as cached value for performance
 	content  string
-	priority *uint16 // only used when pdnsVersion == 3
-	ttl      time.Duration
+	priority *uint16       // only used when pdnsVersion == 3
+	ttl      time.Duration // TODO make TTL an option, not a value
 	version  *VersionType
 }
 
@@ -299,7 +298,7 @@ func parseEntryContent(value []byte, allowString bool) (interface{}, bool, error
 		}
 		return content, true, nil
 	case '{':
-		values := objectType[any]{}
+		values := objectType[any](nil)
 		err := json.Unmarshal(value, &values)
 		if err != nil {
 			return nil, false, fmt.Errorf("failed to parse as JSON object: %s", err)
