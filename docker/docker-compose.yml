@@ -115,7 +115,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile-etcdkeeper
-    command: etcd:2379
+    environment:
+      ETCD_ENDPOINT: etcd:2379
     ports:
       - "${ETCDKEEPER_PORT:-}:8080"
     depends_on:

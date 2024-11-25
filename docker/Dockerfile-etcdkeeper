@@ -10,5 +10,6 @@ export DEBIAN_FRONTENT=noninteractive
 apt-get update
 apt-get install -y simpleproxy
 EOF
-ENTRYPOINT ["/opt/etcdkeeper.sh"]
+ENV ETCD_ENDPOINT=""
+ENTRYPOINT ./etcdkeeper.sh "$ETCD_ENDPOINT"
 EXPOSE 8080/tcp
