@@ -12,15 +12,33 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
 
-package main
+package src
 
-import P "github.com/nixn/pdns-etcd3/src"
-
-var (
-	programVersion = P.VersionType{IsDevelopment: true, Major: 2, Minor: 0} // update this in a release branch
-	gitVersion     = "GIT_VERSION_UNSET"
+import (
+	"encoding/json"
+	"io"
 )
 
-func main() {
-	P.Main(programVersion, gitVersion)
+type commType[T any] struct {
+	in  *json.Decoder
+	out *json.Encoder
+}
+
+func newComm[T any](in io.Reader, out io.Writer) *commType[T] {
+	comm := commType[T]{
+		json.NewDecoder(in),
+		json.NewEncoder(out),
+	}
+	comm.out.SetEscapeHTML(false)
+	return &comm
+}
+
+func (comm *commType[T]) read() (*T, error) {
+	var data T
+	err := comm.in.Decode(&data)
+	return &data, err
+}
+
+func (comm *commType[T]) write(data any) error {
+	return comm.out.Encode(data)
 }

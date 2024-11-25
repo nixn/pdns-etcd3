@@ -1,4 +1,4 @@
-/* Copyright 2016-2022 nix <https://keybase.io/nixn>
+/* Copyright 2016-2024 nix <https://keybase.io/nixn>
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,43 +26,51 @@ const (
 )
 
 var (
-	versionRegex = regexp.MustCompile("^([0-9]+)(?:\\.([0-9]+))?$")
+	versionRegex = regexp.MustCompile(`^([0-9]+)(?:\.([0-9]+))?$`)
 )
 
-type versionType struct {
-	isDevelopment bool
-	major, minor  uint64
+// VersionType is the type for program and data version, resp.
+type VersionType struct {
+	IsDevelopment       bool
+	Major, Minor, Patch uint64
 }
 
-func (version *versionType) String() string {
-	var prefix string
-	if version.isDevelopment {
-		prefix = "0."
+func (v *VersionType) String() string {
+	if v.IsDevelopment && v.Major == 0 && v.Minor == 0 && v.Patch == 0 {
+		return "develop"
 	}
-	return fmt.Sprintf("%s%d.%d", prefix, version.major, version.minor)
+	var vs string
+	if v.IsDevelopment {
+		vs = developmentPrefix
+	}
+	vs += fmt.Sprintf("%d.%d", v.Major, v.Minor)
+	if v.Patch > 0 {
+		vs += fmt.Sprintf(".%d", v.Patch)
+	}
+	return vs
 }
 
-func (version *versionType) IsCompatibleTo(otherVersion *versionType) bool {
-	if version.isDevelopment == otherVersion.isDevelopment && version.major == otherVersion.major && version.minor >= otherVersion.minor {
+func (v *VersionType) isCompatibleTo(otherVersion *VersionType) bool {
+	if v.IsDevelopment == otherVersion.IsDevelopment && v.Major == otherVersion.Major && v.Minor >= otherVersion.Minor {
 		return true
 	}
 	return false
 }
 
-func parseEntryVersion(string string) (*versionType, error) {
-	version := versionType{}
+func parseEntryVersion(string string) (*VersionType, error) {
+	version := VersionType{}
 	if strings.HasPrefix(string, developmentPrefix) {
-		version.isDevelopment = true
+		version.IsDevelopment = true
 		string = string[len(developmentPrefix):]
 	}
 	if parts := versionRegex.FindStringSubmatch(string); parts != nil {
 		var err error
-		version.major, err = strconv.ParseUint(parts[1], 10, 8)
+		version.Major, err = strconv.ParseUint(parts[1], 10, 8)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse major: %s", err)
 		}
 		if len(parts) > 2 && len(parts[2]) > 0 {
-			version.minor, err = strconv.ParseUint(parts[2], 10, 8)
+			version.Minor, err = strconv.ParseUint(parts[2], 10, 8)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse minor: %s", err)
 			}

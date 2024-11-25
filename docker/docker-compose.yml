@@ -1,0 +1,129 @@
+#version: '3.8'
+name: pdns-etcd3
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile-backend
+    command: -prefix=/DNS/ -log-debug=main+etcd+data
+    volumes:
+      - ../pdns-etcd3:/pdns-etcd3:ro
+      - common:/common
+    profiles:
+      - standalone
+  pdns34:
+    image: powerdns/pdns-auth-34 # TODO build
+    volumes:
+      - ../pdns-etcd3:/pdns-etcd3:ro
+      - common:/common
+      - ./pdns.conf:/etc/powerdns/pdns.conf:ro
+      - ./pdns-1-listen-legacy.conf:/etc/powerdns/pdns.d/pdns-1-listen-legacy.conf:ro
+      - ./pdns-5-${PDNS_BACKEND_MODE:?}-v3.conf:/etc/powerdns/pdns.d/pdns-5-backend.conf:ro
+    ports:
+      - "${PDNS34_PUBLIC_TCP_PORT:-${PDNS34_PUBLIC_PORT:-}}:53"
+      - "${PDNS34_PUBLIC_UDP_PORT:-${PDNS34_PUBLIC_PORT:-}}:53/udp"
+    depends_on:
+      - backend
+    profiles:
+      - pdns-34
+      #- pdns-all # TODO re-enable (when working)
+  pdns44:
+    image: powerdns/pdns-auth-44
+    volumes:
+      - ../pdns-etcd3:/pdns-etcd3:ro
+      - common:/common
+      - ./pdns.conf:/etc/powerdns/pdns.conf:ro
+      - ./pdns-1-listen.conf:/etc/powerdns/pdns.d/pdns-1-listen.conf:ro
+      - ./pdns-5-${PDNS_BACKEND_MODE:?}.conf:/etc/powerdns/pdns.d/pdns-5-backend.conf:ro
+    ports:
+      - "${PDNS44_PUBLIC_TCP_PORT:-${PDNS44_PUBLIC_PORT:-}}:53"
+      - "${PDNS44_PUBLIC_UDP_PORT:-${PDNS44_PUBLIC_PORT:-}}:53/udp"
+    depends_on:
+      - backend
+    profiles:
+      - pdns-44
+      - pdns-all
+  pdns45:
+    image: powerdns/pdns-auth-45
+    volumes:
+      - ../pdns-etcd3:/pdns-etcd3:ro
+      - common:/common
+      - ./pdns.conf:/etc/powerdns/pdns.conf:ro
+      - ./pdns-1-listen.conf:/etc/powerdns/pdns.d/pdns-1-listen.conf:ro
+      - ./pdns-3-zone-cache.conf:/etc/powerdns/pdns.d/pdns-3-zone-cache.conf:ro
+      - ./pdns-5-${PDNS_BACKEND_MODE:?}.conf:/etc/powerdns/pdns.d/pdns-5-backend.conf:ro
+    ports:
+      - "${PDNS45_PUBLIC_TCP_PORT:-${PDNS45_PUBLIC_PORT:-}}:53"
+      - "${PDNS45_PUBLIC_UDP_PORT:-${PDNS45_PUBLIC_PORT:-}}:53/udp"
+    depends_on:
+      - backend
+    profiles:
+      - pdns-45
+      - pdns-all
+  pdns49:
+    image: powerdns/pdns-auth-49
+    volumes:
+      - ../pdns-etcd3:/pdns-etcd3:ro
+      - common:/common
+      - ./pdns.conf:/etc/powerdns/pdns.conf:ro
+      - ./pdns-1-listen.conf:/etc/powerdns/pdns.d/pdns-1-listen.conf:ro
+      - ./pdns-3-zone-cache.conf:/etc/powerdns/pdns.d/pdns-3-zone-cache.conf:ro
+      - ./pdns-5-${PDNS_BACKEND_MODE:?}.conf:/etc/powerdns/pdns.d/pdns-5-backend.conf:ro
+    ports:
+      - "${PDNS49_PUBLIC_TCP_PORT:-${PDNS49_PUBLIC_PORT:-}}:53"
+      - "${PDNS49_PUBLIC_UDP_PORT:-${PDNS49_PUBLIC_PORT:-}}:53/udp"
+    depends_on:
+      - backend
+    profiles:
+      - pdns-49
+      - pdns-all
+  pdns50:
+    image: powerdns/pdns-auth-master
+    volumes:
+      - ../pdns-etcd3:/pdns-etcd3:ro
+      - common:/common
+      - ./pdns.conf:/etc/powerdns/pdns.conf:ro
+      - ./pdns-1-listen.conf:/etc/powerdns/pdns.d/pdns-1-listen.conf:ro
+      - ./pdns-3-zone-cache.conf:/etc/powerdns/pdns.d/pdns-3-zone-cache.conf:ro
+      - ./pdns-5-${PDNS_BACKEND_MODE:?}.conf:/etc/powerdns/pdns.d/pdns-5-backend.conf:ro
+    ports:
+      - "${PDNS50_PUBLIC_TCP_PORT:-${PDNS50_PUBLIC_PORT:-}}:53"
+      - "${PDNS50_PUBLIC_UDP_PORT:-${PDNS50_PUBLIC_PORT:-}}:53/udp"
+    depends_on:
+      - backend
+    profiles:
+      - pdns-50
+      - pdns-all
+  etcd:
+    image: quay.io/coreos/etcd:${ETCD_IMAGE_VERSION:-v3.5.14}
+    volumes:
+      - etcd-data:/data
+    command: |
+      etcd
+      --data-dir=/data
+      --name=etcd
+      --initial-advertise-peer-urls=http://etcd:2380
+      --listen-peer-urls=http://0.0.0.0:2380
+      --advertise-client-urls=http://etcd:2379
+      --listen-client-urls=http://0.0.0.0:2379
+      --initial-cluster=etcd=http://etcd:2380
+      --auto-compaction-retention=1h
+    ports:
+      - "${ETCD_PUBLIC_CLIENT_PORT:-}:2379"
+    restart: unless-stopped
+  etcdkeeper:
+    build:
+      context: .
+      dockerfile: Dockerfile-etcdkeeper
+    environment:
+      ETCD_ENDPOINT: etcd:2379
+    ports:
+      - "${ETCDKEEPER_PORT:-}:8080"
+    depends_on:
+      - etcd
+    profiles:
+      - etcdkeeper
+
+volumes:
+  etcd-data:
+  common:
