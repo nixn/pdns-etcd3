@@ -88,7 +88,7 @@ func makeResultItem(qtype string, data *dataNode, record *recordType, client *pd
 			if client.PdnsVersion == 3 {
 				return ""
 			}
-			return fmt.Sprintf(priorityRE.FindStringSubmatch(placeholder)[1], record.priority)
+			return fmt.Sprintf(priorityRE.FindStringSubmatch(placeholder)[1], *record.priority)
 		})
 	}
 	zoneNode := data.findZone()
@@ -100,7 +100,7 @@ func makeResultItem(qtype string, data *dataNode, record *recordType, client *pd
 		"auth":    zoneNode != nil,
 	}
 	if record.priority != nil && client.PdnsVersion == 3 {
-		result["priority"] = record.priority
+		result["priority"] = *record.priority
 	}
 	return result
 }
