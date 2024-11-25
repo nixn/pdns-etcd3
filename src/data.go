@@ -24,7 +24,10 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// TODO use more object-oriented style
+var (
+	// update this when changing data structure (only major/minor, patch is always 0). also change it in docs!
+	dataVersion = VersionType{IsDevelopment: true, Major: 1, Minor: 1}
+)
 
 type recordType struct {
 	content  string
@@ -173,6 +176,9 @@ func (dn *dataNode) rUnlockUpwards(stopAt *dataNode) {
 }
 
 func (dn *dataNode) zoneRev() int64 {
+	// TODO use an automatically updated key for latest seen revision, because on deletion of keys the default zoneRev may jump backwards
+	// or update the SOA record entry after a deletion to fix the revision
+	// TODO for +auto-ptr and potentially +collect: maintain a list of dependent zones (up- and downwards) and take the highest revision as result (for all of them)
 	rev := dn.maxRev
 	for _, dn := range dn.children {
 		if dn.hasSOA() {

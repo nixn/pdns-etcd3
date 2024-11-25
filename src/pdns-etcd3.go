@@ -30,11 +30,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var (
-	// update this when changing data structure (only major/minor, patch is always 0). also change it in docs!
-	dataVersion = VersionType{IsDevelopment: true, Major: 1, Minor: 1}
-)
-
 type programArgs struct {
 	ConfigFile  *string
 	Endpoints   *string
@@ -224,7 +219,7 @@ func handleEvent(event *clientv3.Event) {
 	defer zoneData.mutex.Unlock()
 	zoneData.reload(getResponse.DataChan)
 	dur := time.Since(since)
-	logFrom(log.data(), "#records", zoneData.recordsCount(), "#zones", zoneData.zonesCount(), "dataRevision", maxOf(event.Kv.ModRevision, event.Kv.CreateRevision), "event-duration", dur).Debugf("reloaded zone %q and updated data revision", qname)
+	logFrom(log.data(), "#records", zoneData.recordsCount(), "#zones", zoneData.zonesCount(), "data-revision", maxOf(event.Kv.ModRevision, event.Kv.CreateRevision), "event-duration", dur).Debugf("reloaded zone %q", qname)
 }
 
 // Main is the "moved" program entrypoint, but with git version argument (which is set in real main package)

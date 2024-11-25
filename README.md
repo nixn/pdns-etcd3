@@ -50,7 +50,7 @@ the first development release, considered alpha quality. Any testing is apprecia
 * "Labels" for selectively applying defaults and/or options to record entries
   * sth. like `com/example/-options-ptr` → `{"auto-ptr": true}` and `com/example/www/-options-collect` → `{"collect": …}` for `com/example/www-1/A+ptr+collect` without global options
   * precedence betweeen QTYPE and id (id > label > QTYPE)
-* Support [JSON5][] by [flynn/json5](https://github.com/flynn/json5) (replace default JSON, b/c JSON5 is a superset of JSON)
+* Support [JSON5][] by [flynn/json5](https://github.com/flynn/json5) (replace default JSON, because JSON5 is a superset of JSON)
 * Support [YAML][] by [go-yaml](https://github.com/go-yaml/yaml)
 * DNSSEC support ([PowerDNS DNSSEC-specific calls][pdns-dnssec])
 * Implement [`getAllDomains`][pdns-getall] backend call for enabling PowerDNS caching (for performance)
@@ -156,11 +156,13 @@ are tagged by *#UNIX*):
   they are resolvable before PowerDNS has started.<br>
   Defaults to `[::1]:2379|127.0.0.1:2379`.
 * `prefix=<string>` *#UNIX*<br>
-  Every entry in ETCD will be prefixed with that. It is not interpreted or changed in any way, also the data watcher uses it.<br>
-  Currently there seems to be a bug(?) in the ETCD client (not pdns-etcd3), which causes an empty prefix not to work. Just use one.<br>
+  Every entry in ETCD will be prefixed with that. It is not interpreted or changed in any way, also the data watcher uses it,
+  so any other keys under another prefix do not affect DNS data.<br>
+  Currently there seems to be a bug(?) in the ETCD client (not pdns-etcd3), which causes an empty prefix not to work.
+  Just use one. Tip: Let the prefix start and end with `/`, so you can use [etcdkeeper][] for easier web-based data management.<br>
   There is no default (= empty).
 * `timeout=<duration>` *#UNIX* or<br>
-  `timeout=<integer>` *config file* (in milliseconds, e.g. 1500 for 1.5 seconds)<br>
+  `timeout=<integer>` *config file* (in milliseconds, e.g. `1500` for 1.5 seconds)<br>
   An optional parameter which sets the dial timeout to ETCD. Must be a positive value (>= 1ms).<br>
   Defaults to 2 seconds.
 * `pdns-version=3|4|5`<br>
@@ -173,6 +175,8 @@ are tagged by *#UNIX*):
   In unix mode, the levels are set separately for the program and the clients (PowerDNS connections).<br>
   Example: `log-debug=main+pdns,log-trace=etcd+data`<br>
   Defaults to `info` for all components.
+
+[etcdkeeper]: https://github.com/evildecay/etcdkeeper
 
 ### ETCD structure
 

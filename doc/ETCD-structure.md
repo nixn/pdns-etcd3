@@ -489,9 +489,25 @@ Options:
 #### `TXT`
 * `text`: string
 
+## Changelog
+
+The changelog lists every change which led to a data version increase (major or minor).
+One can use it to check their data - whether an adjustment is needed for a new program version which has a new data version.
+
+#### 0.1.1
+* added options (keyword `-options-`)
+* added option `ip-prefix` to `A` and `AAAA`
+* added option `zone-append-domain` to every supported record with a domain name (`SOA`, `NS`, `PTR`, `CNAME`, `DNAME`, `MX`, `SRV`)
+* reworked parsing of IPs, added more possibilities for the value
+* added last-value syntax
+* domains can now be separated by `.` and/or `/` (also intermixed)
+
+#### 0.1.0
+Initial version (base).
+
 ## Full example
 
-*To be clear on the value, it's always enclosed in ' (single quotes).*
+*To be precise on the value, it is always enclosed in '...' (single quotes); they are not part of the value themselves.*
 
 * `prefix` is `DNS/`<br>
 (note the trailing slash, it is part of the prefix, *not* inserted automatically)
