@@ -103,10 +103,9 @@ If a record content is given as an object, but is not supported by the program, 
 The record TTL is a regular field in case of an object entry (key `ttl`), but there
 is no way to directly define a record-specific TTL for a plain string entry.
 One may use a default value as a workaround for this limitation: For example to have a specific TTL
-on a record with the (unsupported custom) QTYPE `ABC` one can use the entry
-`<domain>/-defaults-/ABC` → `{"ttl":"<specific-ttl-value>"}`
-to specify the TTL for the entry `<domain>/ABC` → `<plain content for ABC>`.<br>
-(TODO make TTL an option)
+on a record with the (currently unsupported) QTYPE `HINFO` one can use the entry
+`<domain>/-defaults-/HINFO` → `{"ttl":"<specific-ttl-value>"}`
+to specify the TTL for the entry `<domain>/HINFO` → `<plain content for HINFO>`.<br>
 
 For each record field a default value is searched for and used, if the entry value
 does not specify the field value itself. If no value is found for the field,
@@ -529,8 +528,9 @@ DNS/net.example/_tcp/_kerberos/-defaults-/SRV → '{"port": 88}'
 DNS/net.example/_tcp/_kerberos/SRV#1 → '{"target": "kerberos1"}'
 DNS/net.example/_tcp/_kerberos/SRV#2 → '="kerberos2"'
 DNS/net.example/kerberos-master/CNAME → '{"target": "kerberos1"}'
-DNS/net.example/ABC → 'content for unsupported qtype ABC, not starting with a type marker'
-DNS/net.example/-defaults-/ABC → '{"ttl": "2h"}'
+DNS/net.example/mail/HINFO → '"amd64" "Linux"'
+DNS/net.example/mail/-defaults-/HINFO → '{"ttl": "2h"}'
+DNS/net.example/TYPE123 → '\# 0'
 ```
 
 Reverse zone for `192.0.2.0/24`:

@@ -54,7 +54,7 @@ type ipMetaT map[int]struct {
 
 var (
 	pid        = os.Getpid()
-	qtypeRegex = regexp.MustCompile("^[A-Z]+$")
+	qtypeRegex = regexp.MustCompile("^[A-Z][A-Z0-9]*$")
 	ipMeta     = ipMetaT{
 		4: {4, 1, `.`},
 		6: {16, 2, `:`},
