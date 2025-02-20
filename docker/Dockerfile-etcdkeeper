@@ -6,7 +6,7 @@ RUN <<EOF
 set -ex
 tar -xf etcdkeeper*.tar.gz
 chmod +x etcdkeeper etcdkeeper.sh
-export DEBIAN_FRONTENT=noninteractive
+export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y simpleproxy
 EOF
