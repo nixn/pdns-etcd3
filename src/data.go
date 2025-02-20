@@ -229,7 +229,7 @@ func cutParts(parts []string, predicate func(string) bool) ([]string, string) {
 	return parts, ""
 }
 
-func parseEntryKey(key string) (name nameType, entryType entryType, qtype, id string, version *VersionType, err error) {
+func parseEntryKey(key string, ensureName bool) (name nameType, entryType entryType, qtype, id string, version *VersionType, err error) {
 	key = strings.TrimPrefix(key, *args.Prefix)
 	// note: qtype is also used as temp variable until it is set itself
 	// version
@@ -238,6 +238,9 @@ func parseEntryKey(key string) (name nameType, entryType entryType, qtype, id st
 		version, err = parseEntryVersion(qtype)
 		if err != nil {
 			err = fmt.Errorf("failed to parse version: %s", err)
+			if ensureName {
+				name = nameType{} // prevent nil pointer on logging (in the caller)
+			}
 			return
 		}
 	}
@@ -328,7 +331,8 @@ func (dn *dataNode) reload(dataChan <-chan etcdItem) {
 	depth := dn.depth()
 ITEMS:
 	for item := range dataChan {
-		name, entryType, qtype, id, version, err := parseEntryKey(item.Key)
+		name, entryType, qtype, id, version, err := parseEntryKey(item.Key, true)
+		//goland:noinspection GoDfaErrorMayBeNotNil
 		dn.log().Tracef("parsed %q into name %q type %q qtype %q id %q version %q err %q", item.Key, name.normal(), entryType, qtype, id, version, err2str(err))
 		// check version first, because a higher version (than our current dataVersion) could change the key syntax (but not prefix and version suffix)
 		if version != nil && !dataVersion.isCompatibleTo(version) {

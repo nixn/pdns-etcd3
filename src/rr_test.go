@@ -56,7 +56,7 @@ func (bs bs) Equal(other bs) bool {
 	return equal(bs, other)
 }
 
-type testFunc[I any, E Comparable[E]] func(I) (v E, err error)
+type testFunc[I any, E Comparable[E]] func(I) (E, error)
 
 func check[I any, E Comparable[E]](t *testing.T, id any, f testFunc[I, E], in I, expected ve[E]) {
 	got, err := f(in)
