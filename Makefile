@@ -3,7 +3,7 @@ GIT_VERSION := $(shell git describe --always --dirty)
 
 RM ?= rm -f
 
-.PHONY: all fmt vet lint clean
+.PHONY: all fmt vet lint clean test
 
 all: $(OUT) vet lint
 
@@ -22,3 +22,6 @@ lint:
 
 clean:
 	$(RM) $(OUT)
+
+test:
+	go test ./src
