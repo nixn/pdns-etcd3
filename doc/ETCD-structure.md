@@ -277,7 +277,7 @@ All entries can have a `ttl` field, for the record TTL. There must be a TTL valu
 
 Domain names undergo a check whether to append the zone name.
 The rule is the same as in [BIND][] zone files: if a name ends with a dot, the zone
-name is not appended, otherwise it is. This is only possible for JSON-entries.
+name is not appended, otherwise it is. This is only possible for object-entries.
 
 [bind]: https://www.isc.org/downloads/bind/
 
@@ -359,15 +359,15 @@ Values must be positive (that is >= 1 second).
       * if trailing, then only for prefix IPs (in the option `ip-prefix`)
       * `"1"` (1 octet: 0x01)
       * `"1:"` (2 octets: 0x00, 0x01)
-      * `"12:"` (1 octet: 0x12)
+      * `"12"` (1 octet: 0x12)
       * `"12:"` (2 octets: 0x00, 0x12)
       * `"123"` (2 octets: 0x01, 0x23)
       * `"123:"` (2 octets: 0x01, 0x23)
       * `"1234"` (2 octets: 0x12, 0x34)
       * `"1234:"` (2 octets: 0x12, 0x34)
       * padding can be tricky, it occurs on the left for IP values, but on the right for prefix IPs; and it respects a leading/trailing `:` (or a missing one)
-      * `":1"` (1 octet: 0x00, 0x01)
-      * `"1:"` (1 octet: 0x00, 0x01)
+      * `":1"` (2 octets: 0x00, 0x01)
+      * `"1:"` (2 octets: 0x00, 0x01)
       * `"1:2"`
         * as IP value (left-padded): 3 octets: 0x01, 0x00, 0x02
         * as prefix IP (right-padded): 3 octets: 0x00, 0x01, 0x20
@@ -416,7 +416,7 @@ This way the operator does not have to increase it manually each time he/she cha
 Options:
 * `no-aa` or `not-authoritative`: boolean
     * don't set the AA-bit for this zone, when set to true
-    * NOT YET IMPLEMENTED
+    * __NOT YET IMPLEMENTED__
 * `zone-append-domain`: domain name
     * when performing zone append checks, take this value (domain) instead of the FQDN of the current zone
     * undergoes itself a zone append check with the parent zone (if not ending with a `.`)
@@ -428,7 +428,7 @@ Options:
 
 Options:
 * `zone-append-domain`: domain name
-  * see `SOA` for description
+  * [see `SOA`](#soa) for description
 
 #### `A`
 * `ip`: IPv4 address
@@ -455,21 +455,21 @@ Options:
 
 Options:
 * `zone-append-domain`: domain name
-  * see `SOA` for description
+  * [see `SOA`](#soa) for description
 
 #### `CNAME`
 * `target`: domain name
 
 Options:
 * `zone-append-domain`: domain name
-  * see `SOA` for description
+  * [see `SOA`](#soa) for description
 
 #### `DNAME`
 * `target`: domain name
 
 Options:
 * `zone-append-domain`: domain name
-  * see `SOA` for description
+  * [see `SOA`](#soa) for description
 
 #### `MX`
 * `priority`: uint16
@@ -477,7 +477,7 @@ Options:
 
 Options:
 * `zone-append-domain`: domain name
-  * see `SOA` for description
+  * [see `SOA`](#soa) for description
 
 #### `SRV`
 * `priority`: uint16
@@ -487,7 +487,7 @@ Options:
 
 Options:
 * `zone-append-domain`: domain name
-  * see `SOA` for description
+  * [see `SOA`](#soa) for description
 
 #### `TXT`
 * `text`: string
@@ -582,5 +582,5 @@ Delegation and glue records for `subunit.example.net.`:
 DNS/net.example/subunit/NS#1 → '{"hostname": "ns1.subunit"}'
 DNS/net.example/subunit/NS#2 → '="ns2.subunit"'
 DNS/net.example/subunit/ns1/A → '192.0.3.2'
-DNS/net.example/subunit/ns2/A → '192.0.3.3'
+DNS/net.example/subunit/ns2/A → '=[3, 3]'
 ```
