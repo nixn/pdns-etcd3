@@ -304,10 +304,13 @@ Values must be positive (that is >= 1 second).
     * valid only if used as prefix (value for option `ip-prefix`) or as suffix when option `ip-prefix` is set
     * one octet only
       * auto-decimal if 1-3 decimal digits (0-9)
-      * auto-hexadecimal if it contains hexadecimal-only digits (A-F)
-      * `"2"`
-      * `"2a"`
+      * `"1"`
+      * `"12"`
+      * `"123"`
       * ~~`"345"`~~ (this results in an error: octet value out of range)
+      * auto-hexadecimal if it contains hexadecimal-only digits (A-F)
+      * `"d"`
+      * `"2a"`
       * hexadecimal may be forced
         * `"0x12"`
     * more octets
@@ -318,7 +321,7 @@ Values must be positive (that is >= 1 second).
     * if leading, then only for IP values (and the option `ip-prefix` must be set, otherwise not enough octets)
     * if trailing, then only for prefix IPs (in the option `ip-prefix`)
     * `"1."`
-    * `".1.2"`
+    * `".3.4"`
   * without `.` (1 - 4 octets)
     * auto-hexadecimal if it contains hexadecimal-only digits (A-F) or is at least 4 characters long
       * three digits in (auto-)hexadecimal mode are taken already as two octets (left-padded zero)
@@ -418,7 +421,7 @@ Options:
     * when performing zone append checks, take this value (domain) instead of the FQDN of the current zone
     * undergoes itself a zone append check with the parent zone (if not ending with a `.`)
     * this option can be applied to any QTYPE with a domain name in its value, but is mostly useful here
-        * currently `NS`, `PTR`, `CNAME`, `DNAME`, `MX` and `SRV`
+        * currently `SOA`, `NS`, `PTR`, `CNAME`, `DNAME`, `MX` and `SRV`
 
 #### `NS`
 * `hostname`: domain name
@@ -433,7 +436,7 @@ Options:
 
 Options:
 * `ip-prefix`: IPv4 address
-  * prefix octets are used in the front, value octets are used at the back, middle is padded with zero octets up to the total length of 4 octets (prefix + middle + value)
+  * prefix octets are used in the front, value octets are used at the back, middle is padded with zero-valued octets up to the total length of 4 octets (prefix + middle + value)
   * if there are "too many" value octets, they override the prefix octets
     * example: if `ip-prefix` is `"192.168.1."`, `ip` is `"2.4"`, the resulting IP address is `192.168.2.4`
 
@@ -443,7 +446,7 @@ Options:
 
 Options:
 * `ip-prefix`: IPv6 address
-  * prefix octets are used in the front, value octets are used at the back, middle is padded with zero octets up to the total length of 16 octets (prefix + middle + value)
+  * prefix octets are used in the front, value octets are used at the back, middle is padded with zero-valued octets up to the total length of 16 octets (prefix + middle + value)
   * if there are "too many" value octets, they override the prefix octets
     * example: if `ip-prefix` is `"2001:db8:a:b:1:2:"`, `ip` is `":5:6:7:8"`, the resulting IP address is `2001:db8:a:b:5:6:7:8`
 
@@ -494,7 +497,7 @@ Options:
 The changelog lists every change which led to a data version increase (major or minor).
 One can use it to check their data - whether an adjustment is needed for a new program version which has a new data version.
 
-#### 0.1.1
+### 0.1.1
 * added options (keyword `-options-`)
 * added option `ip-prefix` to `A` and `AAAA`
 * added option `zone-append-domain` to every supported record with a domain name (`SOA`, `NS`, `PTR`, `CNAME`, `DNAME`, `MX`, `SRV`)
@@ -502,7 +505,7 @@ One can use it to check their data - whether an adjustment is needed for a new p
 * added last-value syntax
 * domains can now be separated by `.` and/or `/` (also intermixed)
 
-#### 0.1.0
+### 0.1.0
 Initial version (base).
 
 ## Full example

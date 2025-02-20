@@ -24,7 +24,7 @@ the second development release, considered alpha quality. Any testing is appreci
   * DNS responses are nearly instantly up-to-date (on every server instance!) after data changes by using a watcher into ETCD (multi-master)
 * [Multiple syntax possibilities](doc/ETCD-structure.md#syntax) for object-supported records
 * [Short syntax for single-value objects](doc/ETCD-structure.md#resource-record-values)
-  * or for the last value left when using defaults (e.g. `target` in `SRV`)
+  * or for the last value left when using defaults (e.g. [`target` in `SRV`](doc/ETCD-structure.md#srv))
 * [Default prefix for IP addresses](doc/ETCD-structure.md#a)
   * overrideable per entry
 * Support for [custom records (types)](doc/ETCD-structure.md#resource-record-values), like those [supported by PowerDNS][pdns-qtypes] but unimplemented in pdns-etcd3
@@ -66,14 +66,14 @@ the second development release, considered alpha quality. Any testing is appreci
 #### Optional
 
 * Support more encodings for values
-  * [EDN][] by [go-edn](https://github.com/go-edn/edn)
-  * [TOML][] by [pelletier/go-toml](https://github.com/pelletier/go-toml) or [BurntSushi/toml](https://github.com/BurntSushi/toml)
+  * [EDN](https://github.com/edn-format/edn)
+    by [go-edn](https://github.com/go-edn/edn)
+  * [TOML](https://github.com/toml-lang/toml)
+    by [pelletier/go-toml](https://github.com/pelletier/go-toml)
+    or [BurntSushi/toml](https://github.com/BurntSushi/toml)
   * …
 * [DNS update support](https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dns-update-support)
 * [Prometheus exporter](https://prometheus.io/docs/guides/go-application/)
-
-[edn]: https://github.com/edn-format/edn
-[toml]: https://github.com/toml-lang/toml
 
 ## Installation
 
@@ -184,8 +184,8 @@ See [ETCD structure](doc/ETCD-structure.md). The structure lies beneath the `pre
 
 ## Compatibility
 
-pdns-etcd3 is tested on PowerDNS versions 3.x.y and different 4.x.y, and uses an ETCD v3 cluster (API 3.0 or higher).
-It's currently only one version of each minor (.x), but most likely all (later) "patch" versions (.y) are compatible.
+pdns-etcd3 is tested on PowerDNS versions 3.y.z and different 4.y.z, and uses an ETCD v3 cluster (API 3.0 or higher).
+It's currently only one version of each minor (.y), but most likely all (later) "patch" versions (.z) are compatible.
 Therefore, each release shall state which exact versions were used for testing,
 so one can be sure to have a working combination for deploying, when using those (tested) versions.
 
