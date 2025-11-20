@@ -16,11 +16,13 @@ package src
 
 import (
 	"fmt"
+	"strings"
 )
 
 type queryType struct {
-	name  nameType
-	qtype string
+	name         nameType // normalized (lowercase) name for lookups
+	originalName string   // original name as received from query
+	qtype        string
 }
 
 func (query *queryType) String() string {
@@ -49,9 +51,13 @@ var (
 )
 
 func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
+	originalQname := params["qname"].(string)
+	normalizedQname := strings.ToLower(originalQname)
+
 	query := queryType{
-		name:  nameType(Map(reversed(splitDomainName(params["qname"].(string), ".")), func(name string, _ int) namePart { return namePart{name, ""} })), // the keyPrefix from query.name will not be used, so it could be anything
-		qtype: params["qtype"].(string),
+		name:         nameType(Map(reversed(splitDomainName(normalizedQname, ".")), func(name string, _ int) namePart { return namePart{name, ""} })), // the keyPrefix from query.name will not be used, so it could be anything
+		originalName: originalQname,
+		qtype:        params["qtype"].(string),
 	}
 	data := dataRoot.getChild(query.name, true)
 	defer data.rUnlockUpwards(nil)
@@ -69,7 +75,7 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 	}
 	for qtype, records := range records {
 		for _, record := range records {
-			item := makeResultItem(qtype, data, &record, client)
+			item := makeResultItem(qtype, data, &record, &query, client)
 			client.log.pdns().WithField("item", item).Trace("adding result item")
 			result = append(result, item)
 		}
@@ -81,7 +87,7 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 	return result, nil
 }
 
-func makeResultItem(qtype string, data *dataNode, record *recordType, client *pdnsClient) objectType[any] {
+func makeResultItem(qtype string, data *dataNode, record *recordType, query *queryType, client *pdnsClient) objectType[any] {
 	content := record.content
 	if record.priority != nil {
 		content = priorityRE.ReplaceAllStringFunc(content, func(placeholder string) string {
@@ -93,7 +99,7 @@ func makeResultItem(qtype string, data *dataNode, record *recordType, client *pd
 	}
 	zoneNode := data.findZone()
 	result := objectType[any]{
-		"qname":   data.getQname(),
+		"qname":   query.originalName,
 		"qtype":   qtype,
 		"content": content,
 		"ttl":     seconds(record.ttl),
