@@ -71,7 +71,6 @@ type rrFunc func(params *rrParams)
 var rr2func = map[string]rrFunc{
 	"A":     a,
 	"AAAA":  aaaa,
-	"ALIAS": domainName("target"),
 	"CNAME": domainName("target"),
 	"DNAME": domainName("name"),
 	"MX":    mx,
