@@ -8,9 +8,6 @@ It uses the [official client][etcd-client] to get the data from the cluster.
 Responses are authoritative for each zone found in the data.
 Only the DNS class `IN` is supported, but that's because of the limitation of PowerDNS.
 
-DNS queries are handled case-insensitively as per [RFC 1035 section 2.3.3](https://www.rfc-editor.org/rfc/rfc1035#section-2.3.3):
-domain names are normalized to lowercase for lookups in ETCD, while preserving the original case in responses.
-
 There is no stable release yet, even no beta. The latest release is [v0.2.0+0.1.1][],
 the second development release, considered alpha quality. Any testing is appreciated.
 
