@@ -51,7 +51,7 @@ var (
 
 func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 	qname := params["qname"].(string) // RFC 1035 2.3.3: remember original qname and use it later in the result
-    query := queryType{
+	query := queryType{
 		name:  nameType(Map(reversed(splitDomainName(strings.ToLower(qname), ".")), func(name string, _ int) namePart { return namePart{name, ""} })), // the keyPrefix from query.name will not be used, so it could be anything
 		qtype: params["qtype"].(string),
 	}
@@ -68,6 +68,11 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 		records = data.records
 	} else {
 		records[query.qtype] = data.records[query.qtype]
+		if query.qtype == "A" || query.qtype == "AAAA" {
+			if aliasRecords, ok := data.records["ALIAS"]; ok {
+				records["ALIAS"] = aliasRecords
+			}
+		}
 	}
 	for qtype, records := range records {
 		for _, record := range records {
