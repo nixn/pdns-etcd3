@@ -470,6 +470,22 @@ Options:
 * `zone-append-domain`: domain name
   * [see `SOA`](#soa) for description
 
+#### `ALIAS`
+* `target`: domain name
+
+The `ALIAS` record is a virtual record type that is resolved internally by PowerDNS. It is not a standard DNS record. When a query for an `ALIAS` record is made, PowerDNS will look up the `target` and return the records found there (e.g. `A` or `AAAA` records) as if they were the records for the original query. This is useful for providing CNAME-like behavior at the zone apex (e.g., for `example.com` itself), where a real `CNAME` is not allowed.
+
+For this record type to function, the following settings must be configured in the PowerDNS `pdns.conf` file:
+```
+resolver=
+expand-alias=yes
+```
+The `resolver` must be set to a functioning DNS resolver (it can be left empty to use the system's default). `expand-alias` enables the feature.
+
+Options:
+* `zone-append-domain`: domain name
+  * [see `SOA`](#soa) for description
+
 #### `MX`
 * `priority`: uint16
 * `target`: domain name
