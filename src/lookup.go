@@ -16,10 +16,11 @@ package src
 
 import (
 	"fmt"
+	"strings"
 )
 
 type queryType struct {
-	name  nameType
+	name  nameType // normalized (lowercased)
 	qtype string
 }
 
@@ -49,8 +50,9 @@ var (
 )
 
 func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
+	qname := params["qname"].(string) // RFC 1035 2.3.3: remember original qname and use it later in the result
 	query := queryType{
-		name:  nameType(Map(reversed(splitDomainName(params["qname"].(string), ".")), func(name string, _ int) namePart { return namePart{name, ""} })), // the keyPrefix from query.name will not be used, so it could be anything
+		name:  nameType(Map(reversed(splitDomainName(strings.ToLower(qname), ".")), func(name string, _ int) namePart { return namePart{name, ""} })), // the keyPrefix from query.name will not be used, so it could be anything
 		qtype: params["qtype"].(string),
 	}
 	data := dataRoot.getChild(query.name, true)
@@ -69,7 +71,7 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 	}
 	for qtype, records := range records {
 		for _, record := range records {
-			item := makeResultItem(qtype, data, &record, client)
+			item := makeResultItem(qname, qtype, data, &record, client)
 			client.log.pdns().WithField("item", item).Trace("adding result item")
 			result = append(result, item)
 		}
@@ -81,7 +83,7 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 	return result, nil
 }
 
-func makeResultItem(qtype string, data *dataNode, record *recordType, client *pdnsClient) objectType[any] {
+func makeResultItem(qname, qtype string, data *dataNode, record *recordType, client *pdnsClient) objectType[any] {
 	content := record.content
 	if record.priority != nil {
 		content = priorityRE.ReplaceAllStringFunc(content, func(placeholder string) string {
@@ -93,7 +95,7 @@ func makeResultItem(qtype string, data *dataNode, record *recordType, client *pd
 	}
 	zoneNode := data.findZone()
 	result := objectType[any]{
-		"qname":   data.getQname(),
+		"qname":   qname,
 		"qtype":   qtype,
 		"content": content,
 		"ttl":     seconds(record.ttl),

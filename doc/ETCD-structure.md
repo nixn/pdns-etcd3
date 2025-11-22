@@ -36,8 +36,7 @@ and the optional parts `#<id>` and `@<version>` (in that order). `/`, `#` and `@
 * `<domain>` is the full domain name of a resource record, but in reversed form, with the subdomains separated by `.` or `/` (can be mixed).
 The `/` is allowed to support (graphical) tools which apply a logical structure to the flat key namespace in ETCDv3
 like in directories and files. (It's really easier to browse it then!)<br>
-`<domain>` must be all lowercase, because the queries from PowerDNS are normalized to lowercase;
-and the program does not change any names from the entries or queries.
+`<domain>` must be all lowercase. Although PowerDNS does not force lowercase on domain queries, this program converts them internally before querying the database.
 
 * `<QTYPE>` are the record types, such as `A`, `MX`, and so on.
 They must be all uppercase, otherwise they will be mistaken for a domain name part.<br>
