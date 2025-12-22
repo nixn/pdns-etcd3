@@ -1,4 +1,5 @@
 /pdns-etcd3
+/coverage.*
 
 # IDEs
 /.idea/

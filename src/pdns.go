@@ -33,14 +33,19 @@ type pdnsClient struct {
 	PdnsVersion uint
 	Comm        *commType[pdnsRequest]
 	log         logType
+	out         io.Closer
 }
 
-func newPdnsClient(id uint, in io.Reader, out io.Writer) *pdnsClient {
+func newPdnsClient(id uint, in io.Reader, out interface {
+	io.Writer
+	io.Closer
+}) *pdnsClient {
 	return &pdnsClient{
 		ID:          id,
 		PdnsVersion: defaultPdnsVersion,
 		Comm:        newComm[pdnsRequest](in, out),
 		log:         newLog(fmt.Sprintf("[%d] ", id), "main", "pdns", "data"), // TODO timings
+		out:         out,
 	}
 }
 

@@ -29,7 +29,7 @@ var (
 )
 
 func setupClient() (logMessages []string, err error) {
-	if len(*args.ConfigFile) > 0 {
+	if *args.ConfigFile != "" {
 		cli, err = clientv3.NewFromConfigFile(*args.ConfigFile)
 		if err != nil {
 			err = fmt.Errorf("failed to create client instance: %s", err)
@@ -56,7 +56,7 @@ func setupClient() (logMessages []string, err error) {
 }
 
 func closeClient() {
-	cli.Close()
+	_ = cli.Close()
 }
 
 type etcdItem struct {
@@ -102,9 +102,16 @@ func get(key string, multi bool, revision *int64) (*getResponseType, error) {
 	return getResponse(response), nil
 }
 
+func put(key string, value string, timeout time.Duration) (*clientv3.PutResponse, error) {
+	opts := []clientv3.OpOption(nil)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return cli.Put(ctx, key, value, opts...)
+}
+
 func watchData(doneCtx context.Context, revision int64) {
 	watcher := clientv3.NewWatcher(cli)
-	defer watcher.Close()
+	defer func() { _ = watcher.Close() }()
 WATCH:
 	for {
 		watchCtx := clientv3.WithRequireLeader(doneCtx)

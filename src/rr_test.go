@@ -1,3 +1,5 @@
+//go:build unit
+
 /* Copyright 2016-2025 nix <https://keybase.io/nixn>
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,63 +18,19 @@ package src
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 )
-
-type Comparable[T any] interface {
-	Equal(other T) bool
-}
-type ve[T Comparable[T]] struct {
-	v T
-	e string
-}
-type test[I any, E Comparable[E]] struct {
-	input    I
-	expected ve[E]
-}
-
-func equal[T comparable](a, b []T) bool {
-	l := len(a)
-	if l != len(b) {
-		return false
-	}
-	for i := 0; i < l; i++ {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
 
 type ip struct {
 	ver int
 	pos int
 	in  any
 }
-type bs []byte
+type bytes []byte
+type bs = bytes
 
-func (bs bs) Equal(other bs) bool {
-	return equal(bs, other)
-}
-
-type testFunc[I any, E Comparable[E]] func(I) (E, error)
-
-func check[I any, E Comparable[E]](t *testing.T, id any, f testFunc[I, E], in I, expected ve[E]) {
-	got, err := f(in)
-	if expected.e != "" {
-		if err == nil {
-			t.Errorf(`%v %#+v: expected error with %q, got value: %v`, id, in, expected.e, got)
-		} else if !strings.Contains(err.Error(), expected.e) {
-			t.Errorf(`%v %#+v: expected error with %q, got error: %s`, id, in, expected.e, err)
-		}
-	} else {
-		if err != nil {
-			t.Errorf(`%v %#+v: expected value: %v, got error: %s`, id, in, expected.v, err)
-		} else if !expected.v.Equal(got) {
-			t.Errorf(`%v %#+v: expected: %v, got: %v`, id, in, expected.v, got)
-		}
-	}
+func (bs bytes) String() string {
+	return fmt.Sprintf("%v", []byte(bs))
 }
 
 func TestParseOctets(t *testing.T) {
@@ -218,10 +176,10 @@ func TestParseOctets(t *testing.T) {
 		}
 		for _, ipVer := range []int{4, 6} {
 			if (spec.input.ver == 0 || spec.input.ver == ipVer) && spec.input.pos < 1 {
-				check[any, bs](t, fmt.Sprintf("%d->%s", i+1, ipMeta[ipVer].separator), pf(ipVer, true), spec.input.in, spec.expected)
+				check[any, bs](t, fmt.Sprintf("(%d)v%d,prefix:%#v", i+1, ipVer, spec.input.in), pf(ipVer, true), spec.input.in, spec.expected)
 			}
 			if (spec.input.ver == 0 || spec.input.ver == ipVer) && spec.input.pos > -1 {
-				check[any, bs](t, fmt.Sprintf("<-%d%s", i+1, ipMeta[ipVer].separator), pf(ipVer, false), spec.input.in, spec.expected)
+				check[any, bs](t, fmt.Sprintf("(%d)v%d,suffix:%#v", i+1, ipVer, spec.input.in), pf(ipVer, false), spec.input.in, spec.expected)
 			}
 		}
 	}

@@ -14,7 +14,11 @@ limitations under the License. */
 
 package main
 
-import P "github.com/nixn/pdns-etcd3/src"
+import (
+	"os"
+
+	P "github.com/nixn/pdns-etcd3/src"
+)
 
 var (
 	programVersion = P.VersionType{IsDevelopment: true} // update this in a release branch
@@ -22,5 +26,5 @@ var (
 )
 
 func main() {
-	P.Main(programVersion, gitVersion)
+	P.Main(programVersion, gitVersion, os.Args[1:])
 }

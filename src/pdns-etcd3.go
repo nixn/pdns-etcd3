@@ -37,6 +37,10 @@ type programArgs struct {
 	Prefix      *string
 }
 
+func (pa programArgs) String() string {
+	return fmt.Sprintf("ConfigFile=%s, Endpoints=%s, DialTimeout=%s, Prefix=%s", val2str(pa.ConfigFile), val2str(pa.Endpoints), val2str(pa.DialTimeout), val2str(pa.Prefix))
+}
+
 var (
 	log        = newLog("", "main", "etcd", "data") // TODO timings
 	args       programArgs
@@ -158,7 +162,7 @@ func startReadRequests(client *pdnsClient) <-chan pdnsRequest {
 }
 
 func handleRequest(request *pdnsRequest, client *pdnsClient) {
-	client.log.main().Debug("handling request:", request)
+	client.log.main().WithField("request", request).Debug("handling request")
 	since := time.Now()
 	var result interface{}
 	var err error
@@ -180,9 +184,9 @@ func handleRequest(request *pdnsRequest, client *pdnsClient) {
 }
 
 func handleEvent(event *clientv3.Event) {
-	log.etcd().WithField("event", event).Debug("handling event")
-	since := time.Now()
 	entryKey := string(event.Kv.Key)
+	log.etcd().WithField("event", event).Debugf("handling event on %q", entryKey)
+	since := time.Now()
 	name, entryType, qtype, id, version, err := parseEntryKey(entryKey)
 	// check version first, because a new version could change the key syntax (but not prefix and version suffix)
 	if version != nil && !dataVersion.IsCompatibleTo(*version, false) {
@@ -210,7 +214,7 @@ func handleEvent(event *clientv3.Event) {
 		return
 	}
 	qname := zoneData.getQname()
-	log.data().Tracef("reloading zone %q", qname)
+	log.data().Debugf("reloading zone %q", qname)
 	zoneData.mutex.RUnlock()
 	if zoneData.parent != nil {
 		defer zoneData.parent.rUnlockUpwards(nil)
@@ -223,7 +227,7 @@ func handleEvent(event *clientv3.Event) {
 }
 
 // Main is the "moved" program entrypoint, but with git version argument (which is set in real main package)
-func Main(programVersion VersionType, gitVersion string) {
+func Main(programVersion VersionType, gitVersion string, cmdLineArgs []string) {
 	releaseVersion := programVersion.String() + "+" + dataVersion.String()
 	if "v"+releaseVersion != gitVersion {
 		releaseVersion += fmt.Sprintf("[%s]", gitVersion)
@@ -241,7 +245,7 @@ func Main(programVersion VersionType, gitVersion string) {
 	for _, level := range logrus.AllLevels {
 		logging[level] = flag.String(logParamPrefix+level.String(), "", fmt.Sprintf("Set logging level %s to the given components (separated by +)", level))
 	}
-	flag.Parse()
+	_ = flag.CommandLine.Parse(cmdLineArgs) // same as flag.Parse(), but we can pass the arguments instead of being fixed to os.Args[1:] (needed for integration testing)
 	standalone = unixSocketPath != nil && *unixSocketPath != ""
 	if standalone {
 		for level, components := range logging {
@@ -249,11 +253,12 @@ func Main(programVersion VersionType, gitVersion string) {
 				log.setLoggingLevel(*components, level)
 			}
 		}
+		//goland:noinspection GoDfaNilDereference
 		socket, err := net.Listen("unix", *unixSocketPath)
 		if err != nil {
 			log.main().Fatalf("Failed to create a unix socket at %s: %s", *unixSocketPath, err)
 		}
-		defer socket.Close()
+		defer func(socket net.Listener) { _ = socket.Close() }(socket)
 		err = os.Chmod(*unixSocketPath, 0777)
 		if err != nil {
 			log.main().Warnf("Failed to chmod unix socket to 0777: %s", err)
@@ -358,6 +363,7 @@ func serve(client *pdnsClient) {
 	for {
 		request, ok := <-reqChan
 		if !ok {
+			_ = client.out.Close()
 			break
 		}
 		handleRequest(&request, client)

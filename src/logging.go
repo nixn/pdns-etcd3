@@ -16,7 +16,6 @@ package src
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 	"time"
 
@@ -50,18 +49,7 @@ func (f *logFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 		str += " |"
 	}
 	for k, v := range entry.Data {
-		rv := reflect.ValueOf(v)
-		if rv.Kind() == reflect.Pointer {
-			if rv.IsNil() {
-				str += fmt.Sprintf(" *%s=<nil>", k)
-			} else {
-				str += fmt.Sprintf(" *%s=%+v", k, rv.Elem())
-			}
-		} else if rv.Kind() == reflect.String {
-			str += fmt.Sprintf(" %s=%q", k, v)
-		} else {
-			str += fmt.Sprintf(" %s=%+v", k, v)
-		}
+		str += fmt.Sprintf(" %s=%s", k, val2str(v))
 	}
 	str += "\n"
 	return []byte(str), nil

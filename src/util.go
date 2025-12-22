@@ -17,6 +17,7 @@ package src
 import (
 	"cmp"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -61,11 +62,66 @@ func Map[T any, R any](slice []T, mapper func(T, int) R) []R {
 	return r
 }
 
-func ptr2str[T any](ptr *T) string {
+func val2str(value any) string {
+	return val2strR(reflect.ValueOf(value), true)
+}
+
+func val2strR(value reflect.Value, withType bool) string {
+	if value.Kind() == reflect.Interface {
+		value = value.Elem()
+	}
+	switch value.Kind() {
+	case reflect.Invalid:
+		return "<nil>"
+	case reflect.Bool, reflect.Int:
+		return fmt.Sprintf("%v", value)
+	case reflect.String:
+		return fmt.Sprintf("%q", value.String())
+	case reflect.Ptr:
+		if value.IsNil() {
+			return "*<nil>"
+		}
+		return "&" + val2strR(value.Elem(), withType)
+	case reflect.Map:
+		if value.IsNil() {
+			return "map<nil>"
+		}
+		var parts []string
+		for _, k := range value.MapKeys() {
+			parts = append(parts, val2strR(k, true)+": "+val2strR(value.MapIndex(k), true))
+		}
+		return "map{" + strings.Join(parts, ", ") + "}"
+	case reflect.Struct:
+		sType := value.Type()
+		var fields []string
+		for i, n := 0, value.NumField(); i < n; i++ {
+			fields = append(fields, fmt.Sprintf("%s: %s", sType.Field(i).Name, val2strR(value.Field(i), true)))
+		}
+		return fmt.Sprintf("%s{%s}", sType.String(), strings.Join(fields, ", "))
+	case reflect.Slice, reflect.Array:
+		if value.IsNil() {
+			return "[]<nil>"
+		}
+		var elements []string
+		for i, n := 0, value.Len(); i < n; i++ {
+			elements = append(elements, val2strR(value.Index(i), false))
+		}
+		return fmt.Sprintf("❲%s❳[%s]", value.Type().Elem().String(), strings.Join(elements, ", "))
+	default:
+		str := ""
+		if withType {
+			str += fmt.Sprintf("❲%s❳", value.Type().String())
+		}
+		str += fmt.Sprintf("%v", value)
+		return str
+	}
+}
+
+func ptr2str[T any](ptr *T, format string) string {
 	if ptr == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("&%v", *ptr)
+	return fmt.Sprintf(`&%`+format, *ptr)
 }
 
 func err2str(err error) string {

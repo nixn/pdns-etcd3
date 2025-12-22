@@ -183,7 +183,7 @@ func getDuration(key string, params *rrParams) (time.Duration, *valuePath, error
 func getHostname(key string, params *rrParams) (string, *valuePath, error) {
 	hostname, vPath, err := getValue[string](key, params)
 	if vPath == nil || err != nil {
-		return "", vPath, fmt.Errorf("failed to get %s.%s as string: vp=%s, err=%s", params.Target(), key, ptr2str(vPath), err)
+		return "", vPath, fmt.Errorf("failed to get %s.%s as string: vp=%s, err=%s", params.Target(), key, ptr2str(vPath, "v"), err)
 	}
 	hostname = strings.TrimSpace(hostname)
 	hostname, err = fqdn(hostname, params)

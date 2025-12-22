@@ -3,9 +3,14 @@ GIT_VERSION := $(shell git describe --always --dirty)
 
 RM ?= rm -f
 
-.PHONY: all fmt vet lint clean test
+VERBOSE ?= 0
+ifeq ($(VERBOSE),1)
+VERBOSE_ARG += -v
+endif
 
-all: $(OUT) vet lint
+.PHONY: all fmt vet lint clean unit-tests unit-tests+coverage integration-tests integration-tests+coverage tests coverage
+
+all: $(OUT) vet lint unit-tests integration-tests
 
 $(OUT): pdns-etcd3.go $(wildcard src/*.go)
 	@$(MAKE) --no-print-directory fmt
@@ -21,7 +26,25 @@ lint:
 	-golint ./...
 
 clean:
-	$(RM) $(OUT)
+	$(RM) $(OUT) coverage.*
 
-test:
-	go test ./src
+unit-tests:
+	go test -tags unit $(VERBOSE_ARG) ./src
+
+unit-tests+coverage:
+	go test -tags unit -coverprofile=coverage.unit.txt $(VERBOSE_ARG) ./src
+	go tool cover -html=coverage.unit.txt -o coverage.unit.html
+
+integration-tests:
+	go test -tags integration -count=1 $(VERBOSE_ARG) ./src
+
+integration-tests+coverage:
+	go test -tags integration -count=1 -coverprofile=coverage.integration.txt $(VERBOSE_ARG) ./src
+	go tool cover -html=coverage.integration.txt -o coverage.integration.html
+
+tests: unit-tests integration-tests
+	@echo "tests finished"
+
+coverage:
+	go test -tags unit,integration -count=1 -coverprofile=coverage.txt $(VERBOSE_ARG) ./src
+	go tool cover -html=coverage.txt -o coverage.html
