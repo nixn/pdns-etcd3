@@ -71,7 +71,13 @@ The content can be one of the following:
   when using PowerDNS v3, because the priority of such records must be reported in a separate field in the backend protocol.
   As of PowerDNS v4 the priority fields are part of the content and the restriction does not apply anymore.<br>
   But there is still one exception to this: the `SOA` record cannot be given as a plain string due to the automatically
-  handled `serial` field.
+  handled `serial` field.<br>
+  Subject to change (NOT YET IMPLEMENTED): Plain strings for probably most or even all object-supported records will be parsed,
+  gaining support for defaults without using object-style notation.
+
+* A forced plain string, if it begins with `` ` `` (a backquote) **(NOT YET IMPLEMENTED)**.<br>
+  Effectively the same as a normal plain string, but no interpretation as a special notation (other markers from below) is applied.
+  Still subject to parsing.
 
 * A JSON object, if it begins with `{`.<br>
   Objects are the heart of the data. They store values for the content fields, have multiple syntax possibilities,
@@ -250,6 +256,8 @@ field name. The program only checks for the types of field values, not their con
 so take care yourself.<br>
 An example: the `ip` field from `A` is not compatible to the `ip` field from `AAAA`.
 
+Field names of defaults and options objects are case-sensitive.
+
 ## Supported records
 
 For each of the supported record types the entry values may be objects.
@@ -260,6 +268,9 @@ All entries can have a `ttl` field, for the record TTL. There must be a TTL valu
 ### Syntax
 
 *Headings denote the logical type, top level list values the technical type, sublevels are notes and examples.*
+
+*Field names (keys) are always case-sensitive (in the record itself, in defaults and in options).
+For example in `A` or `AAAA` only `ip` is recognized and used, not `Ip`, `IP` or `iP`.*
 
 ###### "domain name"
 * string
@@ -277,12 +288,10 @@ name is not appended, otherwise it is. This is only possible for object-entries.
   * seconds, only integral part taken
   * `3600`
 * string
-  * [duration][tdur] (go.time syntax)
+  * [duration](https://pkg.go.dev/time#ParseDuration) (go.time syntax)
   * `"1h"`
 
 Values must be positive (that is >= 1 second).
-
-[tdur]: https://golang.org/pkg/time/#ParseDuration
 
 ###### "IPv4 address"
 * string
@@ -321,6 +330,7 @@ Values must be positive (that is >= 1 second).
     * `"abc"`
     * `"0345"`
     * eligible as prefix IP and as IP value
+  * case-insensitive
 * array of bytes or numeric strings, only octets (uint8)
   * length 1 - 4
   * `[3, 4]`
@@ -368,6 +378,7 @@ Values must be positive (that is >= 1 second).
     * `"20010db8000000000000000000000020"` (16 octets)
     * `"030004"` (3 octets)
     * eligible as prefix IP and as IP value
+  * case-insensitive
 * array of numbers or numeric strings, only octets (uint8)
   * length 1 - 16
   * `[32, "1", "0xd", "0xb8", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "040"]`
