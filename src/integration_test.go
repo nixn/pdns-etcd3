@@ -192,6 +192,7 @@ func TestRequests(t *testing.T) {
 		{"net.example/mail/HINFO", `"amd64" "Linux"`},
 		{"net.example/mail/HINFO#not-object-supported", `{"platform": "arm", "os": "Raspbian"}`},
 		{"net.example/TYPE123", `\# 0`},
+		{"net.example.case/TXT", `PR #1`},
 		// TODO duplicate records (different but equivalent keys)
 	} {
 		rev1 = newEntry(entry.key, entry.value)
@@ -286,6 +287,9 @@ func TestRequests(t *testing.T) {
 			}}},
 			{objectType[any]{"qname": "2.2.0.192.in-addr.arpa", "qtype": "PTR"}, []any{
 				map[string]any{"qname": "2.2.0.192.in-addr.arpa.", "qtype": "PTR", "content": "ns1.example.net.", "ttl": float64(3600), "auth": true},
+			}},
+			{objectType[any]{"qname": "CaSe.example.net", "qtype": "TXT"}, []any{
+				map[string]any{"qname": "CaSe.example.net.", "qtype": "TXT", "content": "PR #1", "ttl": float64(3600), "auth": true},
 			}},
 		} {
 			check[pdnsRequest, any](t, val2str(spec.parameters), action, pdnsRequest{"lookup", spec.parameters}, ve[any]{v: map[string]any{"result": spec.result}})

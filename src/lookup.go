@@ -50,9 +50,10 @@ var (
 )
 
 func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
-	qname := params["qname"].(string) // RFC 1035 2.3.3: remember original qname and use it later in the result
+	// RFC 1035 2.3.3: remember original qname and use it later in the result
+	qname := nameType(Map(reversed(splitDomainName(params["qname"].(string), ".")), func(name string, _ int) namePart { return namePart{name, ""} }))
 	query := queryType{
-		name:  nameType(Map(reversed(splitDomainName(strings.ToLower(qname), ".")), func(name string, _ int) namePart { return namePart{name, ""} })), // the keyPrefix from query.name will not be used, so it could be anything
+		name:  nameType(Map(qname, func(qnamePart namePart, _ int) namePart { return namePart{strings.ToLower(qnamePart.name), "."} })),
 		qtype: params["qtype"].(string),
 	}
 	data := dataRoot.getChild(query.name, true)
@@ -83,10 +84,10 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 	return result, nil
 }
 
-func makeResultItem(qname, qtype string, data *dataNode, record *recordType, client *pdnsClient) objectType[any] {
+func makeResultItem(qname nameType, qtype string, data *dataNode, record *recordType, client *pdnsClient) objectType[any] {
 	zoneNode := data.findZone()
 	result := objectType[any]{
-		"qname":   qname,
+		"qname":   qname.normal(),
 		"qtype":   qtype,
 		"content": record.content,
 		"ttl":     seconds(record.ttl),
