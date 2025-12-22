@@ -35,7 +35,7 @@ type VersionType struct {
 	Major, Minor, Patch uint64
 }
 
-func (v *VersionType) String() string {
+func (v VersionType) String() string {
 	if v.IsDevelopment && v.Major == 0 && v.Minor == 0 && v.Patch == 0 {
 		return "develop"
 	}
@@ -50,11 +50,13 @@ func (v *VersionType) String() string {
 	return vs
 }
 
-func (v *VersionType) isCompatibleTo(otherVersion *VersionType) bool {
-	if v.IsDevelopment == otherVersion.IsDevelopment && v.Major == otherVersion.Major && v.Minor >= otherVersion.Minor {
-		return true
+// IsCompatibleTo checks whether this version is semantically compatible to the provided (other) version
+func (v VersionType) IsCompatibleTo(otherVersion VersionType, checkPatch bool) bool {
+	ov := otherVersion
+	if v.IsDevelopment != ov.IsDevelopment || v.Major != ov.Major || v.Minor < ov.Minor {
+		return false
 	}
-	return false
+	return v.Minor > ov.Minor || !checkPatch || v.Patch >= ov.Patch
 }
 
 func parseEntryVersion(string string) (*VersionType, error) {
@@ -65,12 +67,12 @@ func parseEntryVersion(string string) (*VersionType, error) {
 	}
 	if parts := versionRegex.FindStringSubmatch(string); parts != nil {
 		var err error
-		version.Major, err = strconv.ParseUint(parts[1], 10, 8)
+		version.Major, err = strconv.ParseUint(parts[1], 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse major: %s", err)
 		}
 		if len(parts) > 2 && len(parts[2]) > 0 {
-			version.Minor, err = strconv.ParseUint(parts[2], 10, 8)
+			version.Minor, err = strconv.ParseUint(parts[2], 10, 64)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse minor: %s", err)
 			}

@@ -84,25 +84,24 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 }
 
 func makeResultItem(qname, qtype string, data *dataNode, record *recordType, client *pdnsClient) objectType[any] {
-	content := record.content
+	zoneNode := data.findZone()
+	result := objectType[any]{
+		"qname":   qname,
+		"qtype":   qtype,
+		"content": record.content,
+		"ttl":     seconds(record.ttl),
+		"auth":    zoneNode != nil,
+	}
 	if record.priority != nil {
-		content = priorityRE.ReplaceAllStringFunc(content, func(placeholder string) string {
+		result["content"] = priorityRE.ReplaceAllStringFunc(result["content"].(string), func(placeholder string) string {
 			if client.PdnsVersion == 3 {
 				return ""
 			}
 			return fmt.Sprintf(priorityRE.FindStringSubmatch(placeholder)[1], *record.priority)
 		})
-	}
-	zoneNode := data.findZone()
-	result := objectType[any]{
-		"qname":   qname,
-		"qtype":   qtype,
-		"content": content,
-		"ttl":     seconds(record.ttl),
-		"auth":    zoneNode != nil,
-	}
-	if record.priority != nil && client.PdnsVersion == 3 {
-		result["priority"] = *record.priority
+		if client.PdnsVersion == 3 {
+			result["priority"] = *record.priority
+		}
 	}
 	return result
 }
@@ -136,23 +135,21 @@ func searchOrder(qtype, id string) (order []searchOrderElement) {
 	return
 }
 
-func findValue[T any](key, qtype, id string, data *dataNode, values func(*dataNode) map[string]map[string]defoptType, valuesArea string, notUpwards bool) (T, *valuePath, error) {
+func findValue[T any](key, qtype, id string, data *dataNode, valuesArea entryType, notUpwards bool) (T, *valuePath, error) {
 	queryPath := valuePath{data, &searchOrderElement{qtype, id}}
-	var zeroValue T
 	for dn := data; dn != nil; dn = dn.parent {
-		values := values(dn)
+		values := dn.getValuesFor(valuesArea)
 		for _, soe := range searchOrder(qtype, id) {
-			if values, ok := values[soe.qtype]; ok {
-				if values, ok := values[soe.id]; ok {
-					if value, ok := values.values[key]; ok {
-						valuePath := valuePath{dn, &soe}
-						if value, ok := value.(T); ok {
-							logFrom(log.data(), "value", value, "area", valuesArea).Tracef("found value for %s:%s in %s", queryPath.String(), key, valuePath.String())
-							return value, &valuePath, nil
-						}
-						logFrom(log.data(), "value", value, "area", valuesArea, "found-in", valuePath.String()).Tracef("invalid type of value for %s.%s: %T", queryPath.String(), key, value)
-						return zeroValue, &valuePath, fmt.Errorf("invalid value type: %T", value)
+			if value, ok := values[soe.qtype][soe.id]; ok {
+				if value, ok := value.content.(objectValueType)[key]; ok {
+					valuePath := valuePath{dn, &soe}
+					if value, ok := value.(T); ok {
+						logFrom(log.data(), "value", value, "area", valuesArea).Tracef("found value for %s:%s in %s", queryPath.String(), key, valuePath.String())
+						return value, &valuePath, nil
 					}
+					logFrom(log.data(), "value", value, "area", valuesArea, "found-in", valuePath.String()).Tracef("invalid type of value for %s.%s: %T", queryPath.String(), key, value) // TODO use warning level?
+					var zero T
+					return zero, &valuePath, fmt.Errorf("invalid value type: %T", value)
 				}
 			}
 		}
@@ -160,7 +157,8 @@ func findValue[T any](key, qtype, id string, data *dataNode, values func(*dataNo
 			break
 		}
 	}
-	return zeroValue, nil, nil // not found (and no error)
+	var zero T
+	return zero, nil, nil // not found (and no error)
 }
 
 func findValueOrDefault[V any](key string, values objectType[any], qtype, id string, data *dataNode) (V, *valuePath, error) {
@@ -174,9 +172,10 @@ func findValueOrDefault[V any](key string, values objectType[any], qtype, id str
 		var zeroValue V
 		return zeroValue, &queryPath, fmt.Errorf("invalid type: %T", value)
 	}
-	return findValue[V](key, qtype, id, data, func(dn *dataNode) map[string]map[string]defoptType { return dn.defaults }, "defaults", false)
+	return findValue[V](key, qtype, id, data, defaultsEntry, false)
 }
 
+// TODO remove, just call findValue() directly
 func findOptionValue[V any](key, qtype, id string, data *dataNode, notUpwards bool) (V, *valuePath, error) {
-	return findValue[V](key, qtype, id, data, func(dn *dataNode) map[string]map[string]defoptType { return dn.options }, "options", notUpwards)
+	return findValue[V](key, qtype, id, data, optionsEntry, notUpwards)
 }

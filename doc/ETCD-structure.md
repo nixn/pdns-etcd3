@@ -117,7 +117,7 @@ without interrupting service while adjusting the entries.
 
 The program's data version is given in the release notes and also in the version string logged at program start.
 The full version string ("release version") is `<program version>+<data version>` (with a literal `+`).
-The default version string is appended by a detailed git version string, if it differs from the release tag.
+The release version string is appended by a detailed git version string, if it differs from the release tag.
 
 #### Syntax and rules
 
@@ -132,27 +132,18 @@ Every time when a backward-incompatible change to the structure is introduced,
 `<major>` increases and `<minor>` resets to `0`.
 Otherwise, a change (which should be only additions) increases only `<minor>`.
 
-During the development of first stable release (`1` or `1.0`) the `<major>` number
-is `0`, the minor number starts with `1` and acts as the major number regarding
-changes. Therefore, there may be another minor number (usually called *patch*),
-so that a development data version could be `0.3.2`.
+During the development of the first stable release (`1` or `1.0`) the `<major>` number is `0`,
+the minor number starts with `1` and acts as the major number regarding changes.
+Therefore, there may be another number (usually called *patch*), which acts as the minor number regarding changes,
+so that a development data version could be `0.3.2` (major `3`, minor `2`).
 
 The program ignores all versioned entries, which are either of a different major version
 or of a higher minor version (same major version) than the program's data version.
-All unversioned entries can be read and used by all program versions (if not overridden
-by a supported¹ versioned entry).
+All unversioned entries can be read and used by all program versions (if not overridden by a matching versioned entry).
 
 For multiple entries with an equivalent key and an equivalent version specification
-(same version or unversioned) it is not defined, which entry is taken.
+it is not defined, which entry is taken (but a versioned entry with a compatible version is still preferred).
 It could be any of those, but only one (no merging applied).
-
-For multiple entries with an equivalent key and different version specifications
-the versioned entry with the highest supported version is taken¹.
-If no versioned entry is supported, the unversioned entry is taken (if any).
-
-<small>
-¹ TODO perhaps it should be only the exact data version of the program
-</small>
 
 #### Upgrading
 
@@ -166,10 +157,11 @@ Upgrading to a higher major version without interrupting service works as follow
 2. Determine which entries must be rewritten (updated), added or deleted.
 3. For each entry-to-be-rewritten (in example `com/example/SOA`):
     1. add a new versioned entry of same key with the *old* content and the *old* version:<br>
-    `com/example/SOA@1.1` → `<old content>`
-    2. rewrite the plain entry with the *new* content<br>
+    `com/example/SOA@1.1` → `<old content>`<br>
+    (this entry is instantly preferred by the current servers, so be sure to get the content right)
+    2. rewrite the unversioned entry with the *new* content<br>
     `com/example/SOA` → `<new content>`<br>
-    (the plain entry is ignored yet because all servers currently prefer the versioned entry)
+    (the unversioned entry is ignored yet because all servers currently prefer the versioned entry)
 4. For each entry-to-be-added (in example `com/example/NEW`):
     1. add a new versioned entry with that key, the *new* content and the *new* version:<br>
     `com/example/NEW@2` → `<new content>`<br>
@@ -178,16 +170,16 @@ Upgrading to a higher major version without interrupting service works as follow
     1. add a new versioned entry of same key with the *old* content and the *old* version:<br>
     `com/example/OLD@1.1` → `<old content>`<br>
     (this entry is instantly preferred by the current servers, so be sure to get the content right)
-    2. delete the plain entry of same key:<br>
+    2. delete the unversioned entry of same key:<br>
     `com/example/OLD` → *deleted*
 6. Upgrade all servers (stop, update, restart), one by one, to the *new* version.<br>
 *Tip*: Remove one server from public service, upgrade it and test the new entries.
 If it works well, restore public service and continue upgrading the other servers.
-7. Remove each versioned entry with *old* (now really old) version:<br>
+7. Remove each versioned entry with *old* (now actually old) version:<br>
 `com/example/SOA@1.1`, `com/example/OLD@1.1`, … (`*@1.1`)<br>
 (unfortunately ETCD does not support suffix requests)
 8. For each entry-to-be-added (in example `com/example/NEW`):
-    1. Add a new plain entry of same key with *new* content:<br>
+    1. Add a new unversioned entry of same key with *new* content:<br>
     `com/example/NEW` → `<new content>`
     2. Remove the versioned entry of same key with *new* version:
     `com/example/NEW@2` → *deleted*

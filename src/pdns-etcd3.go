@@ -185,7 +185,7 @@ func handleEvent(event *clientv3.Event) {
 	entryKey := string(event.Kv.Key)
 	name, entryType, qtype, id, version, err := parseEntryKey(entryKey)
 	// check version first, because a new version could change the key syntax (but not prefix and version suffix)
-	if version != nil && !dataVersion.isCompatibleTo(version) {
+	if version != nil && !dataVersion.IsCompatibleTo(*version, false) {
 		log.data().Tracef("ignoring event on version-incompatible entry %q", entryKey)
 		return
 	}

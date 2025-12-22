@@ -25,18 +25,19 @@ import (
 )
 
 type rrParams struct {
+	// TODO refactor into single value, too (combine values and lastFieldValue)
 	values         objectType[any]
 	lastFieldValue *any
 	qtype          string
 	id             string
-	version        *VersionType
+	version        *VersionType // TODO remove? not really needed, only used in logging...
 	data           *dataNode
 	ttl            time.Duration
 	//logger         *logrus.Logger // TODO remove?
 }
 
 func (p *rrParams) Target() string {
-	return fmt.Sprintf("%s%s%s%s%s", p.data.getQname(), keySeparator, p.qtype, idSeparator, p.id)
+	return targetString(p.data.getQname(), p.qtype, p.id)
 }
 
 func (p *rrParams) SetContent(content string, priority *uint16) {
@@ -86,7 +87,7 @@ func fqdn(domain string, params *rrParams) (string, error) {
 	for data := params.data; !strings.HasSuffix(domain, "."); data = data.parent {
 		zoneAppendDomain, valuePath, err := findOptionValue[string](zoneAppendDomainOption, params.qtype, params.id, data, true)
 		if err != nil {
-			return domain, fmt.Errorf("failed to get option %q (dn=%s, vp=%s): %s", zoneAppendDomain, data.getQname(), (valuePath), err)
+			return domain, fmt.Errorf("failed to get option %q (dn=%s, vp=%s): %s", zoneAppendDomain, data.getQname(), valuePath, err)
 		}
 		if valuePath != nil {
 			zoneAppendDomain = strings.TrimSpace(zoneAppendDomain)
@@ -271,6 +272,7 @@ func soa(params *rrParams) {
 }
 
 func parseOctets(value any, ipVer int, asPrefix bool) ([]byte, error) {
+	//goland:noinspection GoPreferNilSlice
 	values := []any{}
 	sepFirst := false
 	sepLast := false
