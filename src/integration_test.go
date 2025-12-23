@@ -217,6 +217,12 @@ func TestRequests(t *testing.T) {
 	request = pdnsRequest{"getAllDomainMetadata", objectType[any]{"name": "example.com"}}
 	expectedResponse = map[string]any{"result": map[string]any{}}
 	check(t, "getAllDomainMetadata", action, request, ve[any]{v: expectedResponse})
+	request = pdnsRequest{"getAllDomains", objectType[any]{"include_disabled": true}}
+	expectedResponse = map[string]any{"result": SliceContains{false, true, []any{
+		map[string]any{"zone": "example.net.", "serial": float64(rev1)},
+		map[string]any{"zone": "2.0.192.in-addr.arpa.", "serial": float64(rev2)},
+	}}}
+	check(t, "getAllDomains", action, request, ve[any]{v: expectedResponse})
 	t.Run("lookup", func(t *testing.T) {
 		for _, spec := range []struct {
 			parameters objectType[any]

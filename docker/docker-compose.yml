@@ -52,7 +52,6 @@ services:
       - common:/common
       - ./pdns.conf:/etc/powerdns/pdns.conf:ro
       - ./pdns-1-listen.conf:/etc/powerdns/pdns.d/pdns-1-listen.conf:ro
-      - ./pdns-3-zone-cache.conf:/etc/powerdns/pdns.d/pdns-3-zone-cache.conf:ro
       - ./pdns-3-webserver.conf:/etc/powerdns/pdns.d/pdns-3-webserver.conf:ro
       - ./pdns-5-${PDNS_BACKEND_MODE:?}.conf:/etc/powerdns/pdns.d/pdns-5-backend.conf:ro
     ports:
@@ -71,7 +70,6 @@ services:
       - common:/common
       - ./pdns.conf:/etc/powerdns/pdns.conf:ro
       - ./pdns-1-listen.conf:/etc/powerdns/pdns.d/pdns-1-listen.conf:ro
-      - ./pdns-3-zone-cache.conf:/etc/powerdns/pdns.d/pdns-3-zone-cache.conf:ro
       - ./pdns-3-webserver.conf:/etc/powerdns/pdns.d/pdns-3-webserver.conf:ro
       - ./pdns-5-${PDNS_BACKEND_MODE:?}.conf:/etc/powerdns/pdns.d/pdns-5-backend.conf:ro
     ports:
@@ -90,7 +88,6 @@ services:
       - common:/common
       - ./pdns.conf:/etc/powerdns/pdns.conf:ro
       - ./pdns-1-listen.conf:/etc/powerdns/pdns.d/pdns-1-listen.conf:ro
-      - ./pdns-3-zone-cache.conf:/etc/powerdns/pdns.d/pdns-3-zone-cache.conf:ro
       - ./pdns-3-webserver.conf:/etc/powerdns/pdns.d/pdns-3-webserver.conf:ro
       - ./pdns-5-${PDNS_BACKEND_MODE:?}.conf:/etc/powerdns/pdns.d/pdns-5-backend.conf:ro
     ports:

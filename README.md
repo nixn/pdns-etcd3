@@ -53,12 +53,9 @@ the second development release, considered alpha quality. Any testing is appreci
 * Support [JSON5][] by [flynn/json5](https://github.com/flynn/json5) (replace default JSON, because JSON5 is a superset of JSON)
 * Support [YAML][] by [go-yaml](https://github.com/go-yaml/yaml)
 * DNSSEC support ([PowerDNS DNSSEC-specific calls][pdns-dnssec])
-* Implement [`getAllDomains`][pdns-getall] backend call for enabling PowerDNS caching (for performance)
-  * setting [`zone-cache-refresh-interval`][pdns-zone-cache]
 
 [pdns-dnssec]: https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dnssec-support
 [pdns-unix-conn]: https://doc.powerdns.com/authoritative/backends/remote.html#unix-connector
-[pdns-getall]: https://doc.powerdns.com/authoritative/backends/remote.html#getalldomains
 [pdns-zone-cache]: https://doc.powerdns.com/authoritative/settings.html#setting-zone-cache-refresh-interval
 [json5]: https://json5.org/
 [yaml]: http://www.yaml.org/

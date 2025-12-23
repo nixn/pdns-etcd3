@@ -171,6 +171,8 @@ func handleRequest(request *pdnsRequest, client *pdnsClient) {
 		result, err = lookup(request.Parameters, client)
 	case "getalldomainmetadata":
 		result, err = map[string]any{}, nil
+	case "getalldomains":
+		result = dataRoot.allDomains(nil)
 	default:
 		result, err = false, fmt.Errorf("unknown/unimplemented request: %s", request)
 	}

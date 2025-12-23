@@ -222,6 +222,23 @@ func (dn *dataNode) zonesCount() int {
 	return count
 }
 
+type domainInfo struct {
+	Zone   string `json:"zone"`
+	Serial int64  `json:"serial"`
+}
+
+func (dn *dataNode) allDomains(result []domainInfo) []domainInfo {
+	if _, ok := dn.records["SOA"][""]; ok {
+		zone, serial := dn.getQname(), dn.zoneRev()
+		dn.log("zone", zone, "serial", serial).Trace("allDomains: found zone")
+		result = append(result, domainInfo{zone, serial})
+	}
+	for _, child := range dn.children {
+		result = child.allDomains(result)
+	}
+	return result
+}
+
 func targetString(qname, qtype, id string) string {
 	return qname + keySeparator + qtype + idSeparator + id
 }
