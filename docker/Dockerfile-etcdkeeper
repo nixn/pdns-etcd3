@@ -11,5 +11,5 @@ apt-get update
 apt-get install -y simpleproxy
 EOF
 ENV ETCD_ENDPOINT=""
-ENTRYPOINT ./etcdkeeper.sh "$ETCD_ENDPOINT"
+ENTRYPOINT exec ./etcdkeeper.sh "$ETCD_ENDPOINT"
 EXPOSE 8080/tcp

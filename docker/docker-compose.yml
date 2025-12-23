@@ -34,10 +34,12 @@ services:
       - common:/common
       - ./pdns.conf:/etc/powerdns/pdns.conf:ro
       - ./pdns-1-listen.conf:/etc/powerdns/pdns.d/pdns-1-listen.conf:ro
+      - ./pdns-3-webserver.conf:/etc/powerdns/pdns.d/pdns-3-webserver.conf:ro
       - ./pdns-5-${PDNS_BACKEND_MODE:?}.conf:/etc/powerdns/pdns.d/pdns-5-backend.conf:ro
     ports:
       - "${PDNS44_PUBLIC_TCP_PORT:-${PDNS44_PUBLIC_PORT:-[::1]:5344}}:53"
       - "${PDNS44_PUBLIC_UDP_PORT:-${PDNS44_PUBLIC_PORT:-[::1]:5344}}:53/udp"
+      - "${PDNS44_PUBLIC_WEB_PORT:-${PDNSALL_PUBLIC_WEB_HOST:-[::1]}:8044}:8081"
     depends_on:
       - backend
     profiles:
@@ -51,10 +53,12 @@ services:
       - ./pdns.conf:/etc/powerdns/pdns.conf:ro
       - ./pdns-1-listen.conf:/etc/powerdns/pdns.d/pdns-1-listen.conf:ro
       - ./pdns-3-zone-cache.conf:/etc/powerdns/pdns.d/pdns-3-zone-cache.conf:ro
+      - ./pdns-3-webserver.conf:/etc/powerdns/pdns.d/pdns-3-webserver.conf:ro
       - ./pdns-5-${PDNS_BACKEND_MODE:?}.conf:/etc/powerdns/pdns.d/pdns-5-backend.conf:ro
     ports:
       - "${PDNS45_PUBLIC_TCP_PORT:-${PDNS45_PUBLIC_PORT:-[::1]:5345}}:53"
       - "${PDNS45_PUBLIC_UDP_PORT:-${PDNS45_PUBLIC_PORT:-[::1]:5345}}:53/udp"
+      - "${PDNS45_PUBLIC_WEB_PORT:-${PDNSALL_PUBLIC_WEB_HOST:-[::1]}:8045}:8081"
     depends_on:
       - backend
     profiles:
@@ -68,27 +72,31 @@ services:
       - ./pdns.conf:/etc/powerdns/pdns.conf:ro
       - ./pdns-1-listen.conf:/etc/powerdns/pdns.d/pdns-1-listen.conf:ro
       - ./pdns-3-zone-cache.conf:/etc/powerdns/pdns.d/pdns-3-zone-cache.conf:ro
+      - ./pdns-3-webserver.conf:/etc/powerdns/pdns.d/pdns-3-webserver.conf:ro
       - ./pdns-5-${PDNS_BACKEND_MODE:?}.conf:/etc/powerdns/pdns.d/pdns-5-backend.conf:ro
     ports:
       - "${PDNS49_PUBLIC_TCP_PORT:-${PDNS49_PUBLIC_PORT:-[::1]:5349}}:53"
       - "${PDNS49_PUBLIC_UDP_PORT:-${PDNS49_PUBLIC_PORT:-[::1]:5349}}:53/udp"
+      - "${PDNS49_PUBLIC_WEB_PORT:-${PDNSALL_PUBLIC_WEB_HOST:-[::1]}:8049}:8081"
     depends_on:
       - backend
     profiles:
       - pdns-49
       - pdns-all
   pdns50:
-    image: powerdns/pdns-auth-master
+    image: powerdns/pdns-auth-50
     volumes:
       - ../pdns-etcd3:/pdns-etcd3:ro
       - common:/common
       - ./pdns.conf:/etc/powerdns/pdns.conf:ro
       - ./pdns-1-listen.conf:/etc/powerdns/pdns.d/pdns-1-listen.conf:ro
       - ./pdns-3-zone-cache.conf:/etc/powerdns/pdns.d/pdns-3-zone-cache.conf:ro
+      - ./pdns-3-webserver.conf:/etc/powerdns/pdns.d/pdns-3-webserver.conf:ro
       - ./pdns-5-${PDNS_BACKEND_MODE:?}.conf:/etc/powerdns/pdns.d/pdns-5-backend.conf:ro
     ports:
       - "${PDNS50_PUBLIC_TCP_PORT:-${PDNS50_PUBLIC_PORT:-[::1]:5350}}:53"
       - "${PDNS50_PUBLIC_UDP_PORT:-${PDNS50_PUBLIC_PORT:-[::1]:5350}}:53/udp"
+      - "${PDNS50_PUBLIC_WEB_PORT:-${PDNSALL_PUBLIC_WEB_HOST:-[::1]}:8050}:8081"
     depends_on:
       - backend
     profiles:
@@ -119,6 +127,7 @@ services:
       ETCD_ENDPOINT: etcd:2379
     ports:
       - "${ETCDKEEPER_PORT:-[::1]:0}:8080"
+    restart: unless-stopped
     depends_on:
       - etcd
     profiles:
