@@ -182,7 +182,7 @@ func handleRequest(request *pdnsRequest, client *pdnsClient) {
 		client.respond(makeResponse(result, err.Error()))
 	}
 	dur := time.Since(since)
-	client.log.main().WithFields(logrus.Fields{"dur": dur, "err": err, "val": result}).Tracef("result")
+	client.log.main().WithFields(logrus.Fields{"dur": dur, "err": err, "val": result}).Trace("result")
 }
 
 func handleEvent(event *clientv3.Event) {
@@ -331,12 +331,12 @@ func serve(client *pdnsClient) {
 	reqChan := startReadRequests(client)
 	// first request must be 'initialize'
 	{
-		client.log.pdns().Infof("Waiting for initial request")
+		client.log.pdns().Debug("waiting for initial request")
 		initRequest := <-reqChan
 		if initRequest.Method != "initialize" {
-			client.log.pdns().WithField("method", initRequest.Method).Fatalf("Wrong request method (waited for 'initialize')")
+			client.log.pdns().WithField("method", initRequest.Method).Fatal("wrong request method (waited for 'initialize')")
 		}
-		client.log.main().WithField("parameters", initRequest.Parameters).Infof("initializing")
+		client.log.main().WithField("parameters", initRequest.Parameters).Info("initializing")
 		params := objectType[string]{}
 		for k, v := range initRequest.Parameters {
 			params[k] = v.(string)

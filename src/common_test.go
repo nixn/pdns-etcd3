@@ -43,13 +43,13 @@ func check[Input any, Value any](t *testing.T, id string, f testFunc[Input, Valu
 		got, err := f(in)
 		if expected.e != "" {
 			if err == nil {
-				t.Errorf(`%#+v -> expected error with %q, got value: %#v`, in, expected.e, got)
+				t.Errorf(`%#+v -> expected error with %q, got value: %s`, in, expected.e, val2str(got))
 			} else if !strings.Contains(err.Error(), expected.e) {
 				t.Errorf(`%#+v -> expected error with %q, got error: %s`, in, expected.e, err)
 			}
 		} else {
 			if err != nil {
-				t.Errorf(`%#+v -> expected value: %v, got error: %s`, in, expected.v, err)
+				t.Errorf(`%#+v -> expected value: %s, got error: %s`, in, val2str(expected.v), err)
 			} else {
 				if unequal := testEqual(t, expected.v, got); unequal != nil {
 					t.Errorf(`%s -> expected: %s, got: %s (%s)`, val2str(in), val2str(expected.v), val2str(got), unequal)
@@ -176,7 +176,7 @@ func testEqualR(t *testing.T, a, b reflect.Value) *DeepError {
 		return cond.Test(t, b)
 	}
 	if vt != b.Type() {
-		return DeepErrorf("different types (%s ≠ %s)", vt, b.Type())
+		return DeepErrorf("different types (%s ≠ %s)", tn(vt), tn(b.Type()))
 	}
 	switch vt.Kind() {
 	case reflect.Pointer:
@@ -206,12 +206,12 @@ func testEqualR(t *testing.T, a, b reflect.Value) *DeepError {
 	case reflect.Map:
 		var missing []string
 		for _, k := range a.MapKeys() {
-			if bv := b.MapIndex(k); !bv.IsZero() {
+			if bv := b.MapIndex(k); bv.IsValid() && !bv.IsZero() {
 				if unequal := testEqualR(t, a.MapIndex(k), bv); unequal != nil {
 					return &DeepError{fmt.Errorf("unequal value for %q", k), unequal}
 				}
 			} else /*if _, ok := v.(Ignore); !ok*/ {
-				missing = append(missing, fmt.Sprintf("%v", k))
+				missing = append(missing, val2strR(k, true))
 			}
 		}
 		if len(missing) > 0 {
@@ -219,8 +219,8 @@ func testEqualR(t *testing.T, a, b reflect.Value) *DeepError {
 		}
 		var extra []string
 		for _, k := range b.MapKeys() {
-			if av := a.MapIndex(k); av.IsZero() {
-				extra = append(extra, fmt.Sprintf("%v", k))
+			if av := a.MapIndex(k); !av.IsValid() || av.IsZero() {
+				extra = append(extra, val2strR(k, true))
 			}
 		}
 		if len(extra) > 0 {

@@ -62,6 +62,30 @@ func Map[T any, R any](slice []T, mapper func(T, int) R) []R {
 	return r
 }
 
+func tn(t reflect.Type) string {
+	switch t.Kind() {
+	//case reflect.Map:
+	//	return fmt.Sprintf("map[%s]%s", tn(t.Key()), tn(t.Elem()))
+	case reflect.Ptr:
+		return "*" + tn(t.Elem())
+	//case reflect.Slice, reflect.Array:
+	//	return "[]" + tn(t.Elem())
+	default:
+		var handle func(n string) string
+		handle = func(n string) string {
+			i, j := strings.IndexByte(n, '['), strings.LastIndexByte(n, ']')
+			if i >= 0 && j > i {
+				return fmt.Sprintf("%s[%s]%s", n[:i], handle(n[i+1:j]), handle(n[j+1:]))
+			}
+			if n == "interface {}" {
+				return "any"
+			}
+			return n
+		}
+		return handle(t.String())
+	}
+}
+
 func val2str(value any) string {
 	return val2strR(reflect.ValueOf(value), true)
 }
@@ -83,36 +107,46 @@ func val2strR(value reflect.Value, withType bool) string {
 		}
 		return "&" + val2strR(value.Elem(), withType)
 	case reflect.Map:
-		if value.IsNil() {
-			return "map<nil>"
+		t := value.Type()
+		typeStr := ""
+		if withType {
+			typeStr = tn(t)
 		}
+		if value.IsNil() {
+			return typeStr + "<nil>"
+		}
+		isAny := t.Elem() == reflect.TypeOf((*any)(nil)).Elem()
 		var parts []string
 		for _, k := range value.MapKeys() {
-			parts = append(parts, val2strR(k, true)+": "+val2strR(value.MapIndex(k), true))
+			parts = append(parts, val2strR(k, true)+": "+val2strR(value.MapIndex(k), isAny))
 		}
-		return "map{" + strings.Join(parts, ", ") + "}"
+		return typeStr + "{" + strings.Join(parts, ", ") + "}"
 	case reflect.Struct:
 		sType := value.Type()
 		var fields []string
 		for i, n := 0, value.NumField(); i < n; i++ {
 			fields = append(fields, fmt.Sprintf("%s: %s", sType.Field(i).Name, val2strR(value.Field(i), true)))
 		}
-		return fmt.Sprintf("%s{%s}", sType.String(), strings.Join(fields, ", "))
+		str := fmt.Sprintf("{%s}", strings.Join(fields, ", "))
+		if withType {
+			str = tn(sType) + str
+		}
+		return str
 	case reflect.Slice, reflect.Array:
 		if value.IsNil() {
 			return "[]<nil>"
 		}
+		isAny := value.Type().Elem() == reflect.TypeOf((*any)(nil)).Elem()
 		var elements []string
 		for i, n := 0, value.Len(); i < n; i++ {
-			elements = append(elements, val2strR(value.Index(i), false))
+			elements = append(elements, val2strR(value.Index(i), isAny))
 		}
-		return fmt.Sprintf("❲%s❳[%s]", value.Type().Elem().String(), strings.Join(elements, ", "))
+		return fmt.Sprintf("❲%s❳[%s]", tn(value.Type().Elem()), strings.Join(elements, ", "))
 	default:
-		str := ""
+		str := fmt.Sprintf("%v", value)
 		if withType {
-			str += fmt.Sprintf("❲%s❳", value.Type().String())
+			str = fmt.Sprintf("❲%s❳", tn(value.Type())) + str
 		}
-		str += fmt.Sprintf("%v", value)
 		return str
 	}
 }

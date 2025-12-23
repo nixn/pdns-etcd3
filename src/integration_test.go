@@ -47,12 +47,14 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+//goland:noinspection GoUnhandledErrorResult
 func pickFreeLocalPort() string {
 	listen, _ := net.Listen("tcp", "127.0.0.1:0")
 	defer listen.Close()
 	return listen.Addr().String()
 }
 
+//goland:noinspection GoUnhandledErrorResult
 func startEtcd(t *testing.T, version string) *etcdProc {
 	t.Helper()
 	etcdBin := fetchEtcdBinaryCached(t, version)
@@ -104,6 +106,7 @@ func (ep *etcdProc) Stop(t *testing.T) {
 	_ = ep.cmd.Wait()
 }
 
+//goland:noinspection GoUnhandledErrorResult
 func TestRequests(t *testing.T) {
 	defer (handleExitInLogging(t))()
 	defer recoverPanics(t)

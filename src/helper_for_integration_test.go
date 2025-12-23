@@ -46,6 +46,8 @@ func getCacheDir() string {
 
 // fetchEtcdBinaryCached downloads and extracts only if not already cached.
 // Returns path to etcd binary.
+//
+//goland:noinspection GoUnhandledErrorResult
 func fetchEtcdBinaryCached(t *testing.T, version string) string {
 	t.Helper()
 	// honor override to skip entirely
