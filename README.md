@@ -13,8 +13,8 @@ the second development release, considered alpha quality. Any testing is appreci
 
 [pdns]: https://www.powerdns.com/
 [pdns-remote]: https://doc.powerdns.com/authoritative/backends/remote.html
-[etcd]: https://github.com/coreos/etcd/
-[etcd-client]: https://github.com/coreos/etcd/tree/master/clientv3/
+[etcd]: https://github.com/etcd-io/etcd/
+[etcd-client]: https://github.com/etcd-io/etcd/tree/main/client/v3
 [v0.2.0+0.1.1]: https://github.com/nixn/pdns-etcd3/releases/tag/v0.2.0%2B0.1.1
 
 ## Features
@@ -145,7 +145,7 @@ are tagged by *#UNIX*):
 
 * `config-file=/path/to/etcd.conf` *#UNIX*<br>
   The path to an ETCD (client) configuration file, as accepted by the official client
-  (see [etcd/clientv3/config.go](https://github.com/coreos/etcd/blob/master/clientv3/config.go), TODO find documentation)<br>
+  (see [etcd/client/v3/config.go](https://github.com/etcd-io/etcd/blob/master/client/v3/config.go), TODO find documentation)<br>
   TLS and authentication is only possible when using such a configuration file.<br>
   Overrides `endpoints` parameter. Defaults to not set.
 * `endpoints=<IP:Port>[|<IP:Port>|...]` *#UNIX*<br>
