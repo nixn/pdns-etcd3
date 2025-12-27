@@ -19,8 +19,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
 	"github.com/sirupsen/logrus"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	clientv3yaml "go.etcd.io/etcd/client/v3/yaml"
 	"golang.org/x/net/context"
 )
 
@@ -30,7 +31,12 @@ var (
 
 func setupClient() (logMessages []string, err error) {
 	if *args.ConfigFile != "" {
-		cli, err = clientv3.NewFromConfigFile(*args.ConfigFile)
+		cfg, fileErr := clientv3yaml.NewConfig(*args.ConfigFile)
+		if fileErr != nil {
+			err = fmt.Errorf("failed to read config from file %q: %s", *args.ConfigFile, fileErr)
+			return
+		}
+		cli, err = clientv3.New(*cfg)
 		if err != nil {
 			err = fmt.Errorf("failed to create client instance: %s", err)
 			return
