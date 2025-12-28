@@ -3,14 +3,17 @@ GIT_VERSION := $(shell git describe --always --dirty)
 
 RM ?= rm -f
 
+GOLINT := $(shell command -v golint 2>/dev/null)
+STATICCHECK := $(shell command -v staticcheck 2>/dev/null)
+
 VERBOSE ?= 0
 ifeq ($(VERBOSE),1)
 VERBOSE_ARG += -v
 endif
 
-.PHONY: all fmt vet lint clean unit-tests unit-tests+coverage integration-tests integration-tests+coverage tests coverage
+.PHONY: all fmt vet lint stan clean unit-tests unit-tests+coverage integration-tests integration-tests+coverage tests coverage
 
-all: $(OUT) vet lint unit-tests integration-tests
+all: $(OUT) vet lint stan unit-tests integration-tests
 
 $(OUT): pdns-etcd3.go $(wildcard src/*.go)
 	@$(MAKE) --no-print-directory fmt
@@ -23,7 +26,18 @@ vet:
 	-go vet
 
 lint:
+ifeq ($(GOLINT),)
+	@echo "(golint not found)"
+else
 	-golint ./...
+endif
+
+stan:
+ifeq ($(STATICCHECK),)
+	@echo "(staticcheck not found)"
+else
+	-staticcheck -tags unit,integration ./...
+endif
 
 clean:
 	$(RM) $(OUT) coverage.*
