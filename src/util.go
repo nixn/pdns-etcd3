@@ -132,10 +132,12 @@ func val2strR(value reflect.Value, withType bool) string {
 			str = tn(sType) + str
 		}
 		return str
-	case reflect.Slice, reflect.Array:
+	case reflect.Slice:
 		if value.IsNil() {
 			return "[]<nil>"
 		}
+		fallthrough
+	case reflect.Array:
 		isAny := value.Type().Elem() == reflect.TypeOf((*any)(nil)).Elem()
 		var elements []string
 		for i, n := 0, value.Len(); i < n; i++ {

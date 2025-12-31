@@ -88,7 +88,7 @@ func getResponse(response *clientv3.GetResponse) *getResponseType {
 }
 
 func get(key string, multi bool, revision *int64) (*getResponseType, error) {
-	log.etcd().WithFields(logrus.Fields{"multi": multi, "rev": revision}).Tracef("get %q", key)
+	log.etcd("multi", multi, "rev", revision).Tracef("get %q", key)
 	opts := []clientv3.OpOption(nil)
 	if multi {
 		opts = append(opts, clientv3.WithPrefix())
@@ -104,7 +104,7 @@ func get(key string, multi bool, revision *int64) (*getResponseType, error) {
 	if err != nil {
 		return nil, fmt.Errorf("[dur %s] %s", dur, err)
 	}
-	log.etcd().WithFields(logrus.Fields{"multi": multi, "dur": dur, "rev": revision, "#": response.Count, "more": response.More}).Tracef("got %q", key)
+	log.etcd("multi", multi, "dur", dur, "rev", revision, "#", response.Count, "more", response.More).Tracef("got %q", key)
 	return getResponse(response), nil
 }
 

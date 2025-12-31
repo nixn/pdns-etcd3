@@ -151,9 +151,9 @@ func startReadRequests(client *pdnsClient) <-chan pdnsRequest {
 					client.log.pdns().Debug("EOF on input stream, terminating")
 					return
 				}
-				client.log.pdns().Fatal("Failed to decode request:", err)
+				client.log.pdns().Fatalf("failed to decode request: %s", err)
 			} else {
-				client.log.pdns().WithField("request", request).Debug("received new request")
+				client.log.pdns("request", request).Debug("received new request")
 				ch <- *request
 			}
 		}
@@ -162,7 +162,7 @@ func startReadRequests(client *pdnsClient) <-chan pdnsRequest {
 }
 
 func handleRequest(request *pdnsRequest, client *pdnsClient) {
-	client.log.main().WithField("request", request).Debug("handling request")
+	client.log.main("request", request).Debug("handling request")
 	since := time.Now()
 	var result interface{}
 	var err error
@@ -177,17 +177,17 @@ func handleRequest(request *pdnsRequest, client *pdnsClient) {
 		result, err = false, fmt.Errorf("unknown/unimplemented request: %s", request)
 	}
 	if err == nil {
-		client.respond(makeResponse(result))
+		client.Respond(makeResponse(result))
 	} else {
-		client.respond(makeResponse(result, err.Error()))
+		client.Respond(makeResponse(result, err.Error()))
 	}
 	dur := time.Since(since)
-	client.log.main().WithFields(logrus.Fields{"dur": dur, "err": err, "val": result}).Trace("result")
+	client.log.main("dur", dur, "err", err, "val", result).Trace("result")
 }
 
 func handleEvent(event *clientv3.Event) {
 	entryKey := string(event.Kv.Key)
-	log.etcd().WithField("event", event).Debugf("handling event on %q", entryKey)
+	log.etcd("event", event).Debugf("handling event on %q", entryKey)
 	since := time.Now()
 	name, entryType, qtype, id, version, err := parseEntryKey(entryKey)
 	// check version first, because a new version could change the key syntax (but not prefix and version suffix)
@@ -196,7 +196,7 @@ func handleEvent(event *clientv3.Event) {
 		return
 	}
 	if err != nil {
-		log.data().WithError(err).Errorf("failed to parse entry key %q, ignoring event", entryKey)
+		log.data().Errorf("failed to parse entry key %q (ignoring event): %s", entryKey, err)
 		return
 	}
 	itemData := dataRoot.getChild(name, true)
@@ -225,7 +225,7 @@ func handleEvent(event *clientv3.Event) {
 	defer zoneData.mutex.Unlock()
 	zoneData.reload(getResponse.DataChan)
 	dur := time.Since(since)
-	logFrom(log.data(), "#records", zoneData.recordsCount(), "#zones", zoneData.zonesCount(), "data-revision", maxOf(event.Kv.ModRevision, event.Kv.CreateRevision), "event-duration", dur).Debugf("reloaded zone %q", qname)
+	log.data("#records", zoneData.recordsCount(), "#zones", zoneData.zonesCount(), "data-revision", maxOf(event.Kv.ModRevision, event.Kv.CreateRevision), "event-duration", dur).Debugf("reloaded zone %q", qname)
 }
 
 // Main is the "moved" program entrypoint, but with git version argument (which is set in real main package)
@@ -361,7 +361,8 @@ func serve(client *pdnsClient) {
 		}
 		defer cancel()
 	}
-	client.respond(makeResponse(true, logMessages...))
+	client.Respond(makeResponse(true, logMessages...))
+REQUESTS:
 	for {
 		request, ok := <-reqChan
 		if !ok {

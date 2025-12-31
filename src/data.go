@@ -139,8 +139,8 @@ func (dn *dataNode) findZone() *dataNode {
 	})
 }
 
-func (dn *dataNode) log(args ...any) *logrus.Entry {
-	return logFrom(log.data(), append([]any{"dn", dn.getQname()}, args...)...)
+func (dn *dataNode) log(fields ...any) *logrus.Entry {
+	return log.data(append([]any{"dn", dn.getQname()}, fields...)...)
 }
 
 func (dn *dataNode) getName() *nameType {

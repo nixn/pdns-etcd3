@@ -58,9 +58,7 @@ func (p *rrParams) SetContent(content string, priority *uint16) {
 }
 
 func (p *rrParams) log(args ...any) *logrus.Entry {
-	logArgs := []any{"target", p.Target(), "version", p.version, "ttl", p.ttl}
-	logArgs = append(logArgs, args...)
-	return p.data.log(logArgs...)
+	return p.data.log(append([]any{"target", p.Target(), "version", p.version, "ttl", p.ttl}, args...)...)
 }
 
 func (p *rrParams) exlog(args ...any) *logrus.Entry {
@@ -120,7 +118,7 @@ func getValue[T any](key string, params *rrParams) (T, *valuePath, error) {
 		if params.lastFieldValue != nil {
 			if lastFieldValue, ok := (*params.lastFieldValue).(T); ok {
 				params.values[key] = lastFieldValue
-				logFrom(log.data(), "value", lastFieldValue).Tracef("using last-field-value for %s:%s", params.Target(), key)
+				log.data("value", lastFieldValue).Tracef("using last-field-value for %s:%s", params.Target(), key)
 				params.lastFieldValue = nil
 				return lastFieldValue, &qPath, nil
 			}

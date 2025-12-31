@@ -49,9 +49,17 @@ func newPdnsClient(id uint, in io.Reader, out interface {
 	}
 }
 
-func (client *pdnsClient) respond(response any) {
-	client.log.pdns().WithField("response", response).Tracef("response")
+// TODO on fatal errors which are local to a client, don't stop the whole program
+
+func (client *pdnsClient) Respond(response any) {
+	client.log.pdns("response", response).Tracef("response")
 	if err := client.Comm.write(response); err != nil {
-		client.log.pdns().WithError(err).WithField("response", response).Fatalf("failed to encode response")
+		client.log.pdns("response", response).Fatalf("failed to encode response: %s", err)
 	}
+}
+
+func (client *pdnsClient) Fatal(msg any) {
+	s := fmt.Sprintf("%s", msg)
+	client.Respond(makeResponse(false, s))
+	client.log.main().Fatalf("fatal error: %s", s)
 }

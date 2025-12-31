@@ -70,29 +70,33 @@ func newLog(msgPrefix string, components ...string) logType {
 	return log
 }
 
-func (log *logType) main() *logrus.Logger {
-	return (*log)["main"]
+func (log *logType) logger(component string) *logrus.Logger {
+	return (*log)[component]
 }
 
-func (log *logType) pdns() *logrus.Logger {
-	return (*log)["pdns"]
+func (log *logType) main(fields ...any) *logrus.Entry {
+	return logFrom(log.logger("main"), fields...)
 }
 
-func (log *logType) etcd() *logrus.Logger {
-	return (*log)["etcd"]
+func (log *logType) pdns(fields ...any) *logrus.Entry {
+	return logFrom(log.logger("pdns"), fields...)
 }
 
-func (log *logType) data() *logrus.Logger {
-	return (*log)["data"]
+func (log *logType) etcd(fields ...any) *logrus.Entry {
+	return logFrom(log.logger("etcd"), fields...)
+}
+
+func (log *logType) data(fields ...any) *logrus.Entry {
+	return logFrom(log.logger("data"), fields...)
 }
 
 func (log *logType) setLoggingLevel(components string, level logrus.Level) {
 	for _, component := range strings.Split(components, "+") {
 		if logger, ok := (*log)[component]; ok {
-			log.main().Printf("Setting log level of %s to %s", component, level)
+			log.main().Printf("setting log level of %s to %s", component, level)
 			logger.SetLevel(level)
 		} else {
-			logFrom(log.main(), "component", component, "level", level).Warnf("setLoggingLevel(): invalid component")
+			log.main("component", component, "level", level).Warnf("setLoggingLevel(): invalid component")
 		}
 	}
 }

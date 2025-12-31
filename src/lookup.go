@@ -73,11 +73,11 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 	for qtype, records := range records {
 		for _, record := range records {
 			item := makeResultItem(qname, qtype, data, &record, client)
-			client.log.pdns().WithField("item", item).Trace("adding result item")
+			client.log.pdns("item", item).Trace("adding result item")
 			result = append(result, item)
 		}
 	}
-	client.log.pdns().WithField("#", len(result)).Debug("request result items count")
+	client.log.pdns("#", len(result)).Debug("request result items count")
 	if len(result) == 0 {
 		return false, nil // see above for reasoning
 	}
@@ -145,10 +145,10 @@ func findValue[T any](key, qtype, id string, data *dataNode, valuesArea entryTyp
 				if value, ok := value.content.(objectValueType)[key]; ok {
 					valuePath := valuePath{dn, &soe}
 					if value, ok := value.(T); ok {
-						logFrom(log.data(), "value", value, "area", valuesArea).Tracef("found value for %s:%s in %s", queryPath.String(), key, valuePath.String())
+						log.data("value", value, "area", valuesArea).Tracef("found value for %s:%s in %s", queryPath.String(), key, valuePath.String())
 						return value, &valuePath, nil
 					}
-					logFrom(log.data(), "value", value, "area", valuesArea, "found-in", valuePath.String()).Tracef("invalid type of value for %s.%s: %T", queryPath.String(), key, value) // TODO use warning level?
+					log.data("value", value, "area", valuesArea, "found-in", valuePath.String()).Tracef("invalid type of value for %s.%s: %T", queryPath.String(), key, value) // TODO use warning level?
 					var zero T
 					return zero, &valuePath, fmt.Errorf("invalid value type: %T", value)
 				}
@@ -166,10 +166,10 @@ func findValueOrDefault[V any](key string, values objectType[any], qtype, id str
 	if value, ok := values[key]; ok {
 		queryPath := valuePath{data, &searchOrderElement{qtype, id}}
 		if value, ok := value.(V); ok {
-			logFrom(log.data(), "value", value).Tracef("found value for %s:%s directly", queryPath.String(), key)
+			log.data("value", value).Tracef("found value for %s:%s directly", queryPath.String(), key)
 			return value, &queryPath, nil
 		}
-		logFrom(log.data(), "value", value).Tracef("invalid type of value for %s.%s: %T (found directly)", queryPath.String(), key, value)
+		log.data("value", value).Tracef("invalid type of value for %s.%s: %T (found directly)", queryPath.String(), key, value)
 		var zeroValue V
 		return zeroValue, &queryPath, fmt.Errorf("invalid type: %T", value)
 	}
