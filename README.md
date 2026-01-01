@@ -215,7 +215,7 @@ The levels in detail:
 
 ## License
 
-Copyright © 2016-2025 nix <https://keybase.io/nixn>
+Copyright © 2016-2026 nix <https://keybase.io/nixn>
 
 Distributed under the Apache 2.0 license, available in the file [LICENSE](LICENSE).
 
