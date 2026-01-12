@@ -56,7 +56,6 @@ the second development release, considered alpha quality. Any testing is appreci
 
 [pdns-dnssec]: https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dnssec-support
 [pdns-unix-conn]: https://doc.powerdns.com/authoritative/backends/remote.html#unix-connector
-[pdns-zone-cache]: https://doc.powerdns.com/authoritative/settings.html#setting-zone-cache-refresh-interval
 [json5]: https://json5.org/
 [yaml]: http://www.yaml.org/
 
@@ -96,15 +95,10 @@ All the configuration options must be given in the PowerDNS configuration file. 
 initiates the backend lazily, the 'initialize' call occurs with the first (client) request and the backend has to be fast
 enough to connect to ETCD, read all data, and reply to this first request. This can be too long, if there is much data to read.
 
-As of PowerDNS v4.5 there is a setting to cache zone data, so the backend would be started and initialized before the
-first client request, but this call is currently not implemented (will be implemented later). Due to this the setting
-`zone-cache-refresh-interval` currently must be set to `0` (v4.5+).
-
 Example PowerDNS configuration file:
 ```
 launch=remote
 remote-connection-string=pipe:command=/path/to/pdns-etcd3[,pdns-version=3|4|5][,<config>][,prefix=<string>][,timeout=<integer>][,log-<level>=<components>]
-zone-cache-refresh-interval=0
 # since in pipe mode every instance connects to ETCD and loads the data for itself (uses memory), possibly do this:
 distributor-threads=1
 ```
@@ -121,13 +115,10 @@ and connects to it right after starting up. Then it accepts connections on the s
 Each connection still begins with an 'initialize' call, but only the non-ETCD parameters are available to it. In this
 mode the data is loaded only once (uses memory only once).
 
-The current restriction on the setting `zone-cache-refresh-interval` (see above) is here valid too, so set it to `0` for now.
-
 Example PowerDNS configuration file:
 ```
 launch=remote
 remote-connection-string=unix:path=/path/to/pdns-etcd3-socket[,pdns-version=3|4|5][,log-<level>=<components>]
-zone-cache-refresh-interval=0
 # in unix mode it is ok to launch multiple access threads, the data is protected by mutexes for concurrent access (including updates)
 distributor-threads=3
 ```
