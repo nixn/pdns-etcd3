@@ -234,7 +234,7 @@ func Main(programVersion VersionType, gitVersion string, cmdLineArgs []string) {
 	if "v"+releaseVersion != gitVersion {
 		releaseVersion += fmt.Sprintf("[%s]", gitVersion)
 	}
-	log.main().Printf("pdns-etcd3 %s, Copyright © 2016-2025 nix <https://keybase.io/nixn>", releaseVersion)
+	log.main().Printf("pdns-etcd3 %s, Copyright © 2016-2026 nix <https://keybase.io/nixn>", releaseVersion)
 	// handle arguments // TODO handle more arguments, f.e. 'show-defaults' standalone command
 	unixSocketPath := flag.String("unix", "", `Create a unix socket at given path and run in Unix Connector mode ("standalone")`)
 	args = programArgs{
