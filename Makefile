@@ -8,10 +8,14 @@ STATICCHECK := $(shell command -v staticcheck 2>/dev/null)
 
 VERBOSE ?= 0
 ifeq ($(VERBOSE),1)
-VERBOSE_ARG += -v
+TEST_EXTRA_ARGS += -v
 endif
 
-.PHONY: all fmt vet lint stan clean unit-tests unit-tests+coverage integration-tests integration-tests+coverage tests coverage
+ifneq ($(ONLY),)
+TEST_EXTRA_ARGS += -run $(ONLY)
+endif
+
+.PHONY: all fmt vet lint stan clean unit-tests unit-tests+coverage integration-tests integration-tests+coverage tests tests+coverage
 
 all: $(OUT) vet lint stan unit-tests integration-tests
 
@@ -43,22 +47,22 @@ clean:
 	$(RM) $(OUT) coverage.*
 
 unit-tests:
-	go test -tags unit $(VERBOSE_ARG) ./src
+	go test -tags unit $(TEST_EXTRA_ARGS) ./src
 
 unit-tests+coverage:
-	go test -tags unit -coverprofile=coverage.unit.txt $(VERBOSE_ARG) ./src
+	-go test -tags unit -coverprofile=coverage.unit.txt $(TEST_EXTRA_ARGS) ./src
 	go tool cover -html=coverage.unit.txt -o coverage.unit.html
 
 integration-tests:
-	go test -tags integration -count=1 $(VERBOSE_ARG) ./src
+	go test -tags integration -count=1 $(TEST_EXTRA_ARGS) ./src
 
 integration-tests+coverage:
-	go test -tags integration -count=1 -coverprofile=coverage.integration.txt $(VERBOSE_ARG) ./src
+	-go test -tags integration -count=1 -coverprofile=coverage.integration.txt $(TEST_EXTRA_ARGS) ./src
 	go tool cover -html=coverage.integration.txt -o coverage.integration.html
 
 tests: unit-tests integration-tests
 	@echo "tests finished"
 
-coverage:
-	go test -tags unit,integration -count=1 -coverprofile=coverage.txt $(VERBOSE_ARG) ./src
+tests+coverage:
+	-go test -tags unit,integration -count=1 -coverprofile=coverage.txt $(TEST_EXTRA_ARGS) ./src
 	go tool cover -html=coverage.txt -o coverage.html
