@@ -50,12 +50,12 @@ var (
 
 func parseBoolean(s string) (bool, error) {
 	switch strings.ToLower(s) {
-	case "y", "yes", "1", "true", "on":
+	case "y", "yes", "1", "t", "true", "on":
 		return true, nil
-	case "n", "no", "0", "false", "off":
+	case "n", "no", "0", "f", "false", "off":
 		return false, nil
 	default:
-		return false, fmt.Errorf("not a boolean string (y[es]/n[o], 1/0, true/false, on/off)")
+		return false, fmt.Errorf("not a boolean string (y[es]/n[o], 1/0, t[rue]/f[alse], on/off)")
 	}
 }
 
