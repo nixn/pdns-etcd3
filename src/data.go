@@ -87,7 +87,7 @@ func (dn *dataNode) getValuesFor(entryType entryType) map[string]map[string]valu
 	case optionsEntry:
 		return dn.options
 	default:
-		log.main().Fatalf("requested values for unknown entrytype %q", entryType)
+		log.main().Panicf("requested values for unknown entrytype %q", entryType)
 		return nil
 	}
 }

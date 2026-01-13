@@ -19,10 +19,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -42,10 +43,16 @@ func (pa programArgs) String() string {
 }
 
 var (
-	log        = newLog("", "main", "etcd", "data") // TODO timings
+	log        = newLog(nil, "main", "pdns", "etcd", "data") // TODO timings
 	args       programArgs
 	standalone bool
 	dataRoot   *dataNode
+)
+
+var (
+	serving   = false
+	connected = false
+	populated = false
 )
 
 func parseBoolean(s string) (bool, error) {
@@ -141,10 +148,18 @@ func readParameters(params objectType[string], client *pdnsClient) error {
 	return nil
 }
 
-func startReadRequests(client *pdnsClient) <-chan pdnsRequest {
+func startReadRequests(wg *sync.WaitGroup, ctx context.Context, client *pdnsClient) <-chan pdnsRequest {
 	ch := make(chan pdnsRequest)
-	go func() {
+	wg.Go(func() {
+		defer recoverPanics(func(v any) bool {
+			recoverFunc(v, "readRequests()", false)
+			return false
+		})
 		defer close(ch)
+		wg.Go(func() {
+			<-ctx.Done()
+			closeNoError(client.in)
+		})
 		for {
 			if request, err := client.Comm.read(); err != nil {
 				if err == io.EOF {
@@ -157,7 +172,7 @@ func startReadRequests(client *pdnsClient) <-chan pdnsRequest {
 				ch <- *request
 			}
 		}
-	}()
+	})
 	return ch
 }
 
@@ -172,7 +187,7 @@ func handleRequest(request *pdnsRequest, client *pdnsClient) {
 	case "getalldomainmetadata":
 		result, err = map[string]any{}, nil
 	case "getalldomains":
-		result = dataRoot.allDomains(nil)
+		result = dataRoot.allDomains([]domainInfo{}) // must not be nil, for empty answers it would not be marshalled into `[]`
 	default:
 		result, err = false, fmt.Errorf("unknown/unimplemented request: %s", request)
 	}
@@ -229,14 +244,23 @@ func handleEvent(event *clientv3.Event) {
 }
 
 // Main is the "moved" program entrypoint, but with git version argument (which is set in real main package)
-func Main(programVersion VersionType, gitVersion string, cmdLineArgs []string) {
+func Main(programVersion VersionType, gitVersion string) {
+	main(programVersion, gitVersion, os.Args[1:], make(chan os.Signal, 1))
+	log.main().Trace("main() returned normally")
+}
+
+func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, osSignals chan os.Signal) {
+	// recoverPanics must be used here, because integration test calls main(...) directly, not Main(...)
+	defer recoverPanics(func(v any) bool {
+		return !recoverFunc(v, "main()", true)
+	})
 	releaseVersion := programVersion.String() + "+" + dataVersion.String()
 	if "v"+releaseVersion != gitVersion {
 		releaseVersion += fmt.Sprintf("[%s]", gitVersion)
 	}
 	log.main().Printf("pdns-etcd3 %s, Copyright © 2016-2026 nix <https://keybase.io/nixn>", releaseVersion)
 	// handle arguments // TODO handle more arguments, f.e. 'show-defaults' standalone command
-	unixSocketPath := flag.String("unix", "", `Create a unix socket at given path and run in Unix Connector mode ("standalone")`)
+	standaloneArg := flag.String("standalone", "", `Use a standalone mode determined by the given URL (unix:///path/to/socket[?relative=<bool>] or http://<listen-address>:<listen-port>)`)
 	args = programArgs{
 		ConfigFile:  flag.String(configFileParam, "", "Use the given configuration file for the ETCD connection (overrides -endpoints)"),
 		Endpoints:   flag.String(endpointsParam, defaultEndpointIPv6+"|"+defaultEndpointIPv4, "Use the endpoints configuration for ETCD connection"),
@@ -247,129 +271,148 @@ func Main(programVersion VersionType, gitVersion string, cmdLineArgs []string) {
 	for _, level := range logrus.AllLevels {
 		logging[level] = flag.String(logParamPrefix+level.String(), "", fmt.Sprintf("Set logging level %s to the given components (separated by +)", level))
 	}
-	_ = flag.CommandLine.Parse(cmdLineArgs) // same as flag.Parse(), but we can pass the arguments instead of being fixed to os.Args[1:] (needed for integration testing)
-	standalone = unixSocketPath != nil && *unixSocketPath != ""
-	if standalone {
-		for level, components := range logging {
-			if len(*components) > 0 {
-				log.setLoggingLevel(*components, level)
-			}
-		}
-		//goland:noinspection GoDfaNilDereference
-		socket, err := net.Listen("unix", *unixSocketPath)
-		if err != nil {
-			log.main().Fatalf("Failed to create a unix socket at %s: %s", *unixSocketPath, err)
-		}
-		defer func(socket net.Listener) { _ = socket.Close() }(socket)
-		err = os.Chmod(*unixSocketPath, 0777)
-		if err != nil {
-			log.main().Warnf("Failed to chmod unix socket to 0777: %s", err)
-		}
-		go unix(socket)
-	} else {
-		go pipe()
+	if err := flag.CommandLine.Parse(cmdLineArgs); err != nil { // same as flag.Parse(), but we can pass the arguments instead of being fixed to os.Args[1:] (needed for integration testing)
+		log.main().Fatalf("failed to parse command line arguments: %s", err)
 	}
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, os.Kill, syscall.SIGTERM)
-	log.main().Debugf("{main} waiting for shutdown signal")
-	sig := <-c
-	log.main().Debugf("{main} caught signal %s, shutting down", sig)
-	// TODO implement graceful shutdown. when calling fatal (or log.Fatal), the deferred functions are not executed :-(
+	for level, components := range logging {
+		if len(*components) > 0 {
+			log.setLoggingLevel(*components, level)
+		}
+	}
+	signal.Notify(osSignals, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		log.main().Trace("{signal} waiting for OS signals (HUP, INT, TERM, QUIT)")
+		sig := <-osSignals
+		log.main().Debugf("{signal} caught signal %s, shutting down", sig)
+		cancel()
+	}()
+	wg := new(sync.WaitGroup)
+	standalone = *standaloneArg != ""
+	if standalone {
+		u, err := url.Parse(*standaloneArg)
+		if err != nil {
+			log.main(err).Panic("failed to parse standalone URL")
+		}
+		standalone, ok := standalones[u.Scheme]
+		if !ok {
+			log.main("scheme", u.Scheme).Panic("unknown scheme in standalone URL")
+		}
+		if messages, err := setupClient(); err != nil {
+			log.main().Panicf("setupClient() failed: %s", err)
+		} else {
+			log.main("messages", messages).Debug("setupClient messages")
+		}
+		defer closeClient()
+		if err = populateData(wg, ctx); err != nil {
+			log.main().Panicf("populateData() failed: %s", err)
+		}
+		standalone(wg, ctx, u)
+	} else {
+		pipe(wg, ctx, os.Stdin, os.Stdout)
+	}
+	log.main().Debug("{main} request handler returned normally, stopping work")
+	cancel()
+	log.main().Trace("{main} waiting for child routines to finish (15s)")
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer waitCancel()
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		log.main().Trace("{main} all finished, exiting")
+	case <-waitCtx.Done():
+		log.main().Error("{main} timeout while waiting on routines, exiting forcefully")
+	}
 }
 
-func populateData(caller string) (context.CancelFunc, error) {
-	log.main().Debugf("{%s} populating data", caller)
-	doneCtx, cancel := context.WithCancel(context.Background())
+func populateData(wg *sync.WaitGroup, ctx context.Context) error {
+	log.main().Debug("populating data")
 	getResponse, err := get(*args.Prefix, true, nil)
 	if err != nil {
-		return cancel, fmt.Errorf("get() failed: %s", err)
+		return fmt.Errorf("get() failed: %s", err)
 	}
+	currentRevision = getResponse.Revision
 	func() {
 		dataRoot = newDataNode(nil, "", "")
 		dataRoot.mutex.Lock()
 		defer dataRoot.mutex.Unlock()
 		dataRoot.reload(getResponse.DataChan)
-		log.main().Debugf("{%s} loaded data: #records=%d #zones=%d revision=%v", caller, dataRoot.recordsCount(), dataRoot.zonesCount(), getResponse.Revision)
+		log.main().Debugf("loaded data: #records=%d #zones=%d revision=%v", dataRoot.recordsCount(), dataRoot.zonesCount(), getResponse.Revision)
 	}()
-	log.main().Debugf("{%s} starting data watcher", caller)
-	go watchData(doneCtx, getResponse.Revision+1)
-	return cancel, nil
+	populated = true
+	log.main().Debug("starting data watcher")
+	wg.Go(func() {
+		defer recoverPanics(func(v any) bool {
+			recoverFunc(v, "watchData()", false)
+			return false
+		})
+		watchData(ctx)
+		log.main().Trace("watchData() returned normally")
+	})
+	return nil
 }
 
-func unix(socket net.Listener) {
-	connectMessages, err := setupClient()
-	if err != nil {
-		log.main().Fatalf("{listen} setupClient() failed: %s", err)
-	}
-	defer closeClient()
-	log.main().WithError(err).Debug("{listen} setupClient: ", strings.Join(connectMessages, "; "))
-	cancel, err := populateData("listen")
-	if err != nil {
-		log.main().Fatalf("{listen} populateData() failed: %s", err)
-	}
-	defer cancel()
-	log.main().Infof("{listen} Waiting for connections")
-	var nextClientID uint = 1
-	for {
-		conn, err := socket.Accept()
-		if err != nil {
-			log.main().Errorf("Failed to accept new connection: %s", err)
-			continue
-		}
-		log.main().Debugf("{listen} New connection [%d]: %+v", nextClientID, conn)
-		go serve(newPdnsClient(nextClientID, conn, conn))
-		nextClientID++
-	}
-}
-
-func pipe() {
-	serve(newPdnsClient(0, os.Stdin, os.Stdout))
-}
-
-func serve(client *pdnsClient) {
-	var logMessages []string
-	reqChan := startReadRequests(client)
-	// first request must be 'initialize'
-	{
-		client.log.pdns().Debug("waiting for initial request")
-		initRequest := <-reqChan
-		if initRequest.Method != "initialize" {
-			client.log.pdns().WithField("method", initRequest.Method).Fatal("wrong request method (waited for 'initialize')")
-		}
-		client.log.main().WithField("parameters", initRequest.Parameters).Info("initializing")
-		params := objectType[string]{}
-		for k, v := range initRequest.Parameters {
-			params[k] = v.(string)
-		}
-		err := readParameters(params, client)
-		if err != nil {
-			fatal(client, err)
-		}
-		client.log.main().Debugf("successfully read parameters")
-	}
-	if !standalone {
+func pipe(wg *sync.WaitGroup, ctx context.Context, in io.ReadCloser, out io.WriteCloser) {
+	initialized := func(client *pdnsClient) []string {
 		clientMessages, err := setupClient()
 		if err != nil {
-			fatal(client, fmt.Errorf("setupClient() failed: %s", err))
+			client.Fatal(fmt.Errorf("setupClient() failed: %s", err))
 		}
-		defer closeClient()
-		client.log.main().Debugf("connected")
-		logMessages = append(logMessages, clientMessages...)
-		cancel, err := populateData("serve")
-		if err != nil {
-			fatal(client, fmt.Errorf("populateData() failed: %s", err))
+		log.etcd().Debugf("connected")
+		if err := populateData(wg, ctx); err != nil {
+			client.Fatal(fmt.Errorf("populateData() failed: %s", err))
 		}
-		defer cancel()
+		return clientMessages
 	}
-	client.Respond(makeResponse(true, logMessages...))
+	defer closeClient()
+	serve(wg, ctx, newPdnsClient(ctx, 0, in, out), &initialized)
+}
+
+func serve(wg *sync.WaitGroup, ctx context.Context, client *pdnsClient, initialized *func(*pdnsClient) []string) {
+	defer closeNoError(client.out)
+	reqChan := startReadRequests(wg, ctx, client)
+	if initialized != nil {
+		// first request must be 'initialize'
+		client.log.pdns().Trace("waiting for initial message")
+		select {
+		case <-ctx.Done():
+			client.log.pdns().Trace("canceled while waiting for initial message")
+			return
+		case initRequest := <-reqChan:
+			if initRequest.Method != "initialize" {
+				client.log.pdns("method", initRequest.Method).Panic("wrong request method (waited for 'initialize')")
+			}
+			client.log.main("parameters", initRequest.Parameters).Info("initializing")
+			params := objectType[string]{}
+			for k, v := range initRequest.Parameters {
+				params[k] = v.(string)
+			}
+			err := readParameters(params, client)
+			if err != nil {
+				client.Fatal(err)
+			}
+			client.log.main().Debugf("successfully read parameters")
+		}
+		logMessages := (*initialized)(client)
+		client.Respond(makeResponse(true, logMessages...))
+	}
+	serving = true
 REQUESTS:
 	for {
-		request, ok := <-reqChan
-		if !ok {
-			_ = client.out.Close()
-			break
+		select {
+		case <-ctx.Done():
+			break REQUESTS
+		case request, ok := <-reqChan:
+			if !ok {
+				break REQUESTS
+			}
+			handleRequest(&request, client)
 		}
-		handleRequest(&request, client)
 	}
 }
 
@@ -379,10 +422,4 @@ func makeResponse(result any, msgs ...string) objectType[any] {
 		response["log"] = msgs
 	}
 	return response
-}
-
-func fatal(client *pdnsClient, msg any) {
-	s := fmt.Sprintf("%s", msg)
-	client.respond(makeResponse(false, s))
-	client.log.main().Fatalf("Fatal error: %s", s)
 }

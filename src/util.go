@@ -17,10 +17,14 @@ package src
 import (
 	"cmp"
 	"fmt"
+	"io"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 type objectType[T any] map[string]T
@@ -138,6 +142,7 @@ func val2strR(value reflect.Value, withType bool) string {
 		}
 		fallthrough
 	case reflect.Array:
+		// TODO check the type for every element and prepend if it differs from array/slice type
 		isAny := value.Type().Elem() == reflect.TypeOf((*any)(nil)).Elem()
 		var elements []string
 		for i, n := 0, value.Len(); i < n; i++ {
@@ -179,4 +184,49 @@ func maxOf[T cmp.Ordered](first T, more ...T) T {
 		}
 	}
 	return result
+}
+
+func recoverPanics(f func(any) bool) {
+	if r := recover(); r != nil {
+		repanic := false
+		if f != nil {
+			repanic = f(r)
+		}
+		if repanic {
+			panic(r)
+		}
+	}
+}
+
+func recoverFunc(v any, name string, exit bool) bool {
+	switch v := v.(type) {
+	case *logrus.Entry:
+		if lf, ok := v.Logger.Formatter.(*logFormatter); ok {
+			log.main().Tracef("%s: fatal error in %s: %s%s", name, lf.component, lf.msgPrefix, v.Message)
+			if exit {
+				os.Exit(1)
+			}
+			return true
+		}
+	case logFatal:
+		suffix := ""
+		if v.clientID != nil {
+			if *v.clientID == 0 {
+				suffix = " [*]"
+			} else {
+				suffix = fmt.Sprintf(" [%d]", *v.clientID)
+			}
+		}
+		log.main().Tracef("%s: fatal error in %s%s", name, v.component, suffix)
+		if exit {
+			os.Exit(v.code)
+		}
+		return true
+	}
+	log.main().Errorf("%s panicked: %s", name, val2str(v))
+	return false
+}
+
+func closeNoError(c io.Closer) {
+	_ = c.Close()
 }

@@ -15,8 +15,6 @@ limitations under the License. */
 package main
 
 import (
-	"os"
-
 	P "github.com/nixn/pdns-etcd3/src"
 )
 
@@ -26,5 +24,5 @@ var (
 )
 
 func main() {
-	P.Main(programVersion, gitVersion, os.Args[1:])
+	P.Main(programVersion, gitVersion)
 }

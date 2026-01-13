@@ -19,14 +19,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	clientv3yaml "go.etcd.io/etcd/client/v3/yaml"
 	"golang.org/x/net/context"
 )
 
 var (
-	cli *clientv3.Client
+	cli             *clientv3.Client
+	currentRevision int64
 )
 
 func setupClient() (logMessages []string, err error) {
@@ -57,6 +57,7 @@ func setupClient() (logMessages []string, err error) {
 		err = fmt.Errorf("failed to create ETCD client instance: %s", err)
 		return
 	}
+	connected = true
 	logMessages = append(logMessages, fmt.Sprintf("%s: %v", endpointsParam, cfg.Endpoints))
 	return
 }
@@ -115,34 +116,56 @@ func put(key string, value string, timeout time.Duration) (*clientv3.PutResponse
 	return cli.Put(ctx, key, value, opts...)
 }
 
-func watchData(doneCtx context.Context, revision int64) {
+func watchData(ctx context.Context) {
 	watcher := clientv3.NewWatcher(cli)
-	defer func() { _ = watcher.Close() }()
+	defer closeNoError(watcher)
+	watchRetryInterval := 5 * time.Second // TODO make a program argument
 WATCH:
 	for {
-		watchCtx := clientv3.WithRequireLeader(doneCtx)
-		watchChan := watcher.Watch(watchCtx, *args.Prefix, clientv3.WithPrefix(), clientv3.WithRev(revision))
-	SELECT:
+		// fail fast
+		select {
+		case <-ctx.Done():
+			break WATCH
+		default:
+		}
+		log.etcd("rev", currentRevision).Tracef("creating watch")
+		watchCtx := clientv3.WithRequireLeader(ctx)
+		watchChan := watcher.Watch(watchCtx, *args.Prefix, clientv3.WithPrefix(), clientv3.WithRev(currentRevision+1))
+	EVENTS:
 		for {
-			select {
-			case <-doneCtx.Done():
-				break WATCH
-			case watchResponse, ok := <-watchChan:
-				if ok {
-					if watchResponse.Canceled {
-						log.etcd().WithError(watchResponse.Err()).Error("watch canceled")
-						break
-					} else {
-						log.etcd().WithFields(logrus.Fields{"compact-rev": watchResponse.CompactRevision, "#events": len(watchResponse.Events), "rev": watchResponse.Header.Revision}).Debug("watch event")
-						for _, ev := range watchResponse.Events {
-							handleEvent(ev)
-						}
-					}
-				} else {
-					log.etcd().WithError(watchResponse.Err()).Errorf("watch failed")
-					break SELECT
+			log.etcd().Trace("waiting for next event")
+			watchResponse, ok := <-watchChan
+			if !ok {
+				log.etcd().Trace("watch channel closed")
+				select {
+				case <-ctx.Done():
+					break WATCH
+				default:
+					break EVENTS
 				}
 			}
+			if err := watchResponse.Err(); err != nil {
+				log.etcd(watchResponse).Errorf("watch failed: %s", err)
+			} else {
+				n := len(watchResponse.Events)
+				log.etcd("compact-rev", watchResponse.CompactRevision, "#events", n, "rev", watchResponse.Header.Revision).Debug("watch event")
+				if n == 0 {
+					log.etcd("rev", currentRevision).Tracef("stopping watch")
+					break WATCH
+				}
+				for _, ev := range watchResponse.Events {
+					handleEvent(ev) // TODO handle all events in a run and reload data afterwards
+				}
+				currentRevision = watchResponse.Header.Revision
+			}
 		}
+		log.etcd().Debugf("retrying watch in %s", watchRetryInterval)
+		interruptibleSleep(ctx, watchRetryInterval)
 	}
+}
+
+func interruptibleSleep(ctx context.Context, dur time.Duration) {
+	sleepCtx, cancel := context.WithTimeout(ctx, dur)
+	defer cancel()
+	<-sleepCtx.Done()
 }

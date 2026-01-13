@@ -28,7 +28,7 @@ type logFormatter struct {
 }
 
 var logLevelChars = map[logrus.Level]string{
-	logrus.PanicLevel: "PNC",
+	logrus.PanicLevel: "FTL", // this is a public-facing string and panics are used to exit gracefully and get reasons in upper levels for fatal errors, so just name it "FTL" too
 	logrus.FatalLevel: "FTL",
 	logrus.ErrorLevel: "ERR",
 	logrus.WarnLevel:  "WRN",
@@ -49,18 +49,38 @@ func (f *logFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 		str += " |"
 	}
 	for k, v := range entry.Data {
-		str += fmt.Sprintf(" %s=%s", k, val2str(v))
+		str += " "
+		if k != "" {
+			str += fmt.Sprintf("%s=", k)
+		}
+		str += val2str(v)
 	}
 	str += "\n"
 	return []byte(str), nil
 }
 
 type logType map[string]*logrus.Logger
+type logFatal struct { // TODO remove after having migrated all log.Fatal calls
+	code      int
+	component string
+	clientID  *uint
+}
 
-func newLog(msgPrefix string, components ...string) logType {
+func newLog(clientID *uint, components ...string) logType {
+	msgPrefix := ""
+	if clientID != nil {
+		if *clientID == 0 {
+			msgPrefix = "[*] "
+		} else {
+			msgPrefix = fmt.Sprintf("[%d] ", *clientID)
+		}
+	}
 	newLogger := func(component string) *logrus.Logger {
 		logger := logrus.New()
 		logger.SetFormatter(&logFormatter{msgPrefix, component})
+		logger.ExitFunc = func(code int) {
+			panic(logFatal{code, component, clientID})
+		}
 		return logger
 	}
 	log := logType{}
@@ -77,6 +97,8 @@ func (log *logType) logger(component string) *logrus.Logger {
 func (log *logType) main(fields ...any) *logrus.Entry {
 	return logFrom(log.logger("main"), fields...)
 }
+
+// TODO add "conn" component (for connectors: pipe, unix, http)
 
 func (log *logType) pdns(fields ...any) *logrus.Entry {
 	return logFrom(log.logger("pdns"), fields...)
@@ -103,17 +125,26 @@ func (log *logType) setLoggingLevel(components string, level logrus.Level) {
 
 func logFrom(logger *logrus.Logger, fieldsArgs ...any) *logrus.Entry {
 	fields := logrus.Fields{}
-	var name string
-	for i, v := range fieldsArgs {
-		if i%2 == 0 {
-			if v, ok := v.(string); ok {
-				name = v
-			} else {
-				name = fmt.Sprintf("%d", (i/2)+1)
-			}
+	var name *string
+	if len(fieldsArgs) == 1 {
+		s := ""
+		name = &s
+	}
+	n := 1
+	for _, v := range fieldsArgs {
+		if s, ok := v.(string); ok && name == nil {
+			name = &s
+		} else if name != nil {
+			fields[*name] = v
+			name = nil
+			n++
 		} else {
-			fields[name] = v
+			fields[fmt.Sprintf("%d", n)] = v
+			n++
 		}
+	}
+	if name != nil {
+		fields[fmt.Sprintf("%d", n)] = *name
 	}
 	return logger.WithFields(fields)
 }

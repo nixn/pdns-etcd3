@@ -15,18 +15,45 @@ limitations under the License. */
 package src
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 )
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (cr *contextReader) Read(p []byte) (int, error) {
+	select {
+	case <-cr.ctx.Done():
+		return 0, fmt.Errorf("read()[1]: %s", cr.ctx.Err())
+	default:
+	}
+	// perform actual read
+	n, err := cr.reader.Read(p)
+	if err != nil {
+		return n, err
+	}
+	// fail fast if canceled mid-read
+	select {
+	case <-cr.ctx.Done():
+		return 0, fmt.Errorf("read()[2]: %s", cr.ctx.Err())
+	default:
+		return n, nil
+	}
+}
 
 type commType[T any] struct {
 	in  *json.Decoder
 	out *json.Encoder
 }
 
-func newComm[T any](in io.Reader, out io.Writer) *commType[T] {
+func newComm[T any](ctx context.Context, in io.Reader, out io.Writer) *commType[T] {
 	comm := commType[T]{
-		json.NewDecoder(in),
+		json.NewDecoder(&contextReader{ctx, in}),
 		json.NewEncoder(out),
 	}
 	comm.out.SetEscapeHTML(false)

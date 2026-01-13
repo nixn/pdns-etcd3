@@ -73,11 +73,11 @@ The content can be one of the following:
   But there is still one exception to this: the `SOA` record cannot be given as a plain string due to the automatically
   handled `serial` field.<br>
   Subject to change (NOT YET IMPLEMENTED): Plain strings for probably most or even all object-supported records will be parsed,
-  gaining support for defaults without using object-style notation.
+  gaining support for defaults, syntax-checking and more without using object-style notation.
 
 * A forced plain string, if it begins with `` ` `` (a backquote) **(NOT YET IMPLEMENTED)**.<br>
   Effectively the same as a normal plain string, but no interpretation as a special notation (other markers from below) is applied.
-  Still subject to parsing.
+  The leading backquote is not included in the resulting value (string). The string remains subject to parsing.
 
 * A JSON object, if it begins with `{`.<br>
   Objects are the heart of the data. They store values for the content fields, have multiple syntax possibilities,
@@ -552,6 +552,7 @@ DNS/net.example/kerberos-master/CNAME → '{"target": "kerberos1"}'
 DNS/net.example/mail/HINFO → '"amd64" "Linux"'
 DNS/net.example/mail/-defaults-/HINFO → '{"ttl": "2h"}'
 DNS/net.example/TYPE123 → '\# 0'
+DNS/net.example/TYPE237 → '\# 1 2a'
 ```
 
 Reverse zone for `192.0.2.0/24`:

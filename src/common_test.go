@@ -20,13 +20,13 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/sirupsen/logrus"
+	"time"
 )
 
 type ve[Value any] struct {
 	v Value
 	e string
+	c map[string]Condition
 }
 
 type test[Input any, Value any] struct {
@@ -51,8 +51,8 @@ func check[Input any, Value any](t *testing.T, id string, f testFunc[Input, Valu
 			if err != nil {
 				t.Errorf(`%#+v -> expected value: %s, got error: %s`, in, val2str(expected.v), err)
 			} else {
-				if unequal := testEqual(t, expected.v, got); unequal != nil {
-					t.Errorf(`%s -> expected: %s, got: %s (%s)`, val2str(in), val2str(expected.v), val2str(got), unequal)
+				if unequal := testEqual(t, expected.v, got, expected.c, ""); unequal != nil {
+					t.Errorf(`%s -> expected: %s (conditions: %s), got: %s (%s)`, val2str(in), val2str(expected.v), val2str(expected.c), val2str(got), unequal)
 				}
 			}
 		}
@@ -85,31 +85,74 @@ func (de DeepError) Depth() int {
 }
 
 type Condition interface {
-	Test(t *testing.T, ov reflect.Value) *DeepError
+	Test(t *testing.T, conditions map[string]Condition, path string, b reflect.Value, a ...reflect.Value) *DeepError
 }
 
 type Ignore struct {
 }
 
-func (i Ignore) Test(t *testing.T, _ reflect.Value) *DeepError {
+func (i Ignore) Test(t *testing.T, _ map[string]Condition, _ string, _ reflect.Value, _ ...reflect.Value) *DeepError {
 	t.Helper()
 	return nil
+}
+
+type OtherDefault[T any] struct {
+	Value, InsteadOf T
+}
+
+func (od OtherDefault[T]) Test(t *testing.T, conditions map[string]Condition, path string, b reflect.Value, a ...reflect.Value) *DeepError {
+	t.Helper()
+	defR := reflect.ValueOf(od.Value)
+	if len(a) == 0 { // same as CompareWith
+		return testEqualR(t, defR, b, conditions, "!"+path)
+	}
+	if testEqualR(t, a[0], reflect.ValueOf(od.InsteadOf), nil, "") != nil {
+		defR = a[0]
+	}
+	return testEqualR(t, defR, b, conditions, "!"+path)
+}
+
+// WhenDefault returns equality, when `a` is equal to Value (the default value), otherwise it compares normally with `a`
+type WhenDefault[T any] struct {
+	Value T
+}
+
+func (wd WhenDefault[T]) Test(t *testing.T, conditions map[string]Condition, path string, b reflect.Value, a ...reflect.Value) *DeepError {
+	t.Helper()
+	defR := reflect.ValueOf(wd.Value)
+	if len(a) == 0 { // same as CompareWith
+		return testEqualR(t, defR, b, conditions, "!"+path)
+	}
+	if testEqualR(t, a[0], reflect.ValueOf(wd.Value), nil, "") == nil {
+		return nil
+	}
+	return testEqualR(t, a[0], b, conditions, "!"+path)
+}
+
+type CompareWith[T any] struct {
+	Value T
+}
+
+func (cw CompareWith[T]) Test(t *testing.T, conditions map[string]Condition, path string, b reflect.Value, _ ...reflect.Value) *DeepError {
+	t.Helper()
+	a := reflect.ValueOf(cw.Value)
+	return testEqualR(t, a, b, conditions, "!"+path)
 }
 
 type Matches struct {
 	Regex string
 }
 
-func (m Matches) Test(t *testing.T, ov reflect.Value) *DeepError {
+func (m Matches) Test(t *testing.T, _ map[string]Condition, _ string, b reflect.Value, _ ...reflect.Value) *DeepError {
 	t.Helper()
-	if ov.Kind() == reflect.String {
+	if b.Kind() == reflect.String {
 		re := regexp.MustCompile(m.Regex)
-		if !re.MatchString(ov.Interface().(string)) {
+		if !re.MatchString(b.Interface().(string)) {
 			return DeepErrorf("does not match regex (%s)", re)
 		}
 		return nil
 	}
-	return DeepErrorf("not a string (%T)", ov)
+	return DeepErrorf("not a string (%T)", b)
 }
 
 type SliceContains struct {
@@ -117,21 +160,29 @@ type SliceContains struct {
 	Elements      []any
 }
 
-func (need SliceContains) Test(t *testing.T, have reflect.Value) *DeepError {
+func (sc SliceContains) Test(t *testing.T, conditions map[string]Condition, path string, b reflect.Value, a ...reflect.Value) *DeepError {
 	t.Helper()
+	have := b
 	if have.Kind() == reflect.Slice {
 		n, i, haveN := 0, 0, have.Len()
+		var need reflect.Value // reflecting the elements slice
+		if len(a) > 0 {
+			need = a[0]
+		} else {
+			need = reflect.ValueOf(sc.Elements)
+		}
+		needN := need.Len()
 	NEED:
-		for j, needJ := range need.Elements {
-			if !need.Ordered {
+		for j := 0; j < needN; j++ {
+			if !sc.Ordered {
 				i = 0
 			}
 			var causes []*DeepError
 			for ; i < haveN; i++ {
-				if err := testEqualR(t, reflect.ValueOf(needJ), have.Index(i)); err == nil {
+				if err := testEqualR(t, need.Index(j), have.Index(i), conditions, fmt.Sprintf("%s@%d", path, j)); err == nil {
 					n++
 					continue NEED
-				} else if need.Ordered && need.Size {
+				} else if sc.Ordered && sc.Size {
 					return DeepErrorf("unequal element @%d", i)
 				} else {
 					causes = append(causes, err)
@@ -148,7 +199,7 @@ func (need SliceContains) Test(t *testing.T, have reflect.Value) *DeepError {
 			}
 			return DeepErrorf("missing needed element @%d, empty slice", j)
 		}
-		if need.Size && n != haveN {
+		if sc.Size && n != haveN {
 			return DeepErrorf("missing or extra elements with 'Size' set (need %d, have %d)", n, haveN)
 		}
 		return nil
@@ -156,12 +207,14 @@ func (need SliceContains) Test(t *testing.T, have reflect.Value) *DeepError {
 	return DeepErrorf("not a slice (%T)", have)
 }
 
-func testEqual(t *testing.T, a, b any) *DeepError {
+func testEqual(t *testing.T, a, b any, conditions map[string]Condition, path string) *DeepError {
 	t.Helper()
-	return testEqualR(t, reflect.ValueOf(a), reflect.ValueOf(b))
+	return testEqualR(t, reflect.ValueOf(a), reflect.ValueOf(b), conditions, path)
 }
 
-func testEqualR(t *testing.T, a, b reflect.Value) *DeepError {
+var compiledConditionsCache = map[string]*regexp.Regexp{}
+
+func testEqualR(t *testing.T, a, b reflect.Value, conditions map[string]Condition, path string) *DeepError {
 	t.Helper()
 	if a.Kind() == reflect.Interface {
 		a = a.Elem()
@@ -169,19 +222,33 @@ func testEqualR(t *testing.T, a, b reflect.Value) *DeepError {
 	if b.Kind() == reflect.Interface {
 		b = b.Elem()
 	}
-	conditionType := reflect.TypeOf((*Condition)(nil)).Elem()
 	vt := a.Type()
-	if vt.Implements(conditionType) {
-		cond := a.Interface().(Condition)
-		return cond.Test(t, b)
+	for re, cond := range conditions {
+		var rec *regexp.Regexp
+		if rec = compiledConditionsCache[re]; rec == nil {
+			rec = regexp.MustCompile("^" + re + "$")
+			compiledConditionsCache[re] = rec
+		}
+		if rec.MatchString(path) {
+			if strings.HasPrefix(path, "!") {
+				path = path[1:]
+				goto NORMAL
+			}
+			return cond.Test(t, conditions, path, b, a)
+		}
 	}
+	if conditionType := reflect.TypeOf((*Condition)(nil)).Elem(); vt.Implements(conditionType) {
+		cond := a.Interface().(Condition)
+		return cond.Test(t, conditions, path, b)
+	}
+NORMAL:
 	if vt != b.Type() {
 		return DeepErrorf("different types (%s ≠ %s)", tn(vt), tn(b.Type()))
 	}
 	switch vt.Kind() {
 	case reflect.Pointer:
 		if an, bn := a.IsNil(), b.IsNil(); !an && !bn {
-			if err := testEqualR(t, a.Elem(), b.Elem()); err != nil {
+			if err := testEqualR(t, a.Elem(), b.Elem(), conditions, path+"-"); err != nil {
 				return &DeepError{fmt.Errorf("unequal (*)"), err}
 			}
 		} else if !an || !bn {
@@ -189,7 +256,7 @@ func testEqualR(t *testing.T, a, b reflect.Value) *DeepError {
 		}
 	case reflect.Struct:
 		for i, n := 0, vt.NumField(); i < n; i++ {
-			if unequal := testEqualR(t, a.Field(i), b.Field(i)); unequal != nil {
+			if unequal := testEqualR(t, a.Field(i), b.Field(i), conditions, path+">"+vt.Field(i).Name); unequal != nil {
 				return &DeepError{fmt.Errorf("unequal value for %q", vt.Field(i).Name), unequal}
 			}
 		}
@@ -199,7 +266,7 @@ func testEqualR(t *testing.T, a, b reflect.Value) *DeepError {
 			return DeepErrorf("different lengths (%d ≠ %d)", n, b.Len())
 		}
 		for i := 0; i < n; i++ {
-			if unequal := testEqualR(t, a.Index(i), b.Index(i)); unequal != nil {
+			if unequal := testEqualR(t, a.Index(i), b.Index(i), conditions, fmt.Sprintf("%s@%d", path, i)); unequal != nil {
 				return &DeepError{fmt.Errorf("unequal elements at index %d", i), unequal}
 			}
 		}
@@ -207,7 +274,7 @@ func testEqualR(t *testing.T, a, b reflect.Value) *DeepError {
 		var missing []string
 		for _, k := range a.MapKeys() {
 			if bv := b.MapIndex(k); bv.IsValid() && !bv.IsZero() {
-				if unequal := testEqualR(t, a.MapIndex(k), bv); unequal != nil {
+				if unequal := testEqualR(t, a.MapIndex(k), bv, conditions, fmt.Sprintf("%s:%s", path, k)); unequal != nil {
 					return &DeepError{fmt.Errorf("unequal value for %q", k), unequal}
 				}
 			} else /*if _, ok := v.(Ignore); !ok*/ {
@@ -242,18 +309,7 @@ type exitErr struct {
 	Code int
 }
 
-func handleExitInLogging(t *testing.T) func() {
-	t.Logf("preventing os.Exit in logging")
-	oldExitFunc := logrus.StandardLogger().ExitFunc
-	logrus.StandardLogger().ExitFunc = func(code int) {
-		panic(exitErr{code})
-	}
-	return func() {
-		logrus.StandardLogger().ExitFunc = oldExitFunc
-	}
-}
-
-func recoverPanics(t *testing.T) {
+func recoverPanicsT(t *testing.T) {
 	if r := recover(); r != nil {
 		if e, ok := r.(exitErr); ok {
 			if e.Code != 1 {
@@ -264,5 +320,43 @@ func recoverPanics(t *testing.T) {
 			return
 		}
 		t.Fatalf("unexpected panic: %v", r)
+	}
+}
+
+func waitFor(t *testing.T, desc string, condition func() bool, interval time.Duration, timeout time.Duration) error {
+	t.Helper()
+	t.Logf("waiting for condition %q (interval: %s, timeout: %s)", desc, interval, timeout)
+	checkTime := max(min(timeout/10, 1*time.Second), interval)
+	checkIncr := checkTime
+	since := time.Now()
+	for !condition() {
+		passed := time.Since(since)
+		if timeout > 0 && passed >= timeout {
+			t.Logf("condition %q timed out after %s", desc, timeout)
+			return fmt.Errorf("timed out after %s", timeout)
+		}
+		if timeout > 0 && passed >= checkTime {
+			t.Logf("waiting for condition %q (%s)", desc, checkTime)
+			checkTime += checkIncr
+		}
+		time.Sleep(interval)
+	}
+	duration := time.Since(since)
+	t.Logf("condition %q fulfilled after %s", desc, duration)
+	return nil
+}
+
+func sleepT(t *testing.T, duration time.Duration, interval ...time.Duration) {
+	i := duration
+	if len(interval) > 0 {
+		i = interval[0]
+	}
+	_ = waitFor(t, fmt.Sprintf("sleep %s", duration), func() bool { return false }, i, duration)
+}
+
+func fatalOnErr(t *testing.T, desc string, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("failed to %s: %s", desc, err)
 	}
 }

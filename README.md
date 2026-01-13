@@ -33,7 +33,7 @@ the second development release, considered alpha quality. Any testing is appreci
   * useful for [`PTR` records](doc/ETCD-structure.md#ptr) in reverse zones
 * [Multi-level defaults and options](doc/ETCD-structure.md#defaults-and-options), overridable
 * [Upgrade data structure](doc/ETCD-structure.md#upgrading) (if needed for new program version) without interrupting service
-* Run [standalone](#unix-mode) for usage as a [Unix connector][pdns-unix-conn]
+* Run [standalone](#standalone-modes) for usage as a [Unix or HTTP connector][pdns-remote-usage]
   * This could be needed for big data sets, because the initialization from PowerDNS is done lazily (at least in v4) on first request (which possibly could time out on "big data"…) :-(
 
 [pdns-qtypes]: https://doc.powerdns.com/authoritative/appendices/types.html
@@ -44,7 +44,7 @@ the second development release, considered alpha quality. Any testing is appreci
   * `A` ⇒ `PTR` (`in-addr.arpa`)
   * `AAAA` ⇒ `PTR` (`ip6.arpa`)
   * …
-* Support for defaults and zone appending (and possibly more) in plain-string records (those which are also object-supported)
+* Support for defaults, syntax-checking and zone appending (and possibly more) in plain-string records (those which are also object-supported)
 * "Collect record", automatically combining A and/or AAAA records from "server records"
   * e.g. `etcd.example.com` based on `etcd-1.example.com`, `etcd-2.example.com`, …
 * "Labels" for selectively applying defaults and/or options to record entries
@@ -55,7 +55,7 @@ the second development release, considered alpha quality. Any testing is appreci
 * DNSSEC support ([PowerDNS DNSSEC-specific calls][pdns-dnssec])
 
 [pdns-dnssec]: https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dnssec-support
-[pdns-unix-conn]: https://doc.powerdns.com/authoritative/backends/remote.html#unix-connector
+[pdns-remote-usage]: https://doc.powerdns.com/authoritative/backends/remote.html#usage
 [json5]: https://json5.org/
 [yaml]: http://www.yaml.org/
 
@@ -70,6 +70,7 @@ the second development release, considered alpha quality. Any testing is appreci
   * …
 * [DNS update support](https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dns-update-support)
 * [Prometheus exporter](https://prometheus.io/docs/guides/go-application/)
+* ZeroMQ connector
 
 ## Installation
 
@@ -106,50 +107,87 @@ distributor-threads=1
 `<config>` is one of `config-file=...` or `endpoints=...` (see "Parameters" below for details on the value).
 `config-file` overrides `endpoints`.
 
-### Unix mode
+### Standalone mode(s)
 
-In unix mode the backend must be launched outside PowerDNS (manually, e.g. as a system service). It then creates a unix
-domain socket and listens for connections (from PowerDNS). It takes the ETCD related parameters from the command line
-and connects to it right after starting up. Then it accepts connections on the socket and serves them.
+All other modes are so-called "standalone" modes: the backend must be launched outside of PowerDNS (manually, e.g. as a system service).
+The standalone mode creates a listening socket and waits for connections (from PowerDNS).
+It takes the ETCD related parameters from the command line and connects to it right after starting up.
+Then it accepts connections on the socket and serves them.
+If the standalone mode begins with an 'initialize' call, only the non-ETCD parameters are available to it.
 
-Each connection still begins with an 'initialize' call, but only the non-ETCD parameters are available to it. In this
-mode the data is loaded only once (uses memory only once).
+The data is loaded only once (uses memory only once). The data is loaded before accepting connections from PowerDNS,
+so it is available directly after a PowerDNS instance has connected.
+It is okay to have parallel accesses to the instance, the data access is protected by mutexes (including updates).
+
+A standalone mode is started by passing the `-standalone=<connector-url>` flag to pdns-etcd3.
+The `<connector-url>` must be a valid URL, specific for each mode.
+
+#### Unix
+
+The unix mode uses a UNIX domain socket, thus it can only run on the same system as PowerDNS.
+The `<connector-url>` looks like:
+```text
+unix:///path/to/pdns-etcd3-socket[?relative=<bool>]
+```
+It gives the path to the socket file (which is then used in the PowerDNS configuration, see below).
+`relative` is false by default, so the path is taken as an absolute path.
+When set to true, the leading slash is ignored and the path is taken as a relative path.
+
+The unix mode takes an 'initialize' call, so one can pass parameters to it, which are defined in the PowerDNS configuration.
 
 Example PowerDNS configuration file:
-```
+```text
 launch=remote
 remote-connection-string=unix:path=/path/to/pdns-etcd3-socket[,pdns-version=3|4|5][,log-<level>=<components>]
-# in unix mode it is ok to launch multiple access threads, the data is protected by mutexes for concurrent access (including updates)
 distributor-threads=3
 ```
 
-The backend is started in unix mode by passing the `-unix` argument to the executable (see below for details).
-It accepts further arguments to configure access to ETCD, one can execute `./pdns-etcd3 -help` for usage information.
+#### HTTP
+
+The HTTP mode uses an HTTP listening socket, thus can serve PowerDNS instances from virtually everywhere,
+based on the listening address. The `<connector-url>` looks like:
+```text
+http://<address>:<port>
+```
+One has to give both, `<address>` and `<port>`. To listen on all interfaces, the URL could look like: `http://0.0.0.0:8053`.
+
+The HTTP mode does not take an 'initialize' call.
+
+In the PowerDNS configuration, the parameters `post` and `post_json` must be both set to true.
+Otherwise the requests would be rejected.
+
+Example PowerDNS configuration file:
+```text
+launch=remote
+remote-connection-string=http:url=http://localhost:8053/,post=yes,post_json=yes
+```
+
+Because there is no 'initialize' call, the version of PowerDNS cannot be known (and is not passed in the requests).
+But it is assumed to be 4+ (i.e. not 3), because the HTTP support was not present in PDNSv3.
 
 ### Parameters
 
-All parameter keys must be given exactly as denoted here (no case modifications). The ETCD related parameters in unix mode
+All parameter keys must be given exactly as denoted here (no case modifications). The ETCD related parameters in standalone mode
 are given as command line "options", starting with a `-`: e.g. `-config-file=...`.
 
-The parameters in detail (the ETCD related parameters, which have to be passed as command line argument in unix mode,
-are tagged by *#UNIX*):
+The parameters in detail (the ETCD related parameters, which have to be passed as command line argument in standalone mode,
+are tagged by *#STANDALONE*):
 
-* `config-file=/path/to/etcd.conf` *#UNIX*<br>
+* `config-file=/path/to/etcd.conf` *#STANDALONE*<br>
   The path to an ETCD (client) configuration file, as accepted by the official client
   (see [etcd/client/v3/config.go](https://github.com/etcd-io/etcd/blob/master/client/v3/config.go), TODO find documentation)<br>
   TLS and authentication is only possible when using such a configuration file.<br>
   Overrides `endpoints` parameter. Defaults to not set.
-* `endpoints=<IP:Port>[|<IP:Port>|...]` *#UNIX*<br>
+* `endpoints=<IP:Port>[|<IP:Port>|...]` *#STANDALONE*<br>
   For a simple connection use the endpoints given here. `endpoints` accepts hostnames too (instead of `IP`), but be sure
   they are resolvable before PowerDNS has started.<br>
   Defaults to `[::1]:2379|127.0.0.1:2379`.
-* `prefix=<string>` *#UNIX*<br>
+* `prefix=<string>` *#STANDALONE*<br>
   Every entry in ETCD will be prefixed with that. It is not interpreted or changed in any way, also the data watcher uses it,
   so any other keys under another prefix do not affect DNS data.<br>
-  Currently there seems to be a bug(?) in the ETCD client (not pdns-etcd3), which causes an empty prefix not to work.
-  Just use one. Tip: Let the prefix start and end with `/`, so you can use [etcdkeeper][] for easier web-based data management.<br>
+  Tip: Let the prefix start and end with `/`, so you can use [etcdkeeper][] for easier web-based data management.<br>
   There is no default (= empty).
-* `timeout=<duration>` *#UNIX* or<br>
+* `timeout=<duration>` *#STANDALONE* or<br>
   `timeout=<integer>` *config file* (in milliseconds, e.g. `1500` for 1.5 seconds)<br>
   An optional parameter which sets the dial timeout to ETCD. Must be a positive value (>= 1ms).<br>
   Defaults to 2 seconds.
@@ -157,12 +195,14 @@ are tagged by *#UNIX*):
   The (major) PowerDNS version. Version 3 and 4 have incompatible protocols with the backend, so one must use the proper one.
   Version 5 is accepted, but works currently the same as 4 (no relevant API changes yet).<br>
   Defaults to `4`.
-* `log-<level>=<components>` *#UNIX* and *config file*<br>
+* `log-<level>=<components>` *#STANDALONE* and *config file*<br>
   Sets the logging level of `<components>` to `<level>` (see below for values). `<components>` is one or more of the
   component names, separated by `+`. This parameter can be "repeated" for different logging levels.
   In unix mode, the levels are set separately for the program and the clients (PowerDNS connections).<br>
   Example: `log-debug=main+pdns,log-trace=etcd+data`<br>
   Defaults to `info` for all components.
+
+One can see all available command-line (standalone) parameters with a short description, when running `pdns-etcd3 -help`.
 
 [etcdkeeper]: https://github.com/evildecay/etcdkeeper
 
@@ -183,13 +223,13 @@ There is much logging in the program for being able to test and debug it properl
 It is structured and leveled, utilizing [logrus][]. The structure consists of different components,
 namely `main`, `pdns`, `etcd` and `data`; the (seven) logging levels are [taken from logrus][logrus-levels].
 For each component an own logging level can be set, so that one can debug only the component(s) of interest.
-In the unix mode the components are "doubled", there is the program side with its components (main, etcd, data) and
+In the standalone modes the components are "doubled"; there is the program side with its components (main, etcd, data) and
 the (PDNS) client side (main, pdns), which can be configured separately. In pipe mode there is only one of each component.
 
 The components in detail:
 * `main` - The main thread / loop of the program, e.g. setting up logging, creating data objects, processing signals and events, etc.
 * `pdns` - The communication with PowerDNS, e.g. incoming requests and sending results.
-* `etcd` - The communication with ETCD, e.g. real queries against it, connection issues, watchers, etc.
+* `etcd` - The communication with ETCD, e.g. real queries against it, connection issues, watcher, etc.
 * `data` - Everything concerning the values (records, ...), parsing data from ETCD, searching records for requests etc.
 
 The levels in detail:

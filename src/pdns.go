@@ -15,6 +15,7 @@ limitations under the License. */
 package src
 
 import (
+	"context"
 	"fmt"
 	"io"
 )
@@ -33,20 +34,23 @@ type pdnsClient struct {
 	PdnsVersion uint
 	Comm        *commType[pdnsRequest]
 	log         logType
-	out         io.Closer
+	in          io.ReadCloser
+	out         io.WriteCloser
 }
 
-func newPdnsClient(id uint, in io.Reader, out interface {
-	io.Writer
-	io.Closer
-}) *pdnsClient {
-	return &pdnsClient{
+func newPdnsClient(ctx context.Context, id uint, in io.ReadCloser, out io.WriteCloser) *pdnsClient {
+	client := &pdnsClient{
 		ID:          id,
 		PdnsVersion: defaultPdnsVersion,
-		Comm:        newComm[pdnsRequest](in, out),
-		log:         newLog(fmt.Sprintf("[%d] ", id), "main", "pdns", "data"), // TODO timings
+		Comm:        newComm[pdnsRequest](ctx, in, out),
+		log:         newLog(&id, "main", "pdns", "data"), // TODO timings
+		in:          in,
 		out:         out,
 	}
+	for comp, logger := range client.log {
+		logger.SetLevel(log.logger(comp).GetLevel())
+	}
+	return client
 }
 
 // TODO on fatal errors which are local to a client, don't stop the whole program
@@ -61,5 +65,5 @@ func (client *pdnsClient) Respond(response any) {
 func (client *pdnsClient) Fatal(msg any) {
 	s := fmt.Sprintf("%s", msg)
 	client.Respond(makeResponse(false, s))
-	client.log.main().Fatalf("fatal error: %s", s)
+	client.log.main().Panicf("fatal error: %s", s)
 }

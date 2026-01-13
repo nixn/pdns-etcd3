@@ -521,6 +521,8 @@ func mx(params *rrParams) {
 }
 
 func txt(params *rrParams) {
+	// TODO one TXT records allows for multiple sub-strings!! strings with whitespaces must be quoted by " (and quotes escaped), otherwise they can be unquoted
+	// they have to be of length <= 255, RFC 1035 3.3.par2
 	text, vPath, err := getValue[string]("text", params)
 	if vPath == nil || err != nil {
 		params.log("vp", vPath, "error", err).Error("failed to get value for 'text' (as string)")
