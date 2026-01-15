@@ -58,7 +58,7 @@ func newPdnsClient(ctx context.Context, id uint, in io.ReadCloser, out io.WriteC
 func (client *pdnsClient) Respond(response any) {
 	client.log.pdns("response", response).Tracef("response")
 	if err := client.Comm.write(response); err != nil {
-		client.log.pdns("response", response).Fatalf("failed to encode response: %s", err)
+		client.log.pdns("response", response).Panicf("failed to encode response: %s", err)
 	}
 }
 

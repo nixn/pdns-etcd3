@@ -209,6 +209,7 @@ func recoverFunc(v any, name string, exit bool) bool {
 			return true
 		}
 	case logFatal:
+		log.main().Printf("[BUG] deprecated call of log.Fatal(): %s", val2str(v))
 		suffix := ""
 		if v.clientID != nil {
 			if *v.clientID == 0 {

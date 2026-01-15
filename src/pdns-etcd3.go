@@ -166,7 +166,7 @@ func startReadRequests(wg *sync.WaitGroup, ctx context.Context, client *pdnsClie
 					client.log.pdns().Debug("EOF on input stream, terminating")
 					return
 				}
-				client.log.pdns().Fatalf("failed to decode request: %s", err)
+				client.log.pdns().Panicf("failed to decode request: %s", err)
 			} else {
 				client.log.pdns("request", request).Debug("received new request")
 				ch <- *request
@@ -272,7 +272,7 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 		logging[level] = flag.String(logParamPrefix+level.String(), "", fmt.Sprintf("Set logging level %s to the given components (separated by +)", level))
 	}
 	if err := flag.CommandLine.Parse(cmdLineArgs); err != nil { // same as flag.Parse(), but we can pass the arguments instead of being fixed to os.Args[1:] (needed for integration testing)
-		log.main().Fatalf("failed to parse command line arguments: %s", err)
+		log.main().Panicf("failed to parse command line arguments: %s", err)
 	}
 	for level, components := range logging {
 		if len(*components) > 0 {
