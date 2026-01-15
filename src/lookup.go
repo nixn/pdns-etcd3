@@ -43,10 +43,6 @@ var (
 		defaultsKey: defaultsEntry,
 		optionsKey:  optionsEntry,
 	}
-	entryType2key = map[entryType]string{
-		defaultsEntry: defaultsKey,
-		optionsEntry:  optionsKey,
-	}
 )
 
 func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {

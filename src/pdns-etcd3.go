@@ -50,9 +50,13 @@ var (
 )
 
 var (
+	// these vars may be used in integration tests, so don't bail if not used
 	serving   = false
+	_         = serving
 	connected = false
+	_         = connected
 	populated = false
+	_         = populated
 )
 
 func parseBoolean(s string) (bool, error) {
@@ -78,6 +82,8 @@ func setBooleanParameterFunc(param *bool) setParameterFunc {
 		return nil
 	}
 }
+
+var _ = setBooleanParameterFunc // ZZZ will use later perhaps
 
 func setPdnsVersionParameter(param *uint) setParameterFunc {
 	return func(value string) error {
