@@ -52,11 +52,8 @@ var (
 var (
 	// these vars may be used in integration tests, so don't bail if not used
 	serving   = false
-	_         = serving
 	connected = false
-	_         = connected
 	populated = false
-	_         = populated
 )
 
 func parseBoolean(s string) (bool, error) {
@@ -66,6 +63,7 @@ func parseBoolean(s string) (bool, error) {
 	case "n", "no", "0", "f", "false", "off":
 		return false, nil
 	default:
+		// nolint:misspell
 		return false, fmt.Errorf("not a boolean string (y[es]/n[o], 1/0, t[rue]/f[alse], on/off)")
 	}
 }
@@ -82,8 +80,6 @@ func setBooleanParameterFunc(param *bool) setParameterFunc {
 		return nil
 	}
 }
-
-var _ = setBooleanParameterFunc // ZZZ will use later perhaps
 
 func setPdnsVersionParameter(param *uint) setParameterFunc {
 	return func(value string) error {
@@ -154,7 +150,7 @@ func readParameters(params objectType[string], client *pdnsClient) error {
 	return nil
 }
 
-func startReadRequests(wg *sync.WaitGroup, ctx context.Context, client *pdnsClient) <-chan pdnsRequest {
+func startReadRequests(ctx context.Context, wg *sync.WaitGroup, client *pdnsClient) <-chan pdnsRequest {
 	ch := make(chan pdnsRequest)
 	wgGo(wg, func() {
 		defer recoverPanics(func(v any) bool {
@@ -311,12 +307,12 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 			log.main("messages", messages).Debug("setupClient messages")
 		}
 		defer closeClient()
-		if err = populateData(wg, ctx); err != nil {
+		if err = populateData(ctx, wg); err != nil {
 			log.main().Panicf("populateData() failed: %s", err)
 		}
-		standalone(wg, ctx, u)
+		standalone(ctx, wg, u)
 	} else {
-		pipe(wg, ctx, os.Stdin, os.Stdout)
+		pipe(ctx, wg, os.Stdin, os.Stdout)
 	}
 	log.main().Debug("{main} request handler returned normally, stopping work")
 	cancel()
@@ -336,7 +332,7 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 	}
 }
 
-func populateData(wg *sync.WaitGroup, ctx context.Context) error {
+func populateData(ctx context.Context, wg *sync.WaitGroup) error {
 	log.main().Debug("populating data")
 	getResponse, err := get(*args.Prefix, true, nil)
 	if err != nil {
@@ -363,25 +359,25 @@ func populateData(wg *sync.WaitGroup, ctx context.Context) error {
 	return nil
 }
 
-func pipe(wg *sync.WaitGroup, ctx context.Context, in io.ReadCloser, out io.WriteCloser) {
+func pipe(ctx context.Context, wg *sync.WaitGroup, in io.ReadCloser, out io.WriteCloser) {
 	initialized := func(client *pdnsClient) []string {
 		clientMessages, err := setupClient()
 		if err != nil {
 			client.Fatal(fmt.Errorf("setupClient() failed: %s", err))
 		}
 		log.etcd().Debugf("connected")
-		if err := populateData(wg, ctx); err != nil {
+		if err := populateData(ctx, wg); err != nil {
 			client.Fatal(fmt.Errorf("populateData() failed: %s", err))
 		}
 		return clientMessages
 	}
 	defer closeClient()
-	serve(wg, ctx, newPdnsClient(ctx, 0, in, out), &initialized)
+	serve(ctx, wg, newPdnsClient(ctx, 0, in, out), &initialized)
 }
 
-func serve(wg *sync.WaitGroup, ctx context.Context, client *pdnsClient, initialized *func(*pdnsClient) []string) {
+func serve(ctx context.Context, wg *sync.WaitGroup, client *pdnsClient, initialized *func(*pdnsClient) []string) {
 	defer closeNoError(client.out)
-	reqChan := startReadRequests(wg, ctx, client)
+	reqChan := startReadRequests(ctx, wg, client)
 	if initialized != nil {
 		// first request must be 'initialize'
 		client.log.pdns().Trace("waiting for initial message")

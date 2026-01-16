@@ -223,14 +223,14 @@ func soa(params *rrParams) {
 	mail = strings.TrimSpace(mail)
 	atIndex := strings.Index(mail, "@")
 	if atIndex < 0 {
-		mail = strings.Replace(mail, ".", "\\.", -1)
+		mail = strings.ReplaceAll(mail, ".", "\\.")
 	} else {
 		localpart := mail[0:atIndex]
 		domain := ""
 		if atIndex+1 < len(mail) {
 			domain = mail[atIndex+1:]
 		}
-		localpart = strings.Replace(localpart, ".", "\\.", -1)
+		localpart = strings.ReplaceAll(localpart, ".", "\\.")
 		mail = localpart + "." + domain
 	}
 	mail, err = fqdn(mail, params)
@@ -321,11 +321,12 @@ func parseOctets(value any, ipVer int, asPrefix bool) ([]byte, error) {
 		if doubleColonIndex >= 0 || strings.Contains(value, ":") {
 			ip := net.ParseIP(value)
 			if ip != nil {
-				if ipVer == 4 {
+				switch ipVer {
+				case 4:
 					ip = ip.To4()
-				} else if ipVer == 6 {
+				case 6:
 					ip = ip.To16()
-				} else {
+				default:
 					ip = nil
 				}
 			}

@@ -3,8 +3,7 @@ GIT_VERSION := $(shell git describe --always --dirty)
 
 RM ?= rm -f
 
-GOLINT := $(shell command -v golint 2>/dev/null)
-STATICCHECK := $(shell command -v staticcheck 2>/dev/null)
+GOCILINT := $(shell command -v golangci-lint 2>/dev/null)
 
 VERBOSE ?= 0
 ifeq ($(VERBOSE),1)
@@ -15,9 +14,9 @@ ifneq ($(ONLY),)
 TEST_EXTRA_ARGS += -run $(ONLY)
 endif
 
-.PHONY: all fmt vet lint stan clean unit-tests unit-tests+coverage integration-tests integration-tests+coverage tests tests+coverage
+.PHONY: all fmt vet gocilint clean unit-tests unit-tests+coverage integration-tests integration-tests+coverage tests tests+coverage
 
-all: $(OUT) vet lint stan unit-tests integration-tests
+all: $(OUT) vet gocilint unit-tests integration-tests
 
 $(OUT): pdns-etcd3.go $(wildcard src/*.go)
 	@$(MAKE) --no-print-directory fmt
@@ -29,18 +28,11 @@ fmt:
 vet:
 	-go vet
 
-lint:
-ifeq ($(GOLINT),)
-	@echo "(golint not found)"
+gocilint:
+ifeq ($(GOCILINT),)
+	@echo "(golangci-lint not found)"
 else
-	-golint ./...
-endif
-
-stan:
-ifeq ($(STATICCHECK),)
-	@echo "(staticcheck not found)"
-else
-	-staticcheck -tags unit,integration ./...
+	-$(GOCILINT) run
 endif
 
 clean:

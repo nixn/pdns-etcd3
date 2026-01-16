@@ -73,7 +73,7 @@ func TestRequests(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	wg := new(sync.WaitGroup)
-	go pipe(wg, ctx, inR, outW)
+	go pipe(ctx, wg, inR, outW)
 	pe3 := newComm[any](ctx, outR, inW)
 	action := func(request pdnsRequest) (any, error) {
 		t.Logf("request: %s", val2str(request))
@@ -565,7 +565,7 @@ func TestWithPDNS(t *testing.T) {
 	} {
 		query := new(dns.Msg)
 		query.Id = uint16(i + 1)
-		q.answer.MsgHdr.Id = query.Id
+		q.answer.MsgHdr.Id = query.Id // nolint:staticcheck
 		query.Question = make([]dns.Question, 1)
 		query.Question[0] = dns.Question{Name: q.name, Qtype: q.qtype, Qclass: dns.ClassINET}
 		q.answer.Question = query.Question

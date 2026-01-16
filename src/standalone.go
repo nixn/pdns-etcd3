@@ -28,7 +28,7 @@ import (
 	"time"
 )
 
-type standaloneFunc func(*sync.WaitGroup, context.Context, *url.URL)
+type standaloneFunc func(context.Context, *sync.WaitGroup, *url.URL)
 
 var (
 	standalones = map[string]standaloneFunc{
@@ -37,7 +37,7 @@ var (
 	}
 )
 
-func unixListener(wg *sync.WaitGroup, ctx context.Context, u *url.URL) {
+func unixListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
 	if u.Path == "" {
 		log.main().Panicf("{unix} the socket path cannot be empty")
 	}
@@ -85,7 +85,7 @@ func unixListener(wg *sync.WaitGroup, ctx context.Context, u *url.URL) {
 				recoverFunc(v, fmt.Sprintf("{unix} serve[%d]", nextClientID), false)
 				return false
 			})
-			serve(wg, ctx, newPdnsClient(ctx, nextClientID, conn, conn), &initialzed)
+			serve(ctx, wg, newPdnsClient(ctx, nextClientID, conn, conn), &initialzed)
 			log.main().Tracef("{unix} serve[%d] returned normally", nextClientID)
 		})
 		nextClientID++
@@ -100,7 +100,7 @@ func (w *httpWriter) Close() error {
 	return nil
 }
 
-func httpListener(wg *sync.WaitGroup, ctx context.Context, u *url.URL) {
+func httpListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
 	if u.Hostname() == "" {
 		log.main().Panic("{http} <listen-address> may not be empty")
 	}
@@ -146,7 +146,7 @@ func httpListener(wg *sync.WaitGroup, ctx context.Context, u *url.URL) {
 		w.WriteHeader(http.StatusOK)
 		ww := &httpWriter{w}
 		client := newPdnsClient(ctx, 0, r.Body, ww)
-		serve(wg, ctx, client, nil)
+		serve(ctx, wg, client, nil)
 	})
 	server := &http.Server{
 		Handler:           handler,
