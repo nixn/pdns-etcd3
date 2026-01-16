@@ -156,13 +156,13 @@ func readParameters(params objectType[string], client *pdnsClient) error {
 
 func startReadRequests(wg *sync.WaitGroup, ctx context.Context, client *pdnsClient) <-chan pdnsRequest {
 	ch := make(chan pdnsRequest)
-	wg.Go(func() {
+	wgGo(wg, func() {
 		defer recoverPanics(func(v any) bool {
 			recoverFunc(v, "readRequests()", false)
 			return false
 		})
 		defer close(ch)
-		wg.Go(func() {
+		wgGo(wg, func() {
 			<-ctx.Done()
 			closeNoError(client.in)
 		})
@@ -352,7 +352,7 @@ func populateData(wg *sync.WaitGroup, ctx context.Context) error {
 	}()
 	populated = true
 	log.main().Debug("starting data watcher")
-	wg.Go(func() {
+	wgGo(wg, func() {
 		defer recoverPanics(func(v any) bool {
 			recoverFunc(v, "watchData()", false)
 			return false

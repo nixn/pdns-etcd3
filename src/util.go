@@ -22,6 +22,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -184,6 +185,14 @@ func maxOf[T cmp.Ordered](first T, more ...T) T {
 		}
 	}
 	return result
+}
+
+func wgGo(wg *sync.WaitGroup, f func()) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		f()
+	}()
 }
 
 func recoverPanics(f func(any) bool) {

@@ -55,7 +55,7 @@ func unixListener(wg *sync.WaitGroup, ctx context.Context, u *url.URL) {
 		log.main().Panicf("{unix} failed to create a socket at %s: %s", path, err)
 	}
 	defer closeNoError(socket)
-	wg.Go(func() {
+	wgGo(wg, func() {
 		<-ctx.Done()
 		closeNoError(socket)
 	})
@@ -80,7 +80,7 @@ func unixListener(wg *sync.WaitGroup, ctx context.Context, u *url.URL) {
 			continue
 		}
 		log.main().Debugf("{unix} new connection [%d]: %+v", nextClientID, conn)
-		wg.Go(func() {
+		wgGo(wg, func() {
 			defer recoverPanics(func(v any) bool {
 				recoverFunc(v, fmt.Sprintf("{unix} serve[%d]", nextClientID), false)
 				return false
@@ -153,7 +153,7 @@ func httpListener(wg *sync.WaitGroup, ctx context.Context, u *url.URL) {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       10 * time.Second,
 	}
-	wg.Go(func() {
+	wgGo(wg, func() {
 		<-ctx.Done()
 		log.main().Debug("{http} shutting down")
 		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 7*time.Second)
