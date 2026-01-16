@@ -2,7 +2,7 @@ name: Quality Assurance
 on:
   push:
     branches:
-      - main
+      - master
     paths:
       - '.github/workflows/quality-assurance.yml'
       - 'src/**'
@@ -11,7 +11,7 @@ on:
       - 'go.sum'
   pull_request:
     branches:
-      - main
+      - master
 
 permissions:
   contents: read
