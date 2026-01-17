@@ -48,14 +48,6 @@ jobs:
   integration-tests:
     name: Integration tests
     runs-on: ubuntu-latest
-    services:
-      dind:
-        image: docker:dind
-        options: --privileged
-        ports:
-          - '23750:2375'
-    env:
-      DOCKER_HOST: tcp://127.0.0.1:23750
     steps:
       - name: Checkout
         uses: actions/checkout@v6
