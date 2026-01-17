@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/go-connections/nat"
 	"github.com/miekg/dns"
 	"github.com/testcontainers/testcontainers-go"
@@ -358,8 +359,11 @@ func getGitVersion(t *testing.T) string {
 func startPDNS(t *testing.T) (*ctInfo, error) {
 	t.Helper()
 	return startContainer(t, testcontainers.ContainerRequest{
-		Image:          "powerdns/pdns-auth-49",
-		NetworkMode:    "host",
+		Image: "powerdns/pdns-auth-49",
+		HostConfigModifier: func(hc *container.HostConfig) {
+			hc.ExtraHosts = []string{"host.docker.internal:host-gateway"}
+		},
+		ExposedPorts:   []string{"5353/tcp"},
 		LogConsumerCfg: &testcontainers.LogConsumerConfig{Consumers: []testcontainers.LogConsumer{CtLogger{t, "PDNS49"}}},
 		Files:          []testcontainers.ContainerFile{{HostFilePath: "../testdata/pdns.conf", ContainerFilePath: "/etc/powerdns/pdns.conf", FileMode: 0o555}},
 		WaitingFor:     wait.ForLog("ready to distribute questions"),
