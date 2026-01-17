@@ -45,9 +45,14 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
       - run: go test -tags unit -v ./src
-  integration-tests:
-    name: Integration tests
+  integration-tests-requests:
+    name: Integration tests (Requests on ETCD ${{ matrix.etcd-version }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        etcd-version: ['3.2.32', '3.3.27', '3.4.40', '3.5.26', '3.6.7']
+    env:
+      ETCD_VERSION: ${{ matrix.etcd-version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -55,4 +60,20 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: stable
-      - run: go test -tags integration -count=1 -v ./src
+      - run: go test -tags integration -count=1 -v -run Requests ./src
+  integration-tests-pdns:
+    name: Integration tests (PDNS ${{ matrix.pdns-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        pdns-version: ['44', '45', '46', '47', '48', '49', '50', '51']
+    env:
+      PDNS_VERSION: ${{ matrix.pdns-version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - run: go test -tags integration -count=1 -v -run PDNS ./src

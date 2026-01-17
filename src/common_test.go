@@ -16,6 +16,7 @@ package src
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"regexp"
 	"strings"
@@ -359,4 +360,12 @@ func fatalOnErr(t *testing.T, desc string, err error) {
 	if err != nil {
 		t.Fatalf("failed to %s: %s", desc, err)
 	}
+}
+
+func getenvT(key, def string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	return v
 }

@@ -291,8 +291,11 @@ func startContainer(t *testing.T, cr testcontainers.ContainerRequest, endpoint n
 
 func startETCD(t *testing.T) (*ctInfo, error) {
 	t.Helper()
+	image := fmt.Sprintf("quay.io/coreos/etcd:v%s", getenvT("ETCD_VERSION", "3.6.7"))
+	t.Logf("Using ETCD image %s", image)
 	return startContainer(t, testcontainers.ContainerRequest{
-		Image:          "quay.io/coreos/etcd:v3.5.26",
+		Image:          image,
+		Hostname:       "etcd",
 		ExposedPorts:   []string{"2379"},
 		LogConsumerCfg: &testcontainers.LogConsumerConfig{Consumers: []testcontainers.LogConsumer{CtLogger{t, "ETCD"}}},
 		Cmd: []string{
@@ -304,7 +307,6 @@ func startETCD(t *testing.T) (*ctInfo, error) {
 			"--advertise-client-urls=http://etcd:2379",
 			"--listen-client-urls=http://0.0.0.0:2379",
 			"--initial-cluster=etcd=http://etcd:2380",
-			"--auto-compaction-retention=1h",
 		},
 		WaitingFor: wait.ForLog("ready to serve client requests"),
 	}, "2379")
@@ -358,8 +360,10 @@ func getGitVersion(t *testing.T) string {
 
 func startPDNS(t *testing.T) (*ctInfo, error) {
 	t.Helper()
+	image := fmt.Sprintf("powerdns/pdns-auth-%s", getenvT("PDNS_VERSION", "49"))
+	t.Logf("Using PDNS image %s", image)
 	return startContainer(t, testcontainers.ContainerRequest{
-		Image: "powerdns/pdns-auth-49",
+		Image: image,
 		HostConfigModifier: func(hc *container.HostConfig) {
 			hc.ExtraHosts = []string{"host.docker.internal:host-gateway"}
 		},
@@ -462,7 +466,7 @@ func TestWithPDNS(t *testing.T) {
 	}
 	conditions := map[string]Condition{
 		`->MsgHdr>Response`:              CompareWith[bool]{true},
-		`->MsgHdr>Authoritative`:         OtherDefault[bool]{Value: true},
+		`->MsgHdr>Authoritative`:         CompareWith[bool]{Value: true}, // OtherDefault does not work here, because the zero value is a valid response value
 		`->Answer`:                       SliceContains{Size: true},
 		`->(Answer|Ns)@\d->Hdr>Class`:    OtherDefault[uint16]{Value: dns.ClassINET},
 		`->Answer@\d->Hdr>Name`:          WhenDefault[string]{},
