@@ -49,11 +49,13 @@ jobs:
     name: Integration tests
     runs-on: ubuntu-latest
     services:
-      docker:
+      dind:
         image: docker:dind
         options: --privileged
         ports:
           - '2375:2375'
+    env:
+      DOCKER_HOST: tcp://dind:2375
     steps:
       - name: Checkout
         uses: actions/checkout@v6
