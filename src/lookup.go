@@ -69,7 +69,7 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 	for qtype, records := range records {
 		for _, record := range records {
 			item := makeResultItem(qname, qtype, data, &record, client)
-			client.log.pdns("item", item).Trace("adding result item")
+			client.log.pdns(item).Trace("adding result item")
 			result = append(result, item)
 		}
 	}

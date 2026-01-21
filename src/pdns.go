@@ -56,7 +56,7 @@ func newPdnsClient(ctx context.Context, id uint, in io.ReadCloser, out io.WriteC
 // TODO on fatal errors which are local to a client, don't stop the whole program
 
 func (client *pdnsClient) Respond(response any) {
-	client.log.pdns("response", response).Tracef("response")
+	client.log.pdns(response).Tracef("response")
 	if err := client.Comm.write(response); err != nil {
 		client.log.pdns("response", response).Panicf("failed to encode response: %s", err)
 	}

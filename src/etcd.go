@@ -128,12 +128,12 @@ WATCH:
 			break WATCH
 		default:
 		}
-		log.etcd("rev", currentRevision).Tracef("creating watch")
+		log.etcd("currRev", currentRevision).Tracef("creating watch")
 		watchCtx := clientv3.WithRequireLeader(ctx)
 		watchChan := watcher.Watch(watchCtx, *args.Prefix, clientv3.WithPrefix(), clientv3.WithRev(currentRevision+1))
 	EVENTS:
 		for {
-			log.etcd().Trace("waiting for next event")
+			log.etcd("currRev", currentRevision).Trace("waiting for next event")
 			watchResponse, ok := <-watchChan
 			if !ok {
 				log.etcd().Trace("watch channel closed")
@@ -150,7 +150,7 @@ WATCH:
 				n := len(watchResponse.Events)
 				log.etcd("compact-rev", watchResponse.CompactRevision, "#events", n, "rev", watchResponse.Header.Revision).Debug("watch event")
 				if n == 0 {
-					log.etcd("rev", currentRevision).Tracef("stopping watch")
+					log.etcd("currRev", currentRevision).Tracef("stopping watch")
 					break WATCH
 				}
 				for _, ev := range watchResponse.Events {

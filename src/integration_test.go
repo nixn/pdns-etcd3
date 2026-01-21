@@ -360,7 +360,7 @@ func getGitVersion(t *testing.T) string {
 
 func startPDNS(t *testing.T) (*ctInfo, error) {
 	t.Helper()
-	image := fmt.Sprintf("powerdns/pdns-auth-%s", getenvT("PDNS_VERSION", "49"))
+	image := fmt.Sprintf("powerdns/pdns-auth-%s", getenvT("PDNS_VERSION", "51"))
 	t.Logf("Using PDNS image %s", image)
 	return startContainer(t, testcontainers.ContainerRequest{
 		Image: image,
@@ -368,7 +368,7 @@ func startPDNS(t *testing.T) (*ctInfo, error) {
 			hc.ExtraHosts = []string{"host.docker.internal:host-gateway"}
 		},
 		ExposedPorts:   []string{"5353/tcp"},
-		LogConsumerCfg: &testcontainers.LogConsumerConfig{Consumers: []testcontainers.LogConsumer{CtLogger{t, "PDNS49"}}},
+		LogConsumerCfg: &testcontainers.LogConsumerConfig{Consumers: []testcontainers.LogConsumer{CtLogger{t, "PDNS"}}},
 		Files:          []testcontainers.ContainerFile{{HostFilePath: "../testdata/pdns.conf", ContainerFilePath: "/etc/powerdns/pdns.conf", FileMode: 0o555}},
 		WaitingFor:     wait.ForLog("ready to distribute questions"),
 	}, "5353/tcp")

@@ -165,12 +165,12 @@ func startReadRequests(ctx context.Context, wg *sync.WaitGroup, client *pdnsClie
 		for {
 			if request, err := client.Comm.read(); err != nil {
 				if err == io.EOF {
-					client.log.pdns().Debug("EOF on input stream, terminating")
+					client.log.pdns().Trace("EOF on input stream, terminating")
 					return
 				}
 				client.log.pdns().Panicf("failed to decode request: %s", err)
 			} else {
-				client.log.pdns("request", request).Debug("received new request")
+				client.log.pdns(request).Debug("received new request")
 				ch <- *request
 			}
 		}
@@ -179,7 +179,7 @@ func startReadRequests(ctx context.Context, wg *sync.WaitGroup, client *pdnsClie
 }
 
 func handleRequest(request *pdnsRequest, client *pdnsClient) {
-	client.log.main("request", request).Debug("handling request")
+	client.log.main(request).Debug("handling request")
 	since := time.Now()
 	var result interface{}
 	var err error
@@ -204,7 +204,7 @@ func handleRequest(request *pdnsRequest, client *pdnsClient) {
 
 func handleEvent(event *clientv3.Event) {
 	entryKey := string(event.Kv.Key)
-	log.etcd("event", event).Debugf("handling event on %q", entryKey)
+	log.etcd(event).Debugf("handling event on %q", entryKey)
 	since := time.Now()
 	name, entryType, qtype, id, version, err := parseEntryKey(entryKey)
 	// check version first, because a new version could change the key syntax (but not prefix and version suffix)
@@ -229,7 +229,7 @@ func handleEvent(event *clientv3.Event) {
 	getResponse, err := get(*args.Prefix+zoneData.prefixKey(), true, &event.Kv.ModRevision)
 	if err != nil {
 		zoneData.rUnlockUpwards(nil)
-		log.data().WithError(err).Warnf("failed to get data for zone %q, not updating", zoneData.getQname())
+		log.data().Warnf("failed to get data for zone %q: %s (not updating)", zoneData.getQname(), err)
 		return
 	}
 	qname := zoneData.getQname()
@@ -295,7 +295,7 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 	if standalone {
 		u, err := url.Parse(*standaloneArg)
 		if err != nil {
-			log.main(err).Panic("failed to parse standalone URL")
+			log.main().Panicf("failed to parse standalone URL: %s", err)
 		}
 		standalone, ok := standalones[u.Scheme]
 		if !ok {
@@ -304,7 +304,7 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 		if messages, err := setupClient(); err != nil {
 			log.main().Panicf("setupClient() failed: %s", err)
 		} else {
-			log.main("messages", messages).Debug("setupClient messages")
+			log.main(messages).Debug("setupClient messages")
 		}
 		defer closeClient()
 		if err = populateData(ctx, wg); err != nil {
@@ -344,7 +344,7 @@ func populateData(ctx context.Context, wg *sync.WaitGroup) error {
 		dataRoot.mutex.Lock()
 		defer dataRoot.mutex.Unlock()
 		dataRoot.reload(getResponse.DataChan)
-		log.main().Debugf("loaded data: #records=%d #zones=%d revision=%v", dataRoot.recordsCount(), dataRoot.zonesCount(), getResponse.Revision)
+		log.main("#records", dataRoot.recordsCount(), "#zones", dataRoot.zonesCount(), "revision", getResponse.Revision).Debug("loaded data")
 	}()
 	populated = true
 	log.main().Debug("starting data watcher")
