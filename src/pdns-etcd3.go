@@ -269,6 +269,7 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 		DialTimeout: flag.Duration(dialTimeoutParam, defaultDialTimeout, "ETCD dial timeout"),
 		Prefix:      flag.String(prefixParam, "", "Global key prefix"),
 	}
+	pdnsVersionArg := flag.String(pdnsVersionParam, "", "default PDNS version")
 	logging := map[logrus.Level]*string{}
 	for _, level := range logrus.AllLevels {
 		logging[level] = flag.String(logParamPrefix+level.String(), "", fmt.Sprintf("Set logging level %s to the given components (separated by +)", level))
@@ -279,6 +280,12 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 	for level, components := range logging {
 		if len(*components) > 0 {
 			log.setLoggingLevel(*components, level)
+		}
+	}
+	if *pdnsVersionArg != "" {
+		log.main().Debugf("setting default PDNS version to %s", *pdnsVersionArg)
+		if err := setPdnsVersionParameter(&defaultPdnsVersion)(*pdnsVersionArg); err != nil {
+			log.main("arg", *pdnsVersionArg).Panicf("failed to set default PDNS version: %s", err)
 		}
 	}
 	signal.Notify(osSignals, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)

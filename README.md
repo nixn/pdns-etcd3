@@ -162,8 +162,8 @@ launch=remote
 remote-connection-string=http:url=http://localhost:8053/,post=yes,post_json=yes
 ```
 
-Because there is no 'initialize' call, the version of PowerDNS cannot be known (and is not passed in the requests).
-But it is assumed to be 4+ (i.e. not 3), because the HTTP support was not present in PDNSv3.
+Because there is no 'initialize' call, the version of a connecting PowerDNS cannot be known (and is not passed in the requests).
+Thus, when one has to change the assumed version, they can use the `-pdns-version` option (see below).
 
 ### Parameters
 

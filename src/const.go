@@ -20,8 +20,11 @@ import (
 	"time"
 )
 
+var (
+	defaultPdnsVersion = uint(4)
+)
+
 const (
-	defaultPdnsVersion  = 4
 	defaultEndpointIPv4 = "127.0.0.1:2379"
 	defaultEndpointIPv6 = "[::1]:2379"
 	defaultDialTimeout  = 2 * time.Second
