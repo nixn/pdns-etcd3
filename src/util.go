@@ -48,6 +48,13 @@ func clearMap[K comparable, V any](m map[K]V) {
 	}
 }
 
+func Keys[K comparable, V any](m map[K]V) (ks []K) {
+	for k := range m {
+		ks = append(ks, k)
+	}
+	return
+}
+
 func splitDomainName(name string, separator string) []string {
 	name = strings.TrimSuffix(name, separator)
 	if name == "" {

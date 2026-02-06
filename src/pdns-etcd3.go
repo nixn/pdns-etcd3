@@ -204,47 +204,71 @@ func handleRequest(request *pdnsRequest, client *pdnsClient) {
 	client.log.main("dur", dur, "err", err, "val", result).Trace("result")
 }
 
-func handleEvent(event *clientv3.Event) {
-	entryKey := string(event.Kv.Key)
-	log.etcd(event).Debugf("handling event on %q", entryKey)
+func handleEvents(revision int64, events []*clientv3.Event) {
+	log.etcd("rev", revision).Debugf("handling events (%d)", len(events))
 	since := time.Now()
-	name, entryType, qtype, id, version, err := parseEntryKey(entryKey)
-	// check version first, because a new version could change the key syntax (but not prefix and version suffix)
-	if version != nil && !dataVersion.IsCompatibleTo(*version, false) {
-		log.data().Tracef("ignoring event on version-incompatible entry %q", entryKey)
-		return
+	reloadZones := map[string]*dataNode{}
+EVENTS:
+	for i, event := range events {
+		entryKey := string(event.Kv.Key)
+		log.etcd(event).Tracef("handling event %d: %s %q", i+1, event.Type, entryKey)
+		name, entryType, qtype, id, version, err := parseEntryKey(entryKey)
+		// check version first, because a new version could change the key syntax (but not prefix and version suffix)
+		if version != nil && !dataVersion.IsCompatibleTo(*version, false) {
+			log.data().Tracef("ignoring event on version-incompatible entry %q", entryKey)
+			continue
+		}
+		if err != nil {
+			log.data(err.Error()).Errorf("failed to parse entry key %q, ignoring event", entryKey)
+			continue
+		}
+		itemData, _ := dataRoot.getChild(name, true)
+		zoneData := itemData.findZone()
+		if event.Type == clientv3.EventTypeDelete && qtype == "SOA" && id == "" && entryType == normalEntry && zoneData != nil && zoneData.parent != nil {
+			// deleting the SOA record deletes the zone, so the parent zone must be reloaded instead. this results in a full data reload for top-level zones.
+			zoneData = zoneData.parent.findZone()
+		}
+		if zoneData == nil {
+			zoneData = dataRoot
+		}
+		itemData.rUnlockUpwards(zoneData)
+		qname := zoneData.getQname()
+		for _, dn := range reloadZones {
+			if zoneData.subdomainDepth(dn) >= 0 {
+				zoneData.rUnlockUpwards(nil)
+				log.data("event", qname, "scheduled", dn.getQname()).Trace("zone already scheduled for reload (possibly ancestor)")
+				continue EVENTS
+			}
+		}
+		log.data(qname).Debug("scheduling zone for reload")
+		reloadZones[qname] = zoneData
 	}
-	if err != nil {
-		log.data().Errorf("failed to parse entry key %q (ignoring event): %s", entryKey, err)
-		return
+	log.data(Keys(reloadZones)).Debug("reloading zones")
+	for _, dn := range reloadZones {
+		qname := dn.getQname()
+		log.data().Tracef("reloading zone %q", qname)
+		since := time.Now()
+		getResponse, err := get(*args.Prefix+dn.prefixKey(), true, &revision)
+		if err != nil {
+			dn.rUnlockUpwards(nil)
+			log.data().Warnf("failed to get data for zone %q (not reloading): %s", qname, err)
+			continue
+		}
+		log.data().Debugf("reloading zone %q", qname)
+		func() {
+			dn.mutex.RUnlock()
+			if dn.parent != nil {
+				defer dn.parent.rUnlockUpwards(nil)
+			}
+			dn.mutex.Lock()
+			defer dn.mutex.Unlock()
+			dn.reload(getResponse.DataChan)
+		}()
+		dur := time.Since(since)
+		log.data("#records", dn.recordsCount(), "#zones", dn.zonesCount(), "duration", dur).Debugf("reloaded zone %q", qname)
 	}
-	itemData := dataRoot.getChild(name, true)
-	zoneData := itemData.findZone()
-	if event.Type == clientv3.EventTypeDelete && qtype == "SOA" && id == "" && entryType == normalEntry && zoneData != nil && zoneData.parent != nil {
-		// deleting the SOA record deletes the zone, so the parent zone must be reloaded instead. this results in a full data reload for top-level zones.
-		zoneData = zoneData.parent.findZone()
-	}
-	if zoneData == nil {
-		zoneData = dataRoot
-	}
-	itemData.rUnlockUpwards(zoneData)
-	getResponse, err := get(*args.Prefix+zoneData.prefixKey(), true, &event.Kv.ModRevision)
-	if err != nil {
-		zoneData.rUnlockUpwards(nil)
-		log.data().Warnf("failed to get data for zone %q: %s (not updating)", zoneData.getQname(), err)
-		return
-	}
-	qname := zoneData.getQname()
-	log.data().Debugf("reloading zone %q", qname)
-	zoneData.mutex.RUnlock()
-	if zoneData.parent != nil {
-		defer zoneData.parent.rUnlockUpwards(nil)
-	}
-	zoneData.mutex.Lock()
-	defer zoneData.mutex.Unlock()
-	zoneData.reload(getResponse.DataChan)
 	dur := time.Since(since)
-	log.data("#records", zoneData.recordsCount(), "#zones", zoneData.zonesCount(), "data-revision", maxOf(event.Kv.ModRevision, event.Kv.CreateRevision), "event-duration", dur).Debugf("reloaded zone %q", qname)
+	log.data("duration", dur).Debug("reloaded zones")
 }
 
 // Main is the "moved" program entrypoint, but with git version argument (which is set in real main package)

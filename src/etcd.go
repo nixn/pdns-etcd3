@@ -153,9 +153,7 @@ WATCH:
 					log.etcd("currRev", currentRevision).Tracef("stopping watch")
 					break WATCH
 				}
-				for _, ev := range watchResponse.Events {
-					handleEvent(ev) // TODO handle all events in a run and reload data afterwards
-				}
+				handleEvents(watchResponse.Header.Revision, watchResponse.Events)
 				currentRevision = watchResponse.Header.Revision
 			}
 		}
