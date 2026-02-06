@@ -52,9 +52,9 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 		name:  nameType(Map(qname, func(qnamePart namePart, _ int) namePart { return namePart{strings.ToLower(qnamePart.name), "."} })),
 		qtype: params["qtype"].(string),
 	}
-	data := dataRoot.getChild(query.name, true)
+	data, found := dataRoot.getChild(query.name, true)
 	defer data.rUnlockUpwards(nil)
-	if data.depth() < query.name.len() {
+	if !found {
 		client.log.data().Tracef("search for %q returned %q", query.name.normal(), data.getQname())
 		client.log.data().Debugf("no such domain: %q", query.name.normal())
 		return false, nil // need to return false to cause NXDOMAIN, returning an empty array causes PDNS error: "Backend reported condition which prevented lookup (Exception caught when receiving: No 'result' field in response from remote process) sending out servfail"

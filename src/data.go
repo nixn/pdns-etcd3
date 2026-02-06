@@ -166,17 +166,17 @@ func (dn *dataNode) getChildCreate(name nameType) *dataNode {
 	return lChild.getChildCreate(name.fromDepth(2))
 }
 
-func (dn *dataNode) getChild(name nameType, rLock bool) *dataNode {
+func (dn *dataNode) getChild(name nameType, rLock bool) (*dataNode, bool) {
 	if rLock {
 		dn.mutex.RLock()
 	}
 	if name.len() == 0 {
-		return dn
+		return dn, true
 	}
 	childLName := name.lname(1)
 	lChild, ok := dn.children[childLName]
 	if !ok || lChild == nil {
-		return dn
+		return dn, false
 	}
 	return lChild.getChild(name.fromDepth(2), rLock)
 }
