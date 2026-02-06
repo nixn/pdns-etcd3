@@ -165,14 +165,9 @@ func findValueOrDefault[V any](key string, values objectType[any], qtype, id str
 			log.data("value", value).Tracef("found value for %s:%s directly", queryPath.String(), key)
 			return value, &queryPath, nil
 		}
-		log.data("value", value).Tracef("invalid type of value for %s.%s: %T (found directly)", queryPath.String(), key, value)
+		log.data("value", value).Tracef("invalid type of value for %s.%s (found directly): %T", queryPath.String(), key, value)
 		var zeroValue V
 		return zeroValue, &queryPath, fmt.Errorf("invalid type: %T", value)
 	}
 	return findValue[V](key, qtype, id, data, defaultsEntry, false)
-}
-
-// TODO remove, just call findValue() directly
-func findOptionValue[V any](key, qtype, id string, data *dataNode, notUpwards bool) (V, *valuePath, error) {
-	return findValue[V](key, qtype, id, data, optionsEntry, notUpwards)
 }

@@ -81,7 +81,7 @@ func getResponse(response *clientv3.GetResponse) *getResponseType {
 	ch := make(chan etcdItem)
 	go func() {
 		for _, item := range response.Kvs {
-			ch <- etcdItem{string(item.Key), item.Value, maxOf(item.CreateRevision, item.ModRevision)}
+			ch <- etcdItem{string(item.Key), item.Value, max(item.CreateRevision, item.ModRevision)}
 		}
 		close(ch)
 	}()
@@ -116,7 +116,7 @@ func put(key string, value string, timeout time.Duration) (*clientv3.PutResponse
 	return cli.Put(ctx, key, value, opts...)
 }
 
-func watchData(ctx context.Context) {
+func watchData(ctx context.Context, prefix string) {
 	watcher := clientv3.NewWatcher(cli)
 	defer closeNoError(watcher)
 	watchRetryInterval := 5 * time.Second // TODO make a program argument
@@ -130,7 +130,7 @@ WATCH:
 		}
 		log.etcd("currRev", currentRevision).Tracef("creating watch")
 		watchCtx := clientv3.WithRequireLeader(ctx)
-		watchChan := watcher.Watch(watchCtx, *args.Prefix, clientv3.WithPrefix(), clientv3.WithRev(currentRevision+1))
+		watchChan := watcher.Watch(watchCtx, prefix, clientv3.WithPrefix(), clientv3.WithRev(currentRevision+1))
 	EVENTS:
 		for {
 			log.etcd("currRev", currentRevision).Trace("waiting for next event")

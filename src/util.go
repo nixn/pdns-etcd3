@@ -177,16 +177,6 @@ func float2int(n float64) (int64, error) {
 	return strconv.ParseInt(fmt.Sprintf("%.0f", n), 10, 64)
 }
 
-func maxOf[T cmp.Ordered](first T, more ...T) T {
-	result := first
-	for _, item := range more {
-		if item > result {
-			result = item
-		}
-	}
-	return result
-}
-
 func wgGo(wg *sync.WaitGroup, f func()) {
 	wg.Add(1)
 	go func() {

@@ -120,8 +120,8 @@ func (dn *dataNode) depth() int {
 }
 
 func (dn *dataNode) hasSOA() bool {
-	records, ok := dn.records["SOA"]
-	return ok && len(records) > 0
+	_, ok := dn.records["SOA"][""]
+	return ok
 }
 
 func (dn *dataNode) findUpwards(pred func(*dataNode) bool) *dataNode {
@@ -196,7 +196,7 @@ func (dn *dataNode) zoneRev() int64 {
 		if dn.hasSOA() {
 			continue
 		}
-		rev = maxOf(rev, dn.zoneRev())
+		rev = max(rev, dn.zoneRev())
 	}
 	return rev
 }
@@ -415,7 +415,7 @@ ITEMS:
 			vals[qtype] = map[string]valueType{}
 		}
 		vals[qtype][id] = valueType{item.Key, content, itemVersion}
-		itemData.maxRev = maxOf(itemData.maxRev, item.Rev)
+		itemData.maxRev = max(itemData.maxRev, item.Rev)
 		dn.log().Tracef("stored %s for %s: %v", string(entryType), targetString(itemData.getQname(), qtype, id), content)
 	}
 	dn.processValues()

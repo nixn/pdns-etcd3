@@ -256,7 +256,7 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 	defer recoverPanics(func(v any) bool {
 		return !recoverFunc(v, "main()", true)
 	})
-	releaseVersion := programVersion.String() + "+" + dataVersion.String()
+	releaseVersion := fmt.Sprintf("%s+%s", programVersion, dataVersion)
 	if "v"+releaseVersion != gitVersion {
 		releaseVersion += fmt.Sprintf("[%s]", gitVersion)
 	}
@@ -360,7 +360,7 @@ func populateData(ctx context.Context, wg *sync.WaitGroup) error {
 			recoverFunc(v, "watchData()", false)
 			return false
 		})
-		watchData(ctx)
+		watchData(ctx, *args.Prefix)
 		log.main().Trace("watchData() returned normally")
 	})
 	return nil

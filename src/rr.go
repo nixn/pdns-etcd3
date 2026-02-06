@@ -83,7 +83,7 @@ var rr2func = map[string]rrFunc{
 func fqdn(domain string, params *rrParams) (string, error) {
 	qSOA := params.qtype == "SOA"
 	for data := params.data; !strings.HasSuffix(domain, "."); data = data.parent {
-		zoneAppendDomain, valuePath, err := findOptionValue[string](zoneAppendDomainOption, params.qtype, params.id, data, true)
+		zoneAppendDomain, valuePath, err := findValue[string](zoneAppendDomainOption, params.qtype, params.id, data, optionsEntry, true)
 		if err != nil {
 			return domain, fmt.Errorf("failed to get option %q (dn=%s, vp=%s): %s", zoneAppendDomain, data.getQname(), valuePath, err)
 		}
@@ -433,7 +433,7 @@ func ipRR(params *rrParams, ipVer int) {
 		return
 	}
 	var prefix []byte
-	prefixAny, oPath, err := findOptionValue[any](ipPrefixOption, params.qtype, params.id, params.data, false)
+	prefixAny, oPath, err := findValue[any](ipPrefixOption, params.qtype, params.id, params.data, optionsEntry, false)
 	if err != nil {
 		params.exlog("vp", vPath.String(), "error", err).Errorf("failed to get option %q", ipPrefixOption)
 		return
