@@ -21,41 +21,41 @@ type namePart struct {
 
 type nameType []namePart // in reversed form (storage form)
 
-func (name *nameType) String() string {
+func (name nameType) String() string {
 	return name.normal()
 }
 
-func (name *nameType) len() int {
-	return len(*name)
+func (name nameType) len() int {
+	return len(name)
 }
 
-func (name *nameType) lname(depth int) string {
+func (name nameType) lname(depth int) string {
 	if depth == 0 {
 		return ""
 	}
-	return (*name)[depth-1].name
+	return name[depth-1].name
 }
 
-func (name *nameType) keyPrefix(depth int) string {
+func (name nameType) keyPrefix(depth int) string {
 	if depth == 0 {
 		return ""
 	}
-	return (*name)[depth-1].keyPrefix
+	return name[depth-1].keyPrefix
 }
 
-func (name *nameType) fromDepth(depth int) nameType {
+func (name nameType) fromDepth(depth int) nameType {
 	if depth == 0 {
-		return *name
+		return name
 	}
 	var parts []namePart
 	for ; depth <= name.len(); depth++ {
-		parts = append(parts, (*name)[depth-1])
+		parts = append(parts, name[depth-1])
 	}
 	return nameType(parts)
 }
 
 // get the domain in normal form (with trailing dot)
-func (name *nameType) normal() string {
+func (name nameType) normal() string {
 	if name.len() == 0 {
 		return "."
 	}
@@ -67,7 +67,7 @@ func (name *nameType) normal() string {
 }
 
 // get the domain in storage form
-func (name *nameType) asKey(withTrailingKeySeparator bool) string {
+func (name nameType) asKey(withTrailingKeySeparator bool) string {
 	if name.len() == 0 {
 		return ""
 	}
