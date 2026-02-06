@@ -52,14 +52,15 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 		name:  nameType(Map(qname, func(qnamePart namePart, _ int) namePart { return namePart{strings.ToLower(qnamePart.name), "."} })),
 		qtype: params["qtype"].(string),
 	}
+	//goland:noinspection GoPreferNilSlice
+	result := []objectType[any]{}
 	data, found := dataRoot.getChild(query.name, true)
 	defer data.rUnlockUpwards(nil)
 	if !found {
-		client.log.data().Tracef("search for %q returned %q", query.name.normal(), data.getQname())
-		client.log.data().Debugf("no such domain: %q", query.name.normal())
-		return false, nil // need to return false to cause NXDOMAIN, returning an empty array causes PDNS error: "Backend reported condition which prevented lookup (Exception caught when receiving: No 'result' field in response from remote process) sending out servfail"
+		client.log.data(query.name).Tracef("search returned %q", data.getQname())
+		client.log.data(query.name).Debug("no such domain")
+		return result, nil
 	}
-	var result []objectType[any]
 	records := map[string]map[string]recordType{}
 	if query.qtype == "ANY" {
 		records = data.records
@@ -74,9 +75,6 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 		}
 	}
 	client.log.pdns("#", len(result)).Debug("request result items count")
-	if len(result) == 0 {
-		return false, nil // see above for reasoning
-	}
 	return result, nil
 }
 
@@ -117,8 +115,8 @@ func (vp *valuePath) String() string {
 }
 
 func searchOrder(qtype, id string) (order []searchOrderElement) {
-	q := len(qtype) > 0
-	i := len(id) > 0
+	q := qtype != ""
+	i := id != ""
 	if q && i {
 		order = append(order, searchOrderElement{qtype, id})
 	}

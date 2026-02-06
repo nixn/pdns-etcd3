@@ -181,13 +181,15 @@ func startReadRequests(ctx context.Context, wg *sync.WaitGroup, client *pdnsClie
 func handleRequest(request *pdnsRequest, client *pdnsClient) {
 	client.log.main(request).Debug("handling request")
 	since := time.Now()
-	var result interface{}
+	var result any
 	var err error
 	switch strings.ToLower(request.Method) {
 	case "lookup":
 		result, err = lookup(request.Parameters, client)
 	case "getalldomainmetadata":
-		result, err = map[string]any{}, nil
+		result = map[string]any{}
+	case "getdomainmetadata":
+		result = []string{}
 	case "getalldomains":
 		result = dataRoot.allDomains([]domainInfo{}) // must not be nil, for empty answers it would not be marshalled into `[]`
 	default:
