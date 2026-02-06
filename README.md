@@ -74,20 +74,25 @@ the second development release, considered alpha quality. Any testing is appreci
 
 ## Installation
 
-```sh
+```shell
 git clone https://github.com/nixn/pdns-etcd3.git
 cd pdns-etcd3
 make
 ```
 
-NOTE: `go build` will also work, but you will get a dynamically linked executable and incomplete version information in the binary.
+NOTE: A plain `go build` will also work, but you will get a dynamically linked executable and incomplete version information in the binary.
 The build command in `Makefile` produces a static build with setting the version string properly.
+For convenience, it is repeated here:
+```shell
+export CGO_ENABLED=0
+go build -o pdns-etcd3 -a -ldflags="-extldflags=-static -X main.gitVersion=$(git describe --always --dirty)"
+```
 
 ## Usage
 
 Of course, you need an up and running ETCD v3 cluster and a PowerDNS installation.
 
-You have to decide in which mode you want to use the backend: either the pipe mode or the unix mode.
+You have to decide in which mode you want to use the backend: either the pipe mode or a standalone mode.
 
 ### Pipe mode
 
@@ -153,8 +158,8 @@ One has to give both, `<address>` and `<port>`. To listen on all interfaces, the
 
 The HTTP mode does not take an 'initialize' call.
 
-In the PowerDNS configuration, the parameters `post` and `post_json` must be both set to true.
-Otherwise the requests would be rejected.
+In the PowerDNS configuration, the parameters `post` and `post_json` must be both set to a truthy value (e.g. `yes`).
+The requests would be rejected otherwise.
 
 Example PowerDNS configuration file:
 ```text
@@ -198,7 +203,7 @@ are tagged by *#STANDALONE*):
 * `log-<level>=<components>` *#STANDALONE* and *config file*<br>
   Sets the logging level of `<components>` to `<level>` (see below for values). `<components>` is one or more of the
   component names, separated by `+`. This parameter can be "repeated" for different logging levels.
-  In unix mode, the levels are set separately for the program and the clients (PowerDNS connections).<br>
+  In standalone mode, the levels are set separately for the program and the clients (PowerDNS connections).<br>
   Example: `log-debug=main+pdns,log-trace=etcd+data`<br>
   Defaults to `info` for all components.
 
@@ -213,7 +218,7 @@ See [ETCD structure](doc/ETCD-structure.md). The structure lies beneath the `pre
 ## Compatibility
 
 pdns-etcd3 is tested on PowerDNS versions 3.y.z and different 4.y.z, and uses an ETCD v3 cluster (API 3.0 or higher).
-It's currently only one version of each minor (.y), but most likely all (later) "patch" versions (.z) are compatible.
+It's only one version of each minor (.y), but most likely all (later and earlier) "patch" versions (.z) are compatible.
 Therefore, each release shall state which exact versions were used for testing,
 so one can be sure to have a working combination for deploying, when using those (tested) versions.
 

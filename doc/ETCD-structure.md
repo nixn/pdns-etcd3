@@ -36,6 +36,9 @@ and the optional parts `#<id>` and `@<version>` (in that order). `/`, `#` and `@
 * `<domain>` is the full domain name of a resource record, but in reversed form, with the subdomains separated by `.` or `/` (can be mixed).
 The `/` is allowed to support (graphical) tools which apply a logical structure to the flat key namespace in ETCDv3
 like in directories and files. (It's really easier to browse it then!)<br>
+`<domain>` must have the same prefix (separators) as in the `SOA` entry for the zone, otherwise it won't be (re-)loaded properly.
+(e.g. if the `SOA` entry key is `com.example/dept.fin/SOA`, the subdomain `www.fin.dept.example.com` must use the same prefix (`com.example/dept.fin/`),
+so an A record key could be `com.example/dept.fin/www/A`, but not `com.example.dept.fin/www/A`.<br>
 `<domain>` must be all lowercase. Although PowerDNS does not force lowercase on domain queries, this program converts them internally before querying the database.
 
 * `<QTYPE>` are the record types, such as `A`, `MX`, and so on.
@@ -424,6 +427,7 @@ Options:
     * undergoes itself a zone append check with the parent zone (if not ending with a `.`)
     * this option can be applied to any QTYPE with a domain name in its value, but is mostly useful here
         * currently `SOA`, `NS`, `PTR`, `CNAME`, `DNAME`, `MX` and `SRV`
+    * constrained to be valid only within a zone (TODO describe better, give examples)
 
 #### `NS`
 * `hostname`: domain name
