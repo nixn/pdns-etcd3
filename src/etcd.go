@@ -110,10 +110,25 @@ func get(key string, multi bool, revision *int64) (*getResponseType, error) {
 }
 
 func put(key string, value string, timeout time.Duration) (*clientv3.PutResponse, error) {
-	opts := []clientv3.OpOption(nil)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	return cli.Put(ctx, key, value, opts...)
+	return cli.Put(ctx, key, value)
+}
+
+func delOp(key string) clientv3.Op {
+	return clientv3.OpDelete(key)
+}
+
+func putOp(key, value string) clientv3.Op {
+	return clientv3.OpPut(key, value)
+}
+
+func txn(timeout time.Duration, ops ...clientv3.Op) (*clientv3.TxnResponse, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	txn := cli.Txn(ctx)
+	txn.Then(ops...)
+	return txn.Commit()
 }
 
 func watchData(ctx context.Context, prefix string) {

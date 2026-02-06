@@ -34,7 +34,7 @@ func (pk parsedKey) String() string {
 }
 
 func TestParseEntryKey(t *testing.T) {
-	tf := func(key string) (parsedKey, error) {
+	tf := func(_ *testing.T, key string) (parsedKey, error) {
 		name, entryType, qtype, id, itemVersion, err := parseEntryKey(key)
 		return parsedKey{name, entryType, qtype, id, itemVersion}, err
 	}
@@ -56,7 +56,7 @@ func TestParseEntryKey(t *testing.T) {
 		{"com.example/dept.fin/-defaults-/NS#1@2.3", ve[pk]{v: pk{[]namePart{{"com", ""}, {"example", "."}, {"dept", "/"}, {"fin", "."}}, "defaults", "NS", "1", &VersionType{false, 2, 3, 0}}}},
 		{"SOA#id", ve[pk]{e: "SOA entry cannot have an id"}},
 	} {
-		check(t, fmt.Sprintf("(%d)%q", i+1, spec.input), tf, spec.input, spec.expected)
+		checkRun(t, fmt.Sprintf("(%d)%q", i+1, spec.input), tf, spec.input, spec.expected)
 	}
 }
 
@@ -66,7 +66,7 @@ type contentInput struct {
 type ci = contentInput
 
 func TestParseEntryContent(t *testing.T) {
-	tf := func(in contentInput) (any, error) {
+	tf := func(_ *testing.T, in contentInput) (any, error) {
 		return parseEntryContent([]byte(in.content), entryType(in.entryType))
 	}
 	prefix := ""
@@ -79,6 +79,6 @@ func TestParseEntryContent(t *testing.T) {
 		{ci{`{"a": 1}`, "normal"}, ve[any]{v: objectValueType{"a": float64(1)}}},
 		{ci{"---\na: 1", "normal"}, ve[any]{v: stringValueType("---\na: 1")}},
 	} {
-		check(t, fmt.Sprintf("(%d)%q", i+1, spec.input), tf, spec.input, spec.expected)
+		checkRun(t, fmt.Sprintf("(%d)%q", i+1, spec.input), tf, spec.input, spec.expected)
 	}
 }

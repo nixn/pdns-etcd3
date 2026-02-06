@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"os"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,19 +34,45 @@ import (
 	"github.com/miekg/dns"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-func newEntry(t *testing.T, key, value string) int64 {
+func txnT(t *testing.T, ops ...clientv3.Op) int64 {
 	t.Helper()
-	if resp, err := put(key, value, 10*time.Second); err != nil {
-		t.Fatalf("failed to put %q (%q): %s", key, value, err)
-		return 0
+	if resp, err := txn(10*time.Second, ops...); err != nil {
+		t.Fatalf("failed to commit transaction (%d ops): %s", len(ops), err)
+		return -1
+	} else if !resp.Succeeded {
+		t.Fatalf("transaction did not succeed (%d ops)", len(ops))
+		return -1
 	} else {
 		return resp.Header.Revision
 	}
 }
 
-func TestRequests(t *testing.T) {
+func putT(t *testing.T, prefix, key, value string) int64 {
+	t.Helper()
+	if resp, err := put(prefix+key, value, 10*time.Second); err != nil {
+		t.Fatalf("failed to put %q: %s", prefix+key, err)
+		return -1
+	} else {
+		return resp.Header.Revision
+	}
+}
+
+func waitForRevision(t *testing.T, rev int64, desc string) {
+	t.Helper()
+	err := waitFor(t, desc, func() bool { return currentRevision >= rev }, 10*time.Millisecond, 10*time.Second)
+	fatalOnErr(t, "wait for "+desc, err)
+}
+
+func revs(rev int64, revs ...*int64) {
+	for _, rp := range revs {
+		*rp = rev
+	}
+}
+
+func TestPipeRequests(t *testing.T) {
 	defer recoverPanicsT(t)
 	// start ETCD
 	etcd, err := startETCD(t)
@@ -62,7 +89,7 @@ func TestRequests(t *testing.T) {
 	outR, outW, _ := os.Pipe()
 	defer closeNoError(outR) // this should be done automatically by pdns-etcd3, but just in case
 	config := ""
-	timeout, _ := time.ParseDuration("2s")
+	timeout, _ := time.ParseDuration("5s")
 	prefix := ""
 	args = programArgs{
 		ConfigFile:  &config,
@@ -76,174 +103,78 @@ func TestRequests(t *testing.T) {
 	wg := new(sync.WaitGroup)
 	go pipe(ctx, wg, inR, outW)
 	pe3 := newComm[any](ctx, outR, inW)
-	action := func(request pdnsRequest) (any, error) {
+	action := func(t *testing.T, request pdnsRequest) (any, error) {
 		t.Logf("request: %s", val2str(request))
 		_ = pe3.write(request)
 		response, err := pe3.read()
 		t.Logf("response: %s, err: %v", val2str(*response), err)
 		return *response, err
 	}
-	testPrefix := "/DNS/"
-	request := pdnsRequest{"initialize", objectType[any]{"pdns-version": "3", "prefix": testPrefix, "log-trace": "main+pdns+etcd", "log-debug": "data"}}
-	var expectedResponse any
-	expectedResponse = map[string]any{"result": true, "log": Ignore{}}
-	if !check(t, "initialize", action, request, ve[any]{v: expectedResponse}) {
-		t.Fatalf("failed to initialize")
+	{
+		testPrefix := "/DNS/"
+		request := pdnsRequest{"initialize", objectType[any]{"pdns-version": "3", "prefix": testPrefix, "log-trace": "main+pdns+etcd+data"}}
+		expectedResponse := map[string]any{"result": true, "log": Ignore{}}
+		if !checkRun(t, "initialize", action, request, ve[any]{v: expectedResponse}) {
+			t.Fatalf("failed to initialize")
+		}
+		if prefix != testPrefix {
+			t.Fatalf("prefix mismatch after initialize: expected %q, got %q", testPrefix, prefix)
+		}
 	}
-	if prefix != testPrefix {
-		t.Fatalf("prefix mismatch after initialize: expected %q, got %q", testPrefix, prefix)
-	}
-	err = waitFor(t, "populated", func() bool { return populated }, 100*time.Millisecond, 30*time.Second)
+	err = waitFor(t, "populated", func() bool { return populated }, 10*time.Millisecond, 30*time.Second)
 	fatalOnErr(t, "wait for populated", err)
 	sleepT(t, 1*time.Second)
-	var rev1 int64
-	for _, entry := range []struct {
-		key, value string
-	}{
-		{"-defaults-", `{"ttl": "1h"}`},
-		{"-defaults-/SRV", `{"priority": 0, "weight": 0}`},
-		{"-defaults-/SOA", `{"refresh": "1h", "retry": "30m", "expire": 604800, "neg-ttl": "10m"}`},
-		{"net.example/SOA", `{"primary": "ns1", "mail": "horst.master"}`},
-		{"net.example/NS#first", `{"hostname": "ns1"}`},
-		{"net.example/NS#second", `="ns2"`},
-		{"net.example/-options-/A", `{"ip-prefix": [192, 0, 2]}`},
-		{"net.example/-options-/AAAA", `{"ip-prefix": "20010db8"}`},
-		{"net.example/ns1/A", `=2`},
-		{"net.example/ns1/AAAA", `="02"`},
-		{"net.example/ns2/A", `{"ip": "192.0.2.3"}`},
-		{"net.example/ns2/AAAA", `{"ip": [3]}`},
-		{"net.example/-defaults-/MX", `{"ttl": "2h"}`},
-		{"net.example/MX#1", `{"priority": 10, "target": "mail"}`},
-		{"net.example/mail/A", `{"ip": [192,0,2,10]}`},
-		{"net.example/mail/AAAA", `2001:0db8::10`},
-		{"net.example/TXT#spf", `v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all`},
-		{"net.example/TXT#{}", `{"text":"{text which begins with a curly brace (the id too)}"}`},
-		{"net.example/versioned/TXT@1234.56", `@1234.56`},
-		{"net.example/versioned/TXT@0.1", `@0.1`},
-		{fmt.Sprintf("net.example/versioned/TXT@%s", dataVersion), fmt.Sprintf(`@%s`, dataVersion)},
-		{"net.example/kerberos1/A#1", `192.0.2.15`},
-		{"net.example/kerberos1/AAAA#1", `{"ip": "2001:0db8::15"}`},
-		{"net.example/kerberos2/A#", `192.0.2.25`},
-		{"net.example/kerberos2/AAAA#", `2001:db8::25`},
-		{"net.example/_tcp/_kerberos/-defaults-/SRV", `{"port": 88}`},
-		{"net.example/_tcp/_kerberos/SRV#1", `{"target": "kerberos1"}`},
-		{"net.example/_tcp/_kerberos/SRV#2", `="kerberos2"`},
-		{"net.example/kerberos-master/CNAME", `{"target": "kerberos1"}`},
-		{"net.example/mail/-defaults-/HINFO", `{"ttl": "2h"}`},
-		{"net.example/mail/HINFO", `"amd64" "Linux"`},
-		{"net.example/mail/HINFO#not-object-supported", `{"platform": "arm", "os": "Raspbian"}`},
-		{"net.example/TYPE123", `\# 0`},
-		{"net.example.case/TXT", `PR #1`},
-		// TODO duplicate records (different but equivalent keys)
-	} {
-		rev1 = newEntry(t, prefix+entry.key, entry.value)
+	put := func(key, value string) clientv3.Op {
+		return putOp(prefix+key, value)
 	}
-	var rev2 int64
-	for _, entry := range []struct {
-		key, value string
-	}{
-		{"arpa.in-addr/192.0.2/-options-", `{"zone-append-domain": "example.net."}`},
-		{"arpa.in-addr/192.0.2/SOA", `{"primary": "ns1", "mail": "horst.master"}`},
-		{"arpa.in-addr/192.0.2/NS#a", `{"hostname": "ns1"}`},
-		{"arpa.in-addr/192.0.2/NS#b", `ns2.example.net.`},
-		{"arpa.in-addr/192.0.2/2/PTR", `="ns1"`},
-		{"arpa.in-addr/192.0.2/3/PTR", `="ns2"`},
-	} {
-		rev2 = newEntry(t, prefix+entry.key, entry.value)
+	lookupTest := func(t *testing.T, qname, qtype string, result ...any) {
+		checkRun[pdnsRequest, any](t, fmt.Sprintf("lookup %s %s", qname, qtype), action,
+			pdnsRequest{Method: "lookup", Parameters: objectType[any]{"qname": qname, "qtype": qtype}},
+			ve[any]{v: map[string]any{"result": SliceContains{All: true, Only: true, Elements: result}}})
 	}
-	err = waitFor(t, "data loaded", func() bool { return currentRevision == rev2 }, 100*time.Millisecond, 10*time.Second)
-	fatalOnErr(t, "wait for data loaded", err)
-	request = pdnsRequest{"gibberish", nil}
-	expectedResponse = map[string]any{"result": false, "log": Ignore{}}
-	check(t, "gibberish", action, request, ve[any]{v: expectedResponse})
-	request = pdnsRequest{"getAllDomainMetadata", objectType[any]{"name": "example.com"}}
-	expectedResponse = map[string]any{"result": map[string]any{}}
-	check(t, "getAllDomainMetadata", action, request, ve[any]{v: expectedResponse})
-	request = pdnsRequest{"getAllDomains", objectType[any]{"include_disabled": true}}
-	expectedResponse = map[string]any{"result": SliceContains{false, true, []any{
-		map[string]any{"zone": "example.net.", "serial": float64(rev1)},
-		map[string]any{"zone": "2.0.192.in-addr.arpa.", "serial": float64(rev2)},
-	}}}
-	check(t, "getAllDomains", action, request, ve[any]{v: expectedResponse})
-	t.Run("lookup", func(t *testing.T) {
-		for _, spec := range []struct {
-			parameters objectType[any]
-			result     any
-		}{
-			{objectType[any]{"qname": "example.net", "qtype": "SOA"}, []any{
-				map[string]any{"qname": "example.net.", "qtype": "SOA", "content": fmt.Sprintf(`ns1.example.net. horst\.master.example.net. %d 3600 1800 604800 600`, rev1), "ttl": float64(3600), "auth": true},
-			}},
-			{objectType[any]{"qname": "example.net", "qtype": "NS"}, SliceContains{false, true, []any{
-				map[string]any{"qname": "example.net.", "qtype": "NS", "content": "ns1.example.net.", "ttl": float64(3600), "auth": true},
-				map[string]any{"qname": "example.net.", "qtype": "NS", "content": "ns2.example.net.", "ttl": float64(3600), "auth": true},
-			}}},
-			{objectType[any]{"qname": "ns1.example.net", "qtype": "A"}, []any{
-				map[string]any{"qname": "ns1.example.net.", "qtype": "A", "content": "192.0.2.2", "ttl": float64(3600), "auth": true},
-			}},
-			{objectType[any]{"qname": "ns1.example.net", "qtype": "AAAA"}, []any{
-				map[string]any{"qname": "ns1.example.net.", "qtype": "AAAA", "content": "2001:db8::2", "ttl": float64(3600), "auth": true},
-			}},
-			{objectType[any]{"qname": "ns1.example.net", "qtype": "ANY"}, SliceContains{false, true, []any{
-				map[string]any{"qname": "ns1.example.net.", "qtype": "A", "content": "192.0.2.2", "ttl": float64(3600), "auth": true},
-				map[string]any{"qname": "ns1.example.net.", "qtype": "AAAA", "content": "2001:db8::2", "ttl": float64(3600), "auth": true},
-			}}},
-			{objectType[any]{"qname": "ns2.example.net", "qtype": "A"}, []any{
-				map[string]any{"qname": "ns2.example.net.", "qtype": "A", "content": "192.0.2.3", "ttl": float64(3600), "auth": true},
-			}},
-			{objectType[any]{"qname": "ns2.example.net", "qtype": "AAAA"}, []any{
-				map[string]any{"qname": "ns2.example.net.", "qtype": "AAAA", "content": "2001:db8::3", "ttl": float64(3600), "auth": true},
-			}},
-			{objectType[any]{"qname": "example.net", "qtype": "MX"}, []any{
-				map[string]any{"qname": "example.net.", "qtype": "MX", "content": "mail.example.net.", "priority": float64(10), "ttl": float64(7200), "auth": true},
-			}},
-			{objectType[any]{"qname": "mail.example.net", "qtype": "A"}, []any{
-				map[string]any{"qname": "mail.example.net.", "qtype": "A", "content": "192.0.2.10", "ttl": float64(3600), "auth": true},
-			}},
-			{objectType[any]{"qname": "mail.example.net", "qtype": "AAAA"}, []any{
-				map[string]any{"qname": "mail.example.net.", "qtype": "AAAA", "content": "2001:0db8::10", "ttl": float64(3600), "auth": true},
-			}},
-			{objectType[any]{"qname": "example.net", "qtype": "TXT"}, SliceContains{false, true, []any{
-				map[string]any{"qname": "example.net.", "qtype": "TXT", "content": "v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all", "ttl": float64(3600), "auth": true},
-				map[string]any{"qname": "example.net.", "qtype": "TXT", "content": "{text which begins with a curly brace (the id too)}", "ttl": float64(3600), "auth": true},
-			}}},
-			{objectType[any]{"qname": "versioned.example.net", "qtype": "TXT"}, []any{
-				map[string]any{"qname": "versioned.example.net.", "qtype": "TXT", "content": fmt.Sprintf("@%s", dataVersion), "ttl": float64(3600), "auth": true},
-			}},
-			{objectType[any]{"qname": "kerberos1.example.net", "qtype": "AAAA"}, []any{
-				map[string]any{"qname": "kerberos1.example.net.", "qtype": "AAAA", "content": "2001:db8::15", "ttl": float64(3600), "auth": true},
-			}},
-			{objectType[any]{"qname": "_kerberos._tcp.example.net", "qtype": "SRV"}, SliceContains{false, true, []any{
-				map[string]any{"qname": "_kerberos._tcp.example.net.", "qtype": "SRV", "content": "0 88 kerberos1.example.net.", "ttl": float64(3600), "auth": true, "priority": float64(0)},
-				map[string]any{"qname": "_kerberos._tcp.example.net.", "qtype": "SRV", "content": "0 88 kerberos2.example.net.", "ttl": float64(3600), "auth": true, "priority": float64(0)},
-			}}},
-			{objectType[any]{"qname": "kerberos-master.example.net", "qtype": "CNAME"}, []any{
-				map[string]any{"qname": "kerberos-master.example.net.", "qtype": "CNAME", "content": "kerberos1.example.net.", "ttl": float64(3600), "auth": true},
-			}},
-			{objectType[any]{"qname": "mail.example.net", "qtype": "HINFO"}, []any{
-				map[string]any{"qname": "mail.example.net.", "qtype": "HINFO", "content": `"amd64" "Linux"`, "ttl": float64(7200), "auth": true},
-			}},
-			{objectType[any]{"qname": "example.net", "qtype": "TYPE123"}, []any{
-				map[string]any{"qname": "example.net.", "qtype": "TYPE123", "content": `\# 0`, "ttl": float64(3600), "auth": true},
-			}},
-			{objectType[any]{"qname": "gibberish.example.net", "qtype": "ANY"}, false},
-			{objectType[any]{"qname": "2.0.192.in-addr.arpa", "qtype": "SOA"}, []any{
-				map[string]any{"qname": "2.0.192.in-addr.arpa.", "qtype": "SOA", "content": fmt.Sprintf(`ns1.example.net. horst\.master.example.net. %d 3600 1800 604800 600`, rev2), "ttl": float64(3600), "auth": true},
-			}},
-			{objectType[any]{"qname": "2.0.192.in-addr.arpa", "qtype": "NS"}, SliceContains{false, true, []any{
-				map[string]any{"qname": "2.0.192.in-addr.arpa.", "qtype": "NS", "content": "ns1.example.net.", "ttl": float64(3600), "auth": true},
-				map[string]any{"qname": "2.0.192.in-addr.arpa.", "qtype": "NS", "content": "ns2.example.net.", "ttl": float64(3600), "auth": true},
-			}}},
-			{objectType[any]{"qname": "2.2.0.192.in-addr.arpa", "qtype": "PTR"}, []any{
-				map[string]any{"qname": "2.2.0.192.in-addr.arpa.", "qtype": "PTR", "content": "ns1.example.net.", "ttl": float64(3600), "auth": true},
-			}},
-			{objectType[any]{"qname": "CaSe.eXample.Net", "qtype": "TXT"}, []any{
-				map[string]any{"qname": "CaSe.eXample.Net.", "qtype": "TXT", "content": "PR #1", "ttl": float64(3600), "auth": true},
-			}},
-		} {
-			check[pdnsRequest, any](t, val2str(spec.parameters), action, pdnsRequest{"lookup", spec.parameters}, ve[any]{v: map[string]any{"result": spec.result}})
+	rev1 := txnT(t,
+		put("net.example/SOA", `{"primary": "ns1", "mail": "horst.master"}`),
+		put("-defaults-/SOA", `{"refresh": "1h", "retry": "30m", "expire": 604800, "neg-ttl": "10m"}`),
+		put("-defaults-", `{"ttl": "1h"}`),
+	)
+	rev2 := txnT(t,
+		put("arpa.in-addr/192.0.2/-options-", `{"zone-append-domain": "example.net."}`),
+		put("arpa.in-addr/192.0.2/SOA", `{"primary": "ns1", "mail": "horst.master"}`),
+	)
+	rev3 := txnT(t,
+		put("arpa.ip6/2.0.0.1.0.d.b.8/-options-", `{"zone-append-domain": "example.net."}`),
+		put("arpa.ip6/2.0.0.1.0.d.b.8/SOA", `{"primary": "ns1", "mail": "horst.master"}`),
+	)
+	waitForRevision(t, rev3, "data loaded (SOAs)")
+	t.Run("SOAs", func(t *testing.T) {
+		for qname, rev := range map[string]int64{"example.net": rev1, "2.0.192.in-addr.arpa": rev2, "8.b.d.0.1.0.0.2.ip6.arpa": rev3} {
+			lookupTest(t, qname, "SOA",
+				map[string]any{"qname": qname + ".", "qtype": "SOA", "content": fmt.Sprintf(`ns1.example.net. horst\.master.example.net. %d 3600 1800 604800 600`, rev), "ttl": float64(3600), "auth": true},
+			)
 		}
 	})
-	t.Log("finished")
+	t.Run("ns", func(t *testing.T) {
+		revs(txnT(t,
+			put("net.example/NS#first", `{"hostname": "ns"}`),
+			put("net.example/-options-/A", `{"ip-prefix": [192, 0, 2]}`),
+			put("net.example/ns/A", `=2`),
+			put("net.example/-options-/AAAA", `{"ip-prefix": "20010db8"}`),
+			put("net.example/ns/AAAA", `="02"`),
+			put("arpa.in-addr/192.0.2/2/PTR", `="ns"`),
+			put("arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.2/PTR", `="ns"`),
+		), &rev1, &rev2, &rev3)
+		waitForRevision(t, rev1, "ns data loaded")
+		lookupTest(t, "example.net", "NS",
+			map[string]any{"qname": "example.net.", "qtype": "NS", "content": "ns.example.net.", "ttl": float64(3600), "auth": true},
+		)
+		lookupTest(t, "ns.example.net", "ANY",
+			map[string]any{"qname": "ns.example.net.", "qtype": "A", "content": "192.0.2.2", "ttl": float64(3600), "auth": true},
+			map[string]any{"qname": "ns.example.net.", "qtype": "AAAA", "content": "2001:db8::2", "ttl": float64(3600), "auth": true},
+		)
+		for _, qname := range []string{"2.2.0.192.in-addr.arpa", "2.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa"} {
+			lookupTest(t, qname, "PTR", map[string]any{"qname": qname + ".", "qtype": "PTR", "content": "ns.example.net.", "ttl": float64(3600), "auth": true})
+		}
+	})
 }
 
 type CtLogger struct {
@@ -318,14 +249,18 @@ type pe3Info struct {
 	Prefix      string
 }
 
-func startPE3(t *testing.T, etcdEndpoint string, prefix string) pe3Info {
+func startPE3(t *testing.T, etcdEndpoint, prefix, pdnsVersion string) pe3Info {
 	t.Helper()
 	httpAddress, _ := url.Parse("http://0.0.0.0:8053") // the port is fixed, it is set in pdns.conf too
 	doneCtx, done := context.WithCancel(context.Background())
 	osSignals := make(chan os.Signal, 1)
 	go func() {
 		defer done()
-		main(VersionType{IsDevelopment: true}, getGitVersion(t), []string{"-standalone=" + httpAddress.String(), "-endpoints=" + etcdEndpoint, "-prefix=" + prefix, "-log-trace=main+pdns+etcd", "-log-debug=data"}, osSignals)
+		args := []string{"-standalone=" + httpAddress.String(), "-endpoints=" + etcdEndpoint, "-prefix=" + prefix, "-timeout=5s", "-log-trace=main+pdns+etcd+data"}
+		if pdnsVersion != "" {
+			args = append(args, "-pdns-version="+pdnsVersion)
+		}
+		main(VersionType{IsDevelopment: true}, getGitVersion(t), args, osSignals)
 		t.Logf("pe3 finished")
 	}()
 	return pe3Info{
@@ -358,20 +293,68 @@ func getGitVersion(t *testing.T) string {
 	return v
 }
 
+func linesReader(lines []string) *strings.Reader {
+	s := ""
+	for _, line := range lines {
+		s += line + "\n"
+	}
+	return strings.NewReader(s)
+}
+
 func startPDNS(t *testing.T) (*ctInfo, error) {
 	t.Helper()
-	image := fmt.Sprintf("powerdns/pdns-auth-%s", getenvT("PDNS_VERSION", "51"))
-	t.Logf("Using PDNS image %s", image)
+	var image string
+	var fromDockerfile testcontainers.FromDockerfile
+	repo := "localhost/pdns-etcd3/pdns"
+	v := getenvT("PDNS_VERSION", "51")
+	switch v {
+	case "34", "40", "41":
+		t.Logf("Using PDNS image %s:%s (from testdata/pdns-%s/Dockerfile)", repo, v, v)
+		fromDockerfile = testcontainers.FromDockerfile{
+			Context:   "../testdata/pdns-" + v,
+			Repo:      repo,
+			Tag:       v,
+			KeepImage: true,
+			//PrintBuildLog: true,
+		}
+	case "44", "45", "46", "47", "48", "49", "50", "51":
+		image = fmt.Sprintf("powerdns/pdns-auth-%s", v)
+		t.Logf("Using PDNS image %s", image)
+	default:
+		t.Fatalf("invalid PDNS version: %q", v)
+	}
+	cacheSettings := []string{
+		"cache-ttl=0",
+		"query-cache-ttl=0",
+		"negquery-cache-ttl=0",
+	}
+	if v >= "40" {
+		if v < "45" {
+			cacheSettings = append(cacheSettings, "domain-metadata-cache-ttl=0")
+		} else {
+			cacheSettings = append(cacheSettings, "zone-metadata-cache-ttl=0")
+		}
+	}
+	if v >= "44" {
+		cacheSettings = append(cacheSettings, "consistent-backends=no")
+	}
+	if v >= "45" {
+		cacheSettings = append(cacheSettings, "zone-cache-refresh-interval=0")
+	}
 	return startContainer(t, testcontainers.ContainerRequest{
-		Image: image,
+		Image:          image,
+		FromDockerfile: fromDockerfile,
 		HostConfigModifier: func(hc *container.HostConfig) {
 			hc.ExtraHosts = []string{"host.docker.internal:host-gateway"}
 		},
-		ExposedPorts:   []string{"5353/tcp"},
+		ExposedPorts:   []string{"53/tcp"},
 		LogConsumerCfg: &testcontainers.LogConsumerConfig{Consumers: []testcontainers.LogConsumer{CtLogger{t, "PDNS"}}},
-		Files:          []testcontainers.ContainerFile{{HostFilePath: "../testdata/pdns.conf", ContainerFilePath: "/etc/powerdns/pdns.conf", FileMode: 0o555}},
-		WaitingFor:     wait.ForLog("ready to distribute questions"),
-	}, "5353/tcp")
+		Files: []testcontainers.ContainerFile{
+			{HostFilePath: "../testdata/pdns.conf", ContainerFilePath: "/etc/powerdns/pdns.conf", FileMode: 0o555},
+			{Reader: linesReader(cacheSettings), ContainerFilePath: "/etc/powerdns/pdns.d/cache-settings.conf", FileMode: 0o555},
+		},
+		WaitingFor: wait.ForLog("ready to distribute questions"),
+	}, "53/tcp")
 }
 
 func TestWithPDNS(t *testing.T) {
@@ -383,71 +366,58 @@ func TestWithPDNS(t *testing.T) {
 	t.Logf("ETCD endpoint (2379): %s", etcd.Endpoint)
 	// PDNS-ETCD3
 	sleepT(t, 1*time.Second)
-	pe3 := startPE3(t, etcd.Endpoint, "")
+	pe3 := startPE3(t, etcd.Endpoint, "", getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1])
 	defer pe3.Terminate()
 	t.Logf("PDNS-ETCD3 endpoint: %s", pe3.HttpAddress)
-	err = waitFor(t, "PE3 ready", func() bool { return serving }, 100*time.Millisecond, 30*time.Second)
+	err = waitFor(t, "PE3 ready", func() bool { return serving }, 10*time.Millisecond, 30*time.Second)
 	fatalOnErr(t, "wait for PE3 ready", err)
 	sleepT(t, 1*time.Second)
 	// fill data
-	var rev1 int64
-	for _, entry := range []struct {
-		key, value string
-	}{
-		{"-defaults-", `{"ttl": "1h"}`},
-		{"-defaults-/SRV", `{"priority": 0, "weight": 0}`},
-		{"-defaults-/SOA", `{"refresh": "1h", "retry": "30m", "expire": 604800, "neg-ttl": "10m"}`},
-		{"net.example/SOA", `{"primary": "ns1", "mail": "horst.master"}`},
-		{"net.example/NS#first", `{"hostname": "ns1"}`},
-		{"net.example/NS#second", `="ns2"`},
-		{"net.example/-options-/A", `{"ip-prefix": [192, 0, 2]}`},
-		{"net.example/-options-/AAAA", `{"ip-prefix": "20010db8"}`},
-		{"net.example/ns1/A", `=2`},
-		{"net.example/ns1/AAAA", `="02"`},
-		{"net.example/ns2/A", `{"ip": "192.0.2.3"}`},
-		{"net.example/ns2/AAAA", `{"ip": [3]}`},
-		{"net.example/-defaults-/MX", `{"ttl": "2h"}`},
-		{"net.example/MX#1", `{"priority": 10, "target": "mail"}`},
-		{"net.example/mail/A", `{"ip": [192,0,2,10]}`},
-		{"net.example/mail/AAAA", `2001:0db8::10`},
-		{"net.example/TXT#spf", `v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all`},
-		{"net.example/TXT#{}", `{"text":"{text which begins with a curly brace (the id too)}"}`},
-		{"net.example/versioned/TXT@1234.56", `@1234.56`},
-		{"net.example/versioned/TXT@0.1", `@0.1`},
-		{fmt.Sprintf("net.example/versioned/TXT@%s", dataVersion), fmt.Sprintf(`@%s`, dataVersion)},
-		{"net.example/kerberos1/A#1", `192.0.2.15`},
-		{"net.example/kerberos1/AAAA#1", `{"ip": "2001:0db8::15"}`},
-		{"net.example/kerberos2/A#", `192.0.2.25`},
-		{"net.example/kerberos2/AAAA#", `2001:db8::25`},
-		{"net.example/_tcp/_kerberos/-defaults-/SRV", `{"port": 88}`},
-		{"net.example/_tcp/_kerberos/SRV#1", `{"target": "kerberos1"}`},
-		{"net.example/_tcp/_kerberos/SRV#2", `="kerberos2"`},
-		{"net.example/kerberos-master/CNAME", `{"target": "kerberos1"}`},
-		{"net.example/mail/-defaults-/HINFO", `{"ttl": "2h"}`},
-		{"net.example/mail/HINFO", `"amd64" "Linux"`},
-		{"net.example/mail/HINFO#not-object-supported", `{"platform": "arm", "os": "Raspbian"}`},
-		{"net.example/TYPE123", `\# 0`},
-		{"net.example/TYPE237", `\# 1 2a`},
-		{"net.example.case/TXT", `PR #1`},
-		// TODO duplicate records (different but equivalent keys)
-	} {
-		rev1 = newEntry(t, pe3.Prefix+entry.key, entry.value)
+	put := func(key, value string) clientv3.Op {
+		return putOp(pe3.Prefix+key, value)
 	}
-	var rev2 int64
-	for _, entry := range []struct {
-		key, value string
-	}{
-		{"arpa.in-addr/192.0.2/-options-", `{"zone-append-domain": "example.net."}`},
-		{"arpa.in-addr/192.0.2/SOA", `{"primary": "ns1", "mail": "horst.master"}`},
-		{"arpa.in-addr/192.0.2/NS#a", `{"hostname": "ns1"}`},
-		{"arpa.in-addr/192.0.2/NS#b", `ns2.example.net.`},
-		{"arpa.in-addr/192.0.2/2/PTR", `="ns1"`},
-		{"arpa.in-addr/192.0.2/3/PTR", `="ns2"`},
-	} {
-		rev2 = newEntry(t, pe3.Prefix+entry.key, entry.value)
+	del := func(key string) clientv3.Op {
+		return delOp(pe3.Prefix + key)
 	}
-	err = waitFor(t, "data loaded", func() bool { return currentRevision == rev2 }, 100*time.Millisecond, 10*time.Second)
-	fatalOnErr(t, "wait for data loaded", err)
+	withCleanup := func(t *testing.T, puts map[string]string, action func(), postOps []clientv3.Op, rs ...*int64) int64 {
+		var ps, ds []clientv3.Op
+		for k, v := range puts {
+			ps = append(ps, put(k, v))
+			ds = append(ds, del(k))
+		}
+		revs(txnT(t, ps...), rs...)
+		action()
+		ds = append(ds, postOps...)
+		return txnT(t, ds...)
+	}
+	// fill with basic data to have the minimal number of entries to keep logs small when reloading zones
+	putSOA1 := put("net.example/SOA", `{}`)
+	putSOA2 := put("arpa.in-addr/192.0.2/SOA", `{}`)
+	putSOA3 := put("arpa.ip6/2.0.0.1.0.d.b.8/SOA", `{}`)
+	var rev1, rev2, rev3 int64
+	revs(txnT(t,
+		put("-defaults-", `{"ttl": "1h"}`),
+		put("-defaults-/SOA", `{"refresh": "1h", "retry": "30m", "expire": 604800, "neg-ttl": "10m", "primary": "ns1", "mail": "horst.master"}`),
+		put("-defaults-/SRV", `{"priority": 10, "weight": 1}`),
+		put("arpa.in-addr/192.0.2/-options-", `{"zone-append-domain": "example.net."}`),
+		put("arpa.ip6/2.0.0.1.0.d.b.8/-options-", `{"zone-append-domain": "example.net."}`),
+		put("net.example/-options-/A", `{"ip-prefix": [192, 0, 2]}`),
+		put("net.example/-options-/AAAA", `{"ip-prefix": "20010db8"}`),
+		// SOAs
+		putSOA1,
+		putSOA2,
+		putSOA3,
+		// NS (first)
+		put("net.example/NS#first", `="ns1"`),
+		put("arpa.in-addr/192.0.2/NS#a", `="ns1"`),
+		put("arpa.ip6/2.0.0.1.0.d.b.8/NS#1", `="ns1"`),
+		// ns1
+		put("net.example/ns1/A", `=2`),
+		put("net.example/ns1/AAAA", `=2`),
+		put("arpa.in-addr/192.0.2/2/PTR", `="ns1"`),
+		put("arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.2/PTR", `="ns1"`),
+	), &rev1, &rev2, &rev3)
+	waitForRevision(t, rev1, "basic data loaded")
 	// PDNS
 	pdns, err := startPDNS(t)
 	fatalOnErr(t, "start PDNS container", err)
@@ -465,15 +435,15 @@ func TestWithPDNS(t *testing.T) {
 		conditions map[string]Condition
 	}
 	conditions := map[string]Condition{
-		`->MsgHdr>Response`:              CompareWith[bool]{true},
-		`->MsgHdr>Authoritative`:         CompareWith[bool]{Value: true}, // OtherDefault does not work here, because the zero value is a valid response value
-		`->Answer`:                       SliceContains{Size: true},
-		`->(Answer|Ns)@\d->Hdr>Class`:    OtherDefault[uint16]{Value: dns.ClassINET},
-		`->Answer@\d->Hdr>Name`:          WhenDefault[string]{},
-		`->Answer@\d->Hdr>Rrtype`:        WhenDefault[uint16]{},
-		`->(Answer|Ns)@\d->Hdr>Rdlength`: Ignore{},
-		`->Answer@\d->Hdr>Ttl`:           OtherDefault[uint32]{Value: 3600},
-		`->Extra`:                        Ignore{},
+		`->MsgHdr>Response`:                    CompareWith[bool]{true},
+		`->MsgHdr>Authoritative`:               CompareWith[bool]{true}, // OtherDefault does not work here, because the zero value is a valid response value
+		`->(Answer|Ns)`:                        SliceContains{All: true, Only: true},
+		`->(Answer|Ns|Extra)@\d->Hdr>Class`:    OtherDefault[uint16]{Value: dns.ClassINET},
+		`->Answer@\d->Hdr>Name`:                WhenDefault[string]{}, // do not apply to Extra, because the RRs there are of other names! // TODO use OnDefaultSameAs(->Question@0>Name) instead (only on default, because it could be another name, like in CNAME'd answers)
+		`->(Answer|Extra)@\d->Hdr>Rrtype`:      WhenDefault[uint16]{}, // applied to Extra, too, because the type is already given in element type and checked by reflection
+		`->(Answer|Ns|Extra)@\d->Hdr>Rdlength`: Ignore{},
+		`->(Answer|Ns|Extra)@\d->Hdr>Ttl`:      OtherDefault[uint32]{Value: 3600},
+		`->Extra`:                              Ignore{},
 	}
 	qs := func(name string, qtype uint16, answer dns.Msg, extraConditions ...map[string]Condition) querySpec {
 		qs := querySpec{name, qtype, answer, conditions}
@@ -483,97 +453,24 @@ func TestWithPDNS(t *testing.T) {
 		}
 		return qs
 	}
-	exampleNetSOA := func(ttl uint32) *dns.SOA {
-		return &dns.SOA{Hdr: dns.RR_Header{Name: "example.net.", Rrtype: dns.TypeSOA, Ttl: ttl},
-			Ns: "ns1.example.net.", Mbox: "horst\\.master.example.net.", Serial: uint32(rev1), Refresh: 3600, Retry: 1800, Expire: 604800, Minttl: 600}
+	soa := func(name string, rev *int64) func(ttl uint32) *dns.SOA {
+		return func(ttl uint32) *dns.SOA {
+			return &dns.SOA{Hdr: dns.RR_Header{Name: name, Rrtype: dns.TypeSOA, Ttl: ttl},
+				Ns: "ns1.example.net.", Mbox: "horst\\.master.example.net.", Serial: uint32(*rev), Refresh: 3600, Retry: 1800, Expire: 604800, Minttl: 600}
+		}
 	}
-	v4arpaSOA := func(ttl uint32) *dns.SOA {
-		return &dns.SOA{Hdr: dns.RR_Header{Name: "2.0.192.in-addr.arpa.", Rrtype: dns.TypeSOA, Ttl: ttl},
-			Ns: "ns1.example.net.", Mbox: "horst\\.master.example.net.", Serial: uint32(rev2), Refresh: 3600, Retry: 1800, Expire: 604800, Minttl: 600}
-	}
-	for i, q := range []querySpec{
-		qs("example.net.", dns.TypeSOA, dns.Msg{Answer: []dns.RR{
-			exampleNetSOA(3600),
-		}}),
-		qs("example.net.", dns.TypeNS, dns.Msg{Answer: []dns.RR{
-			&dns.NS{Ns: "ns1.example.net."},
-			&dns.NS{Ns: "ns2.example.net."},
-		}}),
-		qs("ns1.example.net.", dns.TypeA, dns.Msg{Answer: []dns.RR{
-			&dns.A{A: []byte{192, 0, 2, 2}},
-		}}),
-		qs("ns1.example.net.", dns.TypeAAAA, dns.Msg{Answer: []dns.RR{
-			&dns.AAAA{AAAA: net.ParseIP("2001:db8::2")},
-		}}),
-		qs("ns1.example.net.", dns.TypeANY, dns.Msg{Answer: []dns.RR{
-			&dns.A{Hdr: dns.RR_Header{Rrtype: dns.TypeA}, A: []byte{192, 0, 2, 2}},
-			&dns.AAAA{Hdr: dns.RR_Header{Rrtype: dns.TypeAAAA}, AAAA: net.ParseIP("2001:db8::2")},
-		}}),
-		qs("ns2.example.net.", dns.TypeA, dns.Msg{Answer: []dns.RR{
-			&dns.A{A: []byte{192, 0, 2, 3}},
-		}}),
-		qs("ns2.example.net.", dns.TypeAAAA, dns.Msg{Answer: []dns.RR{
-			&dns.AAAA{AAAA: net.ParseIP("2001:db8::3")},
-		}}),
-		qs("example.net.", dns.TypeMX, dns.Msg{Answer: []dns.RR{
-			&dns.MX{Hdr: dns.RR_Header{Ttl: 7200}, Preference: 10, Mx: "mail.example.net."},
-		}}),
-		qs("mail.example.net.", dns.TypeA, dns.Msg{Answer: []dns.RR{
-			&dns.A{A: []byte{192, 0, 2, 10}},
-		}}),
-		qs("mail.example.net.", dns.TypeAAAA, dns.Msg{Answer: []dns.RR{
-			&dns.AAAA{AAAA: net.ParseIP("2001:db8::10")},
-		}}),
-		qs("example.net.", dns.TypeTXT, dns.Msg{Answer: []dns.RR{
-			&dns.TXT{Txt: []string{"v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all"}},
-			&dns.TXT{Txt: []string{"{text which begins with a curly brace (the id too)}"}},
-		}}),
-		qs("versioned.example.net.", dns.TypeTXT, dns.Msg{Answer: []dns.RR{
-			&dns.TXT{Txt: []string{fmt.Sprintf("@%s", dataVersion)}},
-		}}),
-		qs("kerberos1.example.net.", dns.TypeAAAA, dns.Msg{Answer: []dns.RR{
-			&dns.AAAA{AAAA: net.ParseIP("2001:db8::15")},
-		}}),
-		qs("_kerberos._tcp.example.net.", dns.TypeSRV, dns.Msg{Answer: []dns.RR{
-			&dns.SRV{Port: 88, Target: "kerberos1.example.net."},
-			&dns.SRV{Port: 88, Target: "kerberos2.example.net."},
-		}}),
-		qs("kerberos-master.example.net.", dns.TypeCNAME, dns.Msg{Answer: []dns.RR{
-			&dns.CNAME{Target: "kerberos1.example.net."},
-		}}),
-		qs("kerberos-master.example.net.", dns.TypeA, dns.Msg{Answer: []dns.RR{
-			&dns.CNAME{ /*Hdr: dns.RR_Header{Rrtype: dns.TypeCNAME},*/ Target: "kerberos1.example.net."},
-			&dns.A{A: []byte{192, 0, 2, 15}},
-		}}),
-		qs("mail.example.net.", dns.TypeHINFO, dns.Msg{Answer: []dns.RR{
-			&dns.HINFO{Hdr: dns.RR_Header{Ttl: 7200}, Cpu: "amd64", Os: "Linux"},
-		}}),
-		qs("example.net.", 123, dns.Msg{Answer: []dns.RR{
-			&dns.RFC3597{Rdata: ""},
-		}}),
-		qs("example.net.", 237, dns.Msg{Answer: []dns.RR{
-			&dns.RFC3597{Rdata: "2a"},
-		}}),
-		qs("gibberish.example.net.", dns.TypeANY, dns.Msg{MsgHdr: dns.MsgHdr{Rcode: dns.RcodeNameError}, Ns: []dns.RR{
-			exampleNetSOA(600),
-		}}),
-		qs("CaSe.eXample.Net.", dns.TypeTXT, dns.Msg{Answer: []dns.RR{
-			&dns.TXT{Txt: []string{"PR #1"}},
-		}}),
-		qs("2.0.192.in-addr.arpa.", dns.TypeSOA, dns.Msg{Answer: []dns.RR{
-			v4arpaSOA(3600),
-		}}),
-		qs("2.0.192.in-addr.arpa.", dns.TypeNS, dns.Msg{Answer: []dns.RR{
-			&dns.NS{Ns: "ns1.example.net."},
-			&dns.NS{Ns: "ns2.example.net."},
-		}}),
-		qs("2.2.0.192.in-addr.arpa.", dns.TypePTR, dns.Msg{Answer: []dns.RR{
-			&dns.PTR{Ptr: "ns1.example.net."},
-		}}),
-	} {
+	exampleNet := "example.net"
+	v4arpa := "2.0.192.in-addr.arpa"
+	v6arpa := "8.b.d.0.1.0.0.2.ip6.arpa"
+	exampleNetSOA := soa(exampleNet+".", &rev1)
+	v4arpaSOA := soa(v4arpa+".", &rev2)
+	v6arpaSOA := soa(v6arpa+".", &rev3)
+	var queryId uint16
+	queryTest := func(t *testing.T, q querySpec) {
 		query := new(dns.Msg)
-		query.Id = uint16(i + 1)
-		q.answer.MsgHdr.Id = query.Id // nolint:staticcheck
+		queryId++
+		query.Id = queryId
+		q.answer.Id = queryId
 		query.Question = make([]dns.Question, 1)
 		query.Question[0] = dns.Question{Name: q.name, Qtype: q.qtype, Qclass: dns.ClassINET}
 		q.answer.Question = query.Question
@@ -581,11 +478,243 @@ func TestWithPDNS(t *testing.T) {
 		if c == nil {
 			c = conditions
 		}
-		check(t, fmt.Sprintf("%s/%s", q.name, dns.TypeToString[q.qtype]), func(query *dns.Msg) (*dns.Msg, error) {
-			msg, _, err := dc.Exchange(query, pdns.Endpoint)
+		checkT(t, func(t *testing.T, query *dns.Msg) (*dns.Msg, error) {
+			msg, dur, err := dc.Exchange(query, pdns.Endpoint)
+			if err == nil {
+				t.Logf("PDNS response (in %s):\n%s", dur, msg)
+				if len(msg.Answer) == 0 {
+					if len(msg.Extra) > 0 {
+						t.Logf("Answer seems to be in Extra, moving")
+						msg.Answer = msg.Extra
+						msg.Extra = nil
+					}
+				} else if q.qtype == dns.TypeANY && len(msg.Extra) > 0 { // len(msg.Answer) is > 0!
+					t.Logf("ANY query, and Answer seems to be partially split into Extra, merging")
+					msg.Answer = append(msg.Answer, msg.Extra...)
+					msg.Extra = nil
+				}
+			}
 			return msg, err
 		}, query, ve[*dns.Msg]{v: &q.answer, c: c})
 	}
+	t.Run("SOA", func(t *testing.T) {
+		for zone, soa := range map[string]func(uint32) *dns.SOA{
+			exampleNet: exampleNetSOA,
+			v4arpa:     v4arpaSOA,
+			v6arpa:     v6arpaSOA,
+		} {
+			t.Run(zone, func(t *testing.T) {
+				queryTest(t, qs(zone+".", dns.TypeSOA, dns.Msg{Answer: []dns.RR{soa(3600)}}))
+			})
+		}
+	})
+	t.Run("NS", func(t *testing.T) {
+		revs(withCleanup(t, map[string]string{
+			// NS (second)
+			"net.example/NS#second":         `="ns2"`,
+			"arpa.in-addr/192.0.2/NS#b":     `="ns2"`,
+			"arpa.ip6/2.0.0.1.0.d.b.8/NS#2": `="ns2"`,
+			// ns2
+			"net.example/ns2/A":          `=3`,
+			"net.example/ns2/AAAA":       `=3`,
+			"arpa.in-addr/192.0.2/3/PTR": `="ns2"`,
+			"arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.3/PTR": `="ns2"`,
+		}, func() {
+			waitForRevision(t, rev1, "NS (second) data loaded")
+			for _, zone := range []string{exampleNet, v4arpa, v6arpa} {
+				t.Run(zone, func(t *testing.T) {
+					queryTest(t, qs(zone+".", dns.TypeNS, dns.Msg{Answer: []dns.RR{
+						&dns.NS{Ns: "ns1.example.net."},
+						&dns.NS{Ns: "ns2.example.net."},
+					}, Extra: []dns.RR{
+						&dns.A{Hdr: dns.RR_Header{Name: "ns1.example.net."}, A: []byte{192, 0, 2, 2}},
+						&dns.A{Hdr: dns.RR_Header{Name: "ns2.example.net."}, A: []byte{192, 0, 2, 3}},
+						&dns.AAAA{Hdr: dns.RR_Header{Name: "ns1.example.net."}, AAAA: net.ParseIP("2001:db8::2")},
+						&dns.AAAA{Hdr: dns.RR_Header{Name: "ns2.example.net."}, AAAA: net.ParseIP("2001:db8::3")},
+					}}, map[string]Condition{`->Extra`: SliceContains{All: false, Only: true}}))
+				})
+			}
+		}, []clientv3.Op{putSOA1, putSOA2, putSOA3}, &rev1, &rev2, &rev3), &rev1, &rev2, &rev3)
+		waitForRevision(t, rev1, "NS (second) data removed")
+	})
+	t.Run("ANY", func(t *testing.T) {
+		queryTest(t, qs("ns1.example.net.", dns.TypeANY, dns.Msg{Answer: []dns.RR{
+			&dns.A{Hdr: dns.RR_Header{Rrtype: dns.TypeA}, A: []byte{192, 0, 2, 2}},
+			&dns.AAAA{Hdr: dns.RR_Header{Rrtype: dns.TypeAAAA}, AAAA: net.ParseIP("2001:db8::2")},
+		}}))
+	})
+	t.Run("(NXDOMAIN)", func(t *testing.T) {
+		queryTest(t, qs("non-existent.example.net.", dns.TypeANY, dns.Msg{
+			MsgHdr: dns.MsgHdr{Rcode: dns.RcodeNameError},
+			Ns:     []dns.RR{exampleNetSOA(600)},
+		}))
+	})
+	t.Run("PTR", func(t *testing.T) {
+		for _, q := range []querySpec{
+			qs("2.2.0.192.in-addr.arpa.", dns.TypePTR, dns.Msg{Answer: []dns.RR{
+				&dns.PTR{Ptr: "ns1.example.net."},
+			}}),
+			qs("2.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa.", dns.TypePTR, dns.Msg{Answer: []dns.RR{
+				&dns.PTR{Ptr: "ns1.example.net."},
+			}}),
+		} {
+			queryTest(t, q)
+		}
+	})
+	t.Run("MX", func(t *testing.T) {
+		revs(withCleanup(t, map[string]string{
+			"net.example/-defaults-/MX": `{"ttl": "2h"}`,
+			"net.example/MX#1":          `{"priority": 5, "target": "mail"}`,
+			"net.example/mail/A":        `{"ip": [192,0,2,10]}`,
+			"net.example/mail/AAAA":     `2001:0db8::10`,
+		}, func() {
+			waitForRevision(t, rev1, "MX data loaded")
+			queryTest(t, qs("example.net.", dns.TypeMX, dns.Msg{Answer: []dns.RR{
+				&dns.MX{Hdr: dns.RR_Header{Ttl: 7200}, Preference: 5, Mx: "mail.example.net."},
+			}, Extra: []dns.RR{
+				&dns.A{Hdr: dns.RR_Header{Name: "mail.example.net."}, A: []byte{192, 0, 2, 10}},
+				&dns.AAAA{Hdr: dns.RR_Header{Name: "mail.example.net."}, AAAA: net.ParseIP("2001:db8::10")},
+			}}, map[string]Condition{`->Extra`: SliceContains{All: true, Only: true}}))
+		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		waitForRevision(t, rev1, "MX data removed")
+	})
+	t.Run("TXT", func(t *testing.T) {
+		revs(withCleanup(t, map[string]string{
+			"net.example/txt/TXT#plain":         `plain string`,
+			"net.example/txt/TXT#plain-nows":    `plain-string-no-whitespace`,
+			"net.example/txt/TXT#plain-complex": `"a \"complex\" plain \\string"`,
+			"net.example/txt/TXT#plain-3":       `"plain" "one" "\\two" "and \"more\""`,
+			"net.example/txt/TXT#{}":            `{"text":"{text which begins with a curly brace (the id too)}"}`,
+			"net.example/txt/TXT#[]":            `{"text":["array", 1, "\\two", "and \"more\""]}`,
+			"net.example/txt/TXT#42":            `=42`,
+			"net.example/txt/TXT#12.34":         `=12.34`,
+		}, func() {
+			waitForRevision(t, rev1, "TXT data loaded")
+			queryTest(t, qs("txt.example.net.", dns.TypeTXT, dns.Msg{Answer: []dns.RR{
+				&dns.TXT{Txt: []string{"plain string"}},
+				&dns.TXT{Txt: []string{"plain-string-no-whitespace"}},
+				&dns.TXT{Txt: []string{"plain", "one", `\\two`, `and \"more\"`}},
+				&dns.TXT{Txt: []string{`a \"complex\" plain \\string`}},
+				&dns.TXT{Txt: []string{"{text which begins with a curly brace (the id too)}"}},
+				&dns.TXT{Txt: []string{"array", "1", `\\two`, `and \"more\"`}},
+				&dns.TXT{Txt: []string{"42"}},
+				&dns.TXT{Txt: []string{"12.34"}},
+			}}))
+		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		waitForRevision(t, rev1, "TXT data removed")
+	})
+	t.Run("versioned", func(t *testing.T) {
+		revs(withCleanup(t, map[string]string{
+			"net.example/versioned/TXT@1234.56":                      `@1234.56`,
+			"net.example/versioned/TXT@0.1":                          `@0.1`,
+			fmt.Sprintf("net.example/versioned/TXT@%s", dataVersion): fmt.Sprintf(`@%s`, dataVersion),
+		}, func() {
+			waitForRevision(t, rev1, "versioned data loaded")
+			queryTest(t, qs("versioned.example.net.", dns.TypeTXT, dns.Msg{Answer: []dns.RR{
+				&dns.TXT{Txt: []string{fmt.Sprintf("@%s", dataVersion)}},
+			}}))
+		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		waitForRevision(t, rev1, "versioned data removed")
+	})
+	t.Run("SRV", func(t *testing.T) {
+		revs(withCleanup(t, map[string]string{
+			"net.example/kerberos1/A#1":                 `=15`,
+			"net.example/kerberos1/AAAA#1":              `="15"`,
+			"net.example/kerberos2/A#":                  `=25`,
+			"net.example/kerberos2/AAAA#":               `="25"`,
+			"net.example/_tcp/_kerberos/-defaults-/SRV": `{"port": 88}`,
+			"net.example/_tcp/_kerberos/SRV#1":          `{"target": "kerberos1", "weight": 2}`,
+			"net.example/_tcp/_kerberos/SRV#2":          `="kerberos2"`,
+		}, func() {
+			waitForRevision(t, rev1, "SRV data loaded")
+			queryTest(t, qs("_kerberos._tcp.example.net.", dns.TypeSRV, dns.Msg{Answer: []dns.RR{
+				&dns.SRV{Priority: 10, Weight: 2, Port: 88, Target: "kerberos1.example.net."},
+				&dns.SRV{Priority: 10, Weight: 1, Port: 88, Target: "kerberos2.example.net."},
+			}, Extra: []dns.RR{
+				&dns.A{Hdr: dns.RR_Header{Name: "kerberos1.example.net."}, A: []byte{192, 0, 2, 15}},
+				&dns.A{Hdr: dns.RR_Header{Name: "kerberos2.example.net."}, A: []byte{192, 0, 2, 25}},
+				&dns.AAAA{Hdr: dns.RR_Header{Name: "kerberos1.example.net."}, AAAA: net.ParseIP("2001:db8::15")},
+				&dns.AAAA{Hdr: dns.RR_Header{Name: "kerberos2.example.net."}, AAAA: net.ParseIP("2001:db8::25")},
+			}}, map[string]Condition{"->Extra": SliceContains{All: true, Only: true}}))
+		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		waitForRevision(t, rev1, "SRV data removed")
+	})
+	t.Run("CNAME", func(t *testing.T) {
+		revs(withCleanup(t, map[string]string{
+			"net.example/cname.external/CNAME": `="something.example.org."`,
+			"net.example/cname.internal/CNAME": `="ns1"`,
+		}, func() {
+			waitForRevision(t, rev1, "CNAME data loaded")
+			t.Run("direct", func(t *testing.T) {
+				queryTest(t, qs("internal.cname.example.net.", dns.TypeCNAME, dns.Msg{Answer: []dns.RR{
+					&dns.CNAME{Target: "ns1.example.net."},
+				}}, map[string]Condition{"->Extra": SliceContains{All: true, Only: true}}))
+			})
+			t.Run("external/A", func(t *testing.T) {
+				queryTest(t, qs("external.cname.example.net.", dns.TypeA, dns.Msg{Answer: []dns.RR{
+					&dns.CNAME{Target: "something.example.org."},
+				}}, map[string]Condition{"->Extra": SliceContains{All: true, Only: true}}))
+			})
+			t.Run("internal/A", func(t *testing.T) {
+				queryTest(t, qs("internal.cname.example.net.", dns.TypeA, dns.Msg{Answer: []dns.RR{
+					&dns.CNAME{Target: "ns1.example.net."},
+					&dns.A{Hdr: dns.RR_Header{Name: "ns1.example.net."}, A: []byte{192, 0, 2, 2}},
+				}}, map[string]Condition{"->Extra": SliceContains{All: true, Only: true}}))
+			})
+		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		waitForRevision(t, rev1, "CNAME data removed")
+	})
+	t.Run("HINFO", func(t *testing.T) {
+		revs(withCleanup(t, map[string]string{
+			"net.example/hinfo/HINFO": `"amd64" "Linux"`,
+			fmt.Sprintf("net.example/hinfo/HINFO#not-object-supported@%s", dataVersion): `{"platform": "arm", "os": "Raspbian"}`,
+		}, func() {
+			waitForRevision(t, rev1, "HINFO data loaded")
+			queryTest(t, qs("hinfo.example.net.", dns.TypeHINFO, dns.Msg{Answer: []dns.RR{
+				&dns.HINFO{Cpu: "amd64", Os: "Linux"},
+			}}))
+		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		waitForRevision(t, rev1, "HINFO data removed")
+	})
+	t.Run("TYPExxx", func(t *testing.T) {
+		revs(withCleanup(t, map[string]string{
+			"net.example/custom/TYPE123": `\# 0`,
+			"net.example/custom/TYPE237": `\# 1 2a`,
+		}, func() {
+			waitForRevision(t, rev1, "TYPExxx data loaded")
+			for qtype, data := range map[uint16]string{
+				123: "",
+				237: "2a",
+			} {
+				queryTest(t, qs("custom.example.net.", qtype, dns.Msg{Answer: []dns.RR{
+					&dns.RFC3597{Rdata: data},
+				}}))
+			}
+		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		waitForRevision(t, rev1, "TYPExxx data removed")
+	})
+	t.Run("*", func(t *testing.T) {
+		revs(withCleanup(t, map[string]string{
+			"net.example/wildcard.*/TXT": `wildcard`,
+		}, func() {
+			waitForRevision(t, rev1, "wildcard data loaded")
+			queryTest(t, qs("something.wildcard.example.net.", dns.TypeTXT, dns.Msg{Answer: []dns.RR{
+				&dns.TXT{Hdr: dns.RR_Header{Name: "something.wildcard.example.net."}, Txt: []string{"wildcard"}},
+			}}))
+		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		waitForRevision(t, rev1, "wildcard data removed")
+	})
+	t.Run("CaSe", func(t *testing.T) {
+		revs(withCleanup(t, map[string]string{
+			"net.example/case/TXT": `PR #1`,
+		}, func() {
+			waitForRevision(t, rev1, "CaSe data loaded")
+			queryTest(t, qs("CaSe.eXample.Net.", dns.TypeTXT, dns.Msg{Answer: []dns.RR{
+				&dns.TXT{Hdr: dns.RR_Header{Name: "CaSe.eXample.Net."}, Txt: []string{"PR #1"}},
+			}}))
+		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		waitForRevision(t, rev1, "CaSe data removed")
+	})
 }
 
 func TestUnixListener(t *testing.T) {

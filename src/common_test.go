@@ -35,28 +35,32 @@ type test[Input any, Value any] struct {
 	expected ve[Value]
 }
 
-type testFunc[Input any, Value any] func(Input) (Value, error)
+type testFunc[Input any, Value any] func(*testing.T, Input) (Value, error)
 
-func check[Input any, Value any](t *testing.T, id string, f testFunc[Input, Value], in Input, expected ve[Value]) bool {
+func checkT[Input any, Value any](t *testing.T, f testFunc[Input, Value], in Input, expected ve[Value]) {
 	t.Helper()
-	return t.Run(id, func(t *testing.T) {
-		t.Helper()
-		got, err := f(in)
-		if expected.e != "" {
-			if err == nil {
-				t.Errorf(`%#+v -> expected error with %q, got value: %s`, in, expected.e, val2str(got))
-			} else if !strings.Contains(err.Error(), expected.e) {
-				t.Errorf(`%#+v -> expected error with %q, got error: %s`, in, expected.e, err)
-			}
+	got, err := f(t, in)
+	if expected.e != "" {
+		if err == nil {
+			t.Errorf(`%#+v -> expected error with %q, got value: %s`, in, expected.e, val2str(got))
+		} else if !strings.Contains(err.Error(), expected.e) {
+			t.Errorf(`%#+v -> expected error with %q, got error: %s`, in, expected.e, err)
+		}
+	} else {
+		if err != nil {
+			t.Errorf(`%#+v -> expected value: %s, got error: %s`, in, val2str(expected.v), err)
 		} else {
-			if err != nil {
-				t.Errorf(`%#+v -> expected value: %s, got error: %s`, in, val2str(expected.v), err)
-			} else {
-				if unequal := testEqual(t, expected.v, got, expected.c, ""); unequal != nil {
-					t.Errorf(`%s -> expected: %s (conditions: %s), got: %s (%s)`, val2str(in), val2str(expected.v), val2str(expected.c), val2str(got), unequal)
-				}
+			if unequal := testEqual(t, expected.v, got, expected.c, ""); unequal != nil {
+				t.Errorf(`%s -> expected: %s (conditions: %s), got: %s (%s)`, val2str(in), val2str(expected.v), val2str(expected.c), val2str(got), unequal)
 			}
 		}
+	}
+}
+
+func checkRun[Input any, Value any](t *testing.T, id string, f testFunc[Input, Value], in Input, expected ve[Value]) bool {
+	t.Helper()
+	return t.Run(id, func(t *testing.T) {
+		checkT(t, f, in, expected)
 	})
 }
 
@@ -157,55 +161,61 @@ func (m Matches) Test(t *testing.T, _ map[string]Condition, _ string, b reflect.
 }
 
 type SliceContains struct {
-	Ordered, Size bool
-	Elements      []any
+	Ordered, All, Only bool
+	Elements           []any
 }
 
-func (sc SliceContains) Test(t *testing.T, conditions map[string]Condition, path string, b reflect.Value, a ...reflect.Value) *DeepError {
+func (sc SliceContains) Test(t *testing.T, conditions map[string]Condition, path string, have reflect.Value, a ...reflect.Value) *DeepError {
 	t.Helper()
-	have := b
-	if have.Kind() == reflect.Slice {
-		n, i, haveN := 0, 0, have.Len()
-		var need reflect.Value // reflecting the elements slice
-		if len(a) > 0 {
-			need = a[0]
-		} else {
-			need = reflect.ValueOf(sc.Elements)
+	if have.Kind() != reflect.Slice {
+		return DeepErrorf("not a slice (%s)", have.Type().String())
+	}
+	var need reflect.Value // reflecting the elements slice
+	if len(a) > 0 {
+		need = a[0]
+	} else {
+		need = reflect.ValueOf(sc.Elements)
+	}
+	haveN, needN := have.Len(), need.Len()
+	need2have := map[int]int{}
+	have2need := map[int]int{}
+NEED:
+	for i, j := 0, 0; j < needN; j++ {
+		if !sc.Ordered {
+			i = 0
 		}
-		needN := need.Len()
-	NEED:
-		for j := 0; j < needN; j++ {
-			if !sc.Ordered {
-				i = 0
+		var causes []*DeepError
+		for ; i < haveN; i++ {
+			if err := testEqualR(t, need.Index(j), have.Index(i), conditions, fmt.Sprintf("%s@%d", path, j)); err == nil {
+				need2have[j] = i
+				have2need[i] = j
+				continue NEED
+			} else if sc.Ordered && sc.All {
+				return DeepErrorf("unequal element @%d", i)
+			} else {
+				causes = append(causes, err)
 			}
-			var causes []*DeepError
-			for ; i < haveN; i++ {
-				if err := testEqualR(t, need.Index(j), have.Index(i), conditions, fmt.Sprintf("%s@%d", path, j)); err == nil {
-					n++
-					continue NEED
-				} else if sc.Ordered && sc.Size {
-					return DeepErrorf("unequal element @%d", i)
-				} else {
-					causes = append(causes, err)
-				}
-			}
+		}
+		if sc.All {
 			if len(causes) > 1 {
 				causesString := ""
 				for _, cause := range causes {
 					causesString += fmt.Sprintf(" [%s]", cause)
 				}
-				return DeepErrorf("missing needed element @%d, possible causes:%s]", j, causesString)
+				return DeepErrorf("missing needed element @%d, possible causes:%s", j, causesString)
 			} else if len(causes) == 1 {
 				return &DeepError{fmt.Errorf("missing needed element @%d", j), causes[0]}
 			}
 			return DeepErrorf("missing needed element @%d, empty slice", j)
 		}
-		if sc.Size && n != haveN {
-			return DeepErrorf("missing or extra elements with 'Size' set (need %d, have %d)", n, haveN)
-		}
-		return nil
 	}
-	return DeepErrorf("not a slice (%T)", have)
+	if sc.All && len(need2have) != needN {
+		return DeepErrorf("missing elements with 'All' set (need %d, found %d)", needN, len(need2have))
+	}
+	if sc.Only && len(have2need) != haveN {
+		return DeepErrorf("unexpected elements with 'Only' set (%d)", haveN-len(have2need))
+	}
+	return nil
 }
 
 func testEqual(t *testing.T, a, b any, conditions map[string]Condition, path string) *DeepError {

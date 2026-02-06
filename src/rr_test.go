@@ -170,16 +170,16 @@ func TestParseOctets(t *testing.T) {
 		{ip{6, 0, "1:::3"}, ve[bs]{e: "IPv6"}},
 	} {
 		pf := func(ipVer int, asPrefix bool) testFunc[any, bs] {
-			return func(in any) (bs, error) {
+			return func(_ *testing.T, in any) (bs, error) {
 				return parseOctets(in, ipVer, asPrefix)
 			}
 		}
 		for _, ipVer := range []int{4, 6} {
 			if (spec.input.ver == 0 || spec.input.ver == ipVer) && spec.input.pos < 1 {
-				check[any, bs](t, fmt.Sprintf("(%d)v%d,prefix:%#v", i+1, ipVer, spec.input.in), pf(ipVer, true), spec.input.in, spec.expected)
+				checkRun[any, bs](t, fmt.Sprintf("(%d)v%d,prefix:%#v", i+1, ipVer, spec.input.in), pf(ipVer, true), spec.input.in, spec.expected)
 			}
 			if (spec.input.ver == 0 || spec.input.ver == ipVer) && spec.input.pos > -1 {
-				check[any, bs](t, fmt.Sprintf("(%d)v%d,suffix:%#v", i+1, ipVer, spec.input.in), pf(ipVer, false), spec.input.in, spec.expected)
+				checkRun[any, bs](t, fmt.Sprintf("(%d)v%d,suffix:%#v", i+1, ipVer, spec.input.in), pf(ipVer, false), spec.input.in, spec.expected)
 			}
 		}
 	}
