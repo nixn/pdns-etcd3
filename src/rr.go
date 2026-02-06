@@ -522,12 +522,43 @@ func mx(params *rrParams) {
 }
 
 func txt(params *rrParams) {
-	// TODO one TXT records allows for multiple sub-strings!! strings with whitespaces must be quoted by " (and quotes escaped), otherwise they can be unquoted
-	// they have to be of length <= 255, RFC 1035 3.3.par2
-	text, vPath, err := getValue[string]("text", params)
+	text, vPath, err := getValue[any]("text", params)
 	if vPath == nil || err != nil {
 		params.log("vp", ptr2str(vPath, "s"), "error", err).Error("failed to get value for 'text'")
 		return
 	}
-	params.SetContent(text, nil)
+	var ts []any
+	switch t := text.(type) {
+	case string, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		ts = []any{t}
+	case []any:
+		ts = t
+	default:
+		params.log("vp", vPath.String(), "type", fmt.Sprintf("%T", text)).Error("invalid type for 'text' (expected a string or number or an array thereof)")
+		return
+	}
+	if len(ts) == 0 {
+		params.log("vp", vPath.String()).Error("empty array for 'text'")
+		return
+	}
+	content := ""
+	for i, t := range ts {
+		if i > 0 {
+			content += " "
+		}
+		switch t := t.(type) {
+		case string:
+			content += fmt.Sprintf("%q", t)
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			content += fmt.Sprintf(`"%d"`, t)
+		case float32:
+			content += fmt.Sprintf("%q", float2decimal(float64(t)))
+		case float64:
+			content += fmt.Sprintf("%q", float2decimal(t))
+		default:
+			params.log("vp", vPath.String(), "type", fmt.Sprintf("%T", t)).Errorf("invalid type for 'text' element at index %d (expected a string or number)", i)
+			return
+		}
+	}
+	params.SetContent(content, nil)
 }

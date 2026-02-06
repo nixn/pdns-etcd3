@@ -200,7 +200,7 @@ from above: 1, 2 (only added entries), 4, 6, 8 and 9.
 
 #### Current version
 
-The current data version is `0.1.1` and is described in this document.
+The current data version is `0.1.2` and is described in this document.
 
 ### Defaults and options
 
@@ -492,12 +492,16 @@ Options:
   * [see `SOA`](#soa) for description
 
 #### `TXT`
-* `text`: string
+* `text`: string or number or an array of strings or numbers
+  * numbers are always converted to strings
 
 ## Changelog
 
 The changelog lists every change which led to a data version increase (major or minor).
 One can use it to check their data - whether an adjustment is needed for a new program version which has a new data version.
+
+### 0.1.2
+* added numbers and arrays to `TXT:text`
 
 ### 0.1.1
 * added options (keyword `-options-`)
@@ -541,6 +545,8 @@ DNS/net.example/mail/A → '{"ip": [192,0,2,10]}'
 DNS/net.example/mail/AAAA → '2001:db8::10'
 DNS/net.example/TXT#spf → 'v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all'
 DNS/net.example/TXT#{} → '{"text":"{text which begins with a curly brace (the id too)}"}'
+DNS/net.example/TXT#"" → '="some string"'
+DNS/net.example/TXT#[] → '=["string 1", 2, "string 3"]'
 DNS/net.example/kerberos1/A#1 → '192.0.2.15'
 DNS/net.example/kerberos1/AAAA#1 → '2001:db8::15'
 DNS/net.example/kerberos2/A# → '192.0.2.25'

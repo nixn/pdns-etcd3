@@ -15,7 +15,6 @@ limitations under the License. */
 package src
 
 import (
-	"cmp"
 	"fmt"
 	"io"
 	"os"
@@ -175,6 +174,11 @@ func err2str(err error) string {
 
 func float2int(n float64) (int64, error) {
 	return strconv.ParseInt(fmt.Sprintf("%.0f", n), 10, 64)
+}
+
+func float2decimal(n float64) string {
+	str := fmt.Sprintf("%f", n)
+	return strings.TrimRight(str, "0.,")
 }
 
 func wgGo(wg *sync.WaitGroup, f func()) {

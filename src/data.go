@@ -26,7 +26,7 @@ import (
 
 var (
 	// update this when changing data structure (only major/minor, patch is always 0). also change it in docs!
-	dataVersion = VersionType{IsDevelopment: true, Major: 1, Minor: 1}
+	dataVersion = VersionType{IsDevelopment: true, Major: 1, Minor: 2}
 )
 
 type recordType struct {
