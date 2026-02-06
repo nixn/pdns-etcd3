@@ -19,7 +19,7 @@ import (
 )
 
 var (
-	programVersion = P.VersionType{IsDevelopment: true} // update this in a release branch
+	programVersion = P.VersionType{IsDevelopment: true, Major: 3, Minor: 0} // update this in a release branch
 	gitVersion     = "GIT_VERSION_UNSET"
 )
 
