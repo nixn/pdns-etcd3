@@ -306,7 +306,7 @@ func startPDNS(t *testing.T) (*ctInfo, error) {
 	var image string
 	var fromDockerfile testcontainers.FromDockerfile
 	repo := "localhost/pdns-etcd3/pdns"
-	v := getenvT("PDNS_VERSION", "51")
+	v := getenvT("PDNS_VERSION", "50")
 	switch v {
 	case "34", "40", "41":
 		t.Logf("Using PDNS image %s:%s (from testdata/pdns-%s/Dockerfile)", repo, v, v)
