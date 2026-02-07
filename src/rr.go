@@ -202,12 +202,12 @@ func getDuration(key string, params *rrParams) (time.Duration, *valuePath, error
 func getHostname(key string, params *rrParams) (string, *valuePath, error) {
 	hostname, vPath, err := getValue[string](key, params)
 	if vPath == nil || err != nil {
-		return "", vPath, fmt.Errorf("failed to get %s.%s as string: vp=%s, err=%s", params.Target(), key, *ptr2strS(vPath), err)
+		return "", vPath, fmt.Errorf("failed to get %s.%s as string: vp=%s, err=%v", params.Target(), key, *ptr2strS(vPath), err)
 	}
 	hostname = strings.TrimSpace(hostname)
 	hostname, err = fqdn(hostname, params)
 	if err != nil {
-		return "", vPath, fmt.Errorf("failed to append zone domain to %s.%s: %s", params.Target(), key, err)
+		return "", vPath, fmt.Errorf("failed to append zone domain to %s.%s: %v", params.Target(), key, err)
 	}
 	return hostname, vPath, nil
 }
@@ -216,7 +216,7 @@ func domainName(key string) rrFunc {
 	return func(params *rrParams) {
 		name, vPath, err := getHostname(key, params)
 		if vPath == nil || err != nil {
-			params.exlog("vp", ptr2strS(vPath), "error", err).Errorf("failed to get %s.%s", params.Target(), key)
+			params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get %s.%s: %v", params.Target(), key, err)
 			return
 		}
 		params.SetContent(name, nil)
@@ -227,18 +227,18 @@ func soa(params *rrParams) {
 	// primary
 	primary, vPath, err := getValue[string]("primary", params)
 	if vPath == nil || err != nil {
-		params.exlog("vp", ptr2strS(vPath), "error", err).Error("failed to get value for 'primary'")
+		params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get value for 'primary': %v", err)
 		return
 	}
 	primary = strings.TrimSpace(primary)
 	primary, err = fqdn(primary, params)
 	if err != nil {
-		params.exlog("vp", vPath.String(), "error", err).Error("failed to append zone domain to 'primary'")
+		params.exlog("vp", vPath.String()).Errorf("failed to append zone domain to 'primary': %v", err)
 	}
 	// mail
 	mail, vPath, err := getValue[string]("mail", params)
 	if vPath == nil || err != nil {
-		params.exlog("vp", ptr2strS(vPath), "error", err).Error("failed to get value for 'mail'")
+		params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get value for 'mail': %v", err)
 		return
 	}
 	mail = strings.TrimSpace(mail)
@@ -256,32 +256,32 @@ func soa(params *rrParams) {
 	}
 	mail, err = fqdn(mail, params)
 	if err != nil {
-		params.exlog("vp", vPath.String(), "error", err).Error("failed to append zone domain to 'mail'")
+		params.exlog("vp", vPath.String()).Errorf("failed to append zone domain to 'mail': %v", err)
 	}
 	// serial
 	serial := params.data.zoneRev() // no need for findZone(), because SOA defines the zone
 	// refresh
 	refresh, vPath, err := getDuration("refresh", params)
 	if vPath == nil || err != nil {
-		params.exlog("vp", ptr2strS(vPath), "error", err).Error("failed to get value for 'refresh'")
+		params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get value for 'refresh': %v", err)
 		return
 	}
 	// retry
 	retry, vPath, err := getDuration("retry", params)
 	if vPath == nil || err != nil {
-		params.exlog("vp", ptr2strS(vPath), "error", err).Error("failed to get value for 'retry'")
+		params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get value for 'retry': %v", err)
 		return
 	}
 	// expire
 	expire, vPath, err := getDuration("expire", params)
 	if vPath == nil || err != nil {
-		params.exlog("vp", ptr2strS(vPath), "error", err).Error("failed to get value for 'expire'")
+		params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get value for 'expire': %v", err)
 		return
 	}
 	// negative ttl
 	negativeTTL, vPath, err := getDuration("neg-ttl", params)
 	if vPath == nil || err != nil {
-		params.exlog("vp", ptr2strS(vPath), "error", err).Error("failed to get value for 'neg-ttl'")
+		params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get value for 'neg-ttl': %v", err)
 		return
 	}
 	// TODO handle option 'not-authoritative' (alias 'not-aa'?)
@@ -456,13 +456,13 @@ func parseOctets(value any, ipVer int, asPrefix bool) ([]byte, error) {
 func ipRR(params *rrParams, ipVer int) {
 	value, vPath, err := getValue[any]("ip", params)
 	if vPath == nil || err != nil {
-		params.exlog("vp", ptr2strS(vPath), "error", err).Error("failed to get value for 'ip'")
+		params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get value for 'ip': %v", err)
 		return
 	}
 	var prefix []byte
 	prefixAny, oPath, err := findValue[any](ipPrefixOption, params.qtype, params.id, params.data, optionsEntry, false)
 	if err != nil {
-		params.exlog("vp", vPath.String(), "error", err).Errorf("failed to get option %q", ipPrefixOption)
+		params.exlog("vp", vPath.String()).Errorf("failed to get option %q: %v", ipPrefixOption, err)
 		return
 	}
 	if oPath != nil {
@@ -511,22 +511,22 @@ func aaaa(params *rrParams) {
 func srv(params *rrParams) {
 	priority, vPath, err := getUint16("priority", params)
 	if vPath == nil || err != nil {
-		params.log("vp", ptr2strS(vPath), "error", err).Error("failed to get value for 'priority'")
+		params.log("vp", ptr2strS(vPath)).Errorf("failed to get value for 'priority': %v", err)
 		return
 	}
 	weight, vPath, err := getUint16("weight", params)
 	if vPath == nil || err != nil {
-		params.log("vp", ptr2strS(vPath), "error", err).Error("failed to get value for 'weight'")
+		params.log("vp", ptr2strS(vPath)).Errorf("failed to get value for 'weight': %v", err)
 		return
 	}
 	port, vPath, err := getUint16("port", params)
 	if vPath == nil || err != nil {
-		params.log("vp", ptr2strS(vPath), "error", err).Error("failed to get value for 'port'")
+		params.log("vp", ptr2strS(vPath)).Errorf("failed to get value for 'port': %v", err)
 		return
 	}
 	target, vPath, err := getHostname("target", params)
 	if vPath == nil || err != nil {
-		params.log("vp", ptr2strS(vPath), "error", err).Error("failed to get value for 'target'")
+		params.log("vp", ptr2strS(vPath)).Errorf("failed to get value for 'target': %v", err)
 		return
 	}
 	content := fmt.Sprintf("{priority:%%d }%d %d %s", weight, port, target)
@@ -536,12 +536,12 @@ func srv(params *rrParams) {
 func mx(params *rrParams) {
 	priority, vPath, err := getUint16("priority", params)
 	if vPath == nil || err != nil {
-		params.exlog("vp", ptr2strS(vPath), "error", err).Error("failed to get value for 'priority'")
+		params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get value for 'priority': %v", err)
 		return
 	}
 	target, vPath, err := getHostname("target", params)
 	if vPath == nil || err != nil {
-		params.log("vp", ptr2strS(vPath), "error", err).Error("failed to get value for 'target'")
+		params.log("vp", ptr2strS(vPath)).Errorf("failed to get value for 'target': %v", err)
 		return
 	}
 	content := fmt.Sprintf("{priority:%%d }%s", target)
@@ -551,7 +551,7 @@ func mx(params *rrParams) {
 func txt(params *rrParams) {
 	text, vPath, err := getValue[any]("text", params)
 	if vPath == nil || err != nil {
-		params.log("vp", ptr2strS(vPath), "error", err).Error("failed to get value for 'text'")
+		params.log("vp", ptr2strS(vPath)).Errorf("failed to get value for 'text': %v", err)
 		return
 	}
 	var ts []any
