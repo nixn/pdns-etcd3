@@ -78,7 +78,7 @@ The content can be one of the following:
   Subject to change (NOT YET IMPLEMENTED): Plain strings for probably most or even all object-supported records will be parsed,
   gaining support for defaults, syntax-checking and more without using object-style notation.
 
-* A forced plain string, if it begins with `` ` `` (a backquote)<br>
+* A forced plain string, if it begins with `` ` `` (a backquote).<br>
   Effectively the same as a normal plain string, but no interpretation as a special notation (other markers from below) is applied.
   The leading backquote is not included in the resulting value (string). The string remains subject to parsing (parsing not yet implemented).
 
@@ -86,6 +86,9 @@ The content can be one of the following:
   Objects are the heart of the data. They store values for the content fields, have multiple syntax possibilities,
   are supported for default/inherited values and options handling (see below for details).<br>
   Objects can only be used for supported resource records. See below for more details to object-supported records.
+
+* A [YAML][] object, if it begins with `---`, followed by a newline.<br>
+  Same as a JSON5 object, but written in YAML syntax.
 
 * A last-field-value, if it begins with `=`.<br>
   If an object-supported resource record has only one field (e.g. `CNAME`, `A`), or only one field left which is not set
@@ -97,9 +100,6 @@ The content can be one of the following:
     * `com.example/www-1/A` => `="1.2.3.4"` (fills the `ip` field)
     * `com.example/www-2/A` => `=7` (when the option `ip-prefix` is set to something like `1.2.3.`)
     * `com.example/NS#1` => `="ns1"` (still utilizing the automatic zone appending)
-
-* A YAML object, if it begins with `---`, followed by a newline. **(NOT IMPLEMENTED YET)**<br>
-  Same as a JSON5 object, but written in YAML syntax.
 
 (All markers do not accept whitespace before them, they would be read as plain strings then.)
 
@@ -118,6 +118,9 @@ to specify the TTL for the entry `<domain>/HINFO` → `<plain content for HINFO>
 For each record field a default value is searched for and used, if the entry value
 does not specify the field value itself. If no value is found for the field,
 an error message is logged and the record entry is ignored.
+
+[JSON5]: https://json5.org/
+[YAML]: https://yaml.org/
 
 ### Version (versioned entries)
 
@@ -250,7 +253,7 @@ The defaults/options with an `#<id>` part are only used for the corresponding `w
 
 Of course, the values in the record itself (`com/example/www/A#<id>`) override all defaults.
 
-Defaults/options entries must be (currently only [JSON5][]) objects, with any number of fields (including zero).
+Defaults/options entries must be objects, with any number of fields (including zero).
 Defaults/options entries may be non-existent, which is equivalent to an empty object.
 
 Field names of defaults objects are the same as record field names. That means there could
@@ -260,8 +263,6 @@ so take care yourself.<br>
 An example: the `ip` field from `A` is not compatible to the `ip` field from `AAAA`.
 
 Field names of defaults and options objects are case-sensitive.
-
-[JSON5]: https://json5.org
 
 ## Supported records
 
@@ -508,6 +509,7 @@ One can use it to check their data - whether an adjustment is needed for a new p
 
 ### 0.1.3
 * allow JSON5 syntax
+* allow YAML syntax for objects
 * added `` ` `` (backquote) marker
 
 ### 0.1.2
@@ -526,7 +528,7 @@ Initial version (base).
 
 ## Full example
 
-*To be precise on the value, it is always enclosed in '...' (single quotes); they are not part of the value themselves.*
+*To be precise on the value, it is almost always (except for YAML) enclosed in '...' (single quotes); they are not part of the value themselves.*
 
 * `prefix` is `DNS/`<br>
 (note the trailing slash, it is part of the prefix, *not* inserted automatically)
@@ -535,7 +537,12 @@ Global defaults:
 ```
 DNS/-defaults- → '{ttl: "1h"} // can omit quotes on simple keys; and use comments!'
 DNS/-defaults-/SRV → '{priority: 0, weight: 0 /* should set to 10 and override when appropriate */}'
-DNS/-defaults-/SOA → '{refresh: "1h", retry: "30m", expire: 604800, "neg-ttl": "10m"}'
+DNS/-defaults-/SOA → (the following lines give the value in YAML syntax; the indentation is only for presentation in this document)
+                     ---
+                     refresh: 1h
+                     retry: 30m
+                     expire: 604800
+                     neg-ttl: 10m
 ```
 
 Forward zone for `example.net`:

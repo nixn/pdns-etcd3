@@ -10,6 +10,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.33.0
 	github.com/titanous/json5 v1.0.0
 	go.etcd.io/etcd/client/v3 v3.5.15
+	go.yaml.in/yaml/v4 v4.0.0-rc.4
 	golang.org/x/net v0.33.0
 )
 

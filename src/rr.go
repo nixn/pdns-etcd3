@@ -129,22 +129,43 @@ func getValue[T any](key string, params *rrParams) (T, *valuePath, error) {
 	return value, &qPath, nil
 }
 
+func asNumber[T interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64
+}](value any, min, max int64) (T, error) {
+	var val int64
+	switch value := value.(type) {
+	case float64:
+		if v, err := float2int(value); err != nil {
+			return 0, fmt.Errorf("failed to convert float (%v) to int: %s", value, err)
+		} else {
+			val = v
+		}
+	case int:
+		val = int64(value)
+	default:
+		return 0, fmt.Errorf("not a float64 or int: %T", value)
+	}
+	if val < min {
+		return 0, fmt.Errorf("out of range: < %d", min)
+	} else if max > min && val > max {
+		return 0, fmt.Errorf("out of range: > %d", max)
+	}
+	return T(val), nil
+}
+
 func getUint16(key string, params *rrParams) (uint16, *valuePath, error) {
-	valueF, vPath, err := getValue[float64](key, params)
+	value, vPath, err := getValue[any](key, params)
 	if err != nil {
-		return 0, vPath, fmt.Errorf("failed to get %s.%s as float64: %s", params.Target(), key, err)
+		return 0, vPath, fmt.Errorf("failed to get %s.%s: %s", params.Target(), key, err)
 	}
 	if vPath == nil {
 		return 0, nil, nil
 	}
-	valueI, err := float2int(valueF)
-	if err != nil {
-		return 0, vPath, fmt.Errorf("failed to convert float (%v) to int: %s", valueF, err)
+	if value, err := asNumber[uint16](value, 0, 65535); err != nil {
+		return 0, vPath, err
+	} else {
+		return value, vPath, nil
 	}
-	if valueI < 0 || valueI > 65535 {
-		return 0, vPath, fmt.Errorf("out of range (0-65535)")
-	}
-	return uint16(valueI), vPath, nil
 }
 
 func getDuration(key string, params *rrParams) (time.Duration, *valuePath, error) {
@@ -157,12 +178,12 @@ func getDuration(key string, params *rrParams) (time.Duration, *valuePath, error
 	}
 	var dur time.Duration
 	switch value := value.(type) {
-	case float64:
-		valueI, err := float2int(value)
-		if err != nil {
-			return 0, vPath, fmt.Errorf("failed to convert float (%v) to int: %s", value, err)
+	case float64, int:
+		if value, err := asNumber[int64](value, 1, -1); err != nil {
+			return 0, vPath, err
+		} else {
+			dur = time.Duration(value) * time.Second
 		}
-		dur = time.Duration(valueI) * time.Second
 	case string:
 		if v, err := time.ParseDuration(value); err == nil {
 			dur = v
@@ -170,7 +191,7 @@ func getDuration(key string, params *rrParams) (time.Duration, *valuePath, error
 			return 0, vPath, fmt.Errorf("parse error: %s", err)
 		}
 	default:
-		return 0, vPath, fmt.Errorf("invalid value type (neither a number nor a string): %T", value)
+		return 0, vPath, fmt.Errorf("invalid value type (not a float64, int or string): %T", value)
 	}
 	if dur < time.Second {
 		return 0, vPath, fmt.Errorf("must be >= 1s")
@@ -275,7 +296,7 @@ func parseOctets(value any, ipVer int, asPrefix bool) ([]byte, error) {
 	sepFirst := false
 	sepLast := false
 	switch value := value.(type) {
-	case float64:
+	case float64, int:
 		values = append(values, value)
 	case string:
 		if value == "" {
@@ -400,6 +421,12 @@ func parseOctets(value any, ipVer int, asPrefix bool) ([]byte, error) {
 		switch v := v.(type) {
 		case byte:
 			octets = append(octets, v)
+		case int:
+			if b, err := asNumber[byte](v, 0, 255); err != nil {
+				return nil, fmt.Errorf("octet #%d (%v): %v", i, v, err)
+			} else {
+				octets = append(octets, b)
+			}
 		case float64:
 			vI, err := float2int(v)
 			if err != nil {

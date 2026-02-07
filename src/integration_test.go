@@ -134,7 +134,7 @@ func TestPipeRequests(t *testing.T) {
 	}
 	rev1 := txnT(t,
 		put("net.example/SOA", `{"primary": "ns1", "mail": "horst.master"}`),
-		put("-defaults-/SOA", `{"refresh": "1h", "retry": "30m", "expire": 604800, "neg-ttl": "10m"}`),
+		put("-defaults-/SOA", "---\n#this is yaml\nrefresh: 1h\nretry: 30m\nexpire: 604800\nneg-ttl: 10m\n"),
 		put("-defaults-", `{"ttl": "1h"}`),
 	)
 	rev2 := txnT(t,
@@ -156,8 +156,8 @@ func TestPipeRequests(t *testing.T) {
 	t.Run("ns", func(t *testing.T) {
 		revs(txnT(t,
 			put("net.example/NS#first", `{"hostname": "ns"}`),
-			put("net.example/-options-/A", `{"ip-prefix": [192, 0, 2]}`),
-			put("net.example/ns/A", `=2`),
+			put("net.example/-options-/A", "---\nip-prefix: [192, 0, 2]"),
+			put("net.example/ns/A", "---\nip: 2"),
 			put("net.example/-options-/AAAA", `{"ip-prefix": "20010db8"}`),
 			put("net.example/ns/AAAA", `="02"`),
 			put("arpa.in-addr/192.0.2/2/PTR", `="ns"`),
@@ -397,7 +397,7 @@ func TestWithPDNS(t *testing.T) {
 	var rev1, rev2, rev3 int64
 	revs(txnT(t,
 		put("-defaults-", `{ttl: "1h"}`),
-		put("-defaults-/SOA", `{refresh: "1h", retry: "30m", expire: 604800, "neg-ttl": "10m", primary: "ns1", mail: "horst.master"}`),
+		put("-defaults-/SOA", "---\n#this is yaml\nrefresh: 1h\nretry: 30m\nexpire: 604800\nneg-ttl: 10m\nprimary: ns1\nmail: horst.master\n"),
 		put("-defaults-/SRV", `{priority: 10, weight: 1}`),
 		put("arpa.in-addr/192.0.2/-options-", `{"zone-append-domain": "example.net."}`),
 		put("arpa.ip6/2.0.0.1.0.d.b.8/-options-", `{"zone-append-domain": "example.net."}`),
@@ -627,6 +627,7 @@ func TestWithPDNS(t *testing.T) {
 			"net.example/_tcp/_kerberos/-defaults-/SRV": `{"port": 88}`,
 			"net.example/_tcp/_kerberos/SRV#1":          `{"target": "kerberos1", "weight": 2}`,
 			"net.example/_tcp/_kerberos/SRV#2":          `="kerberos2"`,
+			"net.example/_tcp/_kerberos/SRV#invalid":    "---\ntarget: invalid\nport: 70000",
 		}, func() {
 			waitForRevision(t, rev1, "SRV data loaded")
 			queryTest(t, qs("_kerberos._tcp.example.net.", dns.TypeSRV, dns.Msg{Answer: []dns.RR{

@@ -22,6 +22,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/titanous/json5"
+	"go.yaml.in/yaml/v4"
 )
 
 var (
@@ -333,35 +334,40 @@ func parseEntryKey(key string) (name nameType, entryType entryType, qtype, id st
 }
 
 func parseEntryContent(value []byte, entryType entryType) (any, error) {
-	if len(value) == 0 {
+	l := len(value)
+	if l == 0 {
 		if entryType == normalEntry {
 			return stringValueType(""), nil
 		}
 		return nil, fmt.Errorf("empty")
 	}
-	switch value[0] {
-	case '`':
+	switch {
+	case value[0] == '`':
 		if entryType != normalEntry {
 			return nil, fmt.Errorf("a non-normal entry must be an object")
 		}
 		return stringValueType(value[1:]), nil
-	case '=': // last-field-value syntax
+	case value[0] == '=': // last-field-value syntax
 		if entryType != normalEntry {
 			return nil, fmt.Errorf("a non-normal entry must be an object")
 		}
 		var content any
-		err := json5.Unmarshal(value[1:], &content)
-		if err != nil {
+		if err := json5.Unmarshal(value[1:], &content); err != nil {
 			return nil, fmt.Errorf("failed to parse as JSON value: %s", err)
 		}
 		return lastFieldValueType(content), nil
-	case '{':
-		var values objectType[any]
-		err := json5.Unmarshal(value, &values)
-		if err != nil {
+	case value[0] == '{':
+		var values objectValueType
+		if err := json5.Unmarshal(value, &values); err != nil {
 			return nil, fmt.Errorf("failed to parse as JSON object: %s", err)
 		}
-		return objectValueType(values), nil
+		return values, nil
+	case l >= 4 && slicePrefixed(value, '-', '-', '-') && (value[3] == '\n' || value[3] == '\r'):
+		var values objectValueType
+		if err := yaml.Unmarshal(value, &values); err != nil {
+			return nil, fmt.Errorf("failed to parse as YAML object: %s", err)
+		}
+		return values, nil
 	}
 	if entryType == normalEntry {
 		return stringValueType(value), nil

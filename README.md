@@ -23,6 +23,8 @@ the third development release, considered alpha quality. Any testing is apprecia
 * Replication is handled by the ETCD cluster, no additional configuration is needed for using multiple authoritative PowerDNS servers.
   * DNS responses are nearly instantly up-to-date (on every server instance!) after data changes by using a watcher into ETCD (multi-master)
 * [Multiple syntax possibilities](doc/ETCD-structure.md#syntax) for (values of) object-supported records
+  * [JSON5][] or [YAML][]
+  * different representations of values (e.g. an IPv4 as `"192.0.2.1"` or `[192, 0, 2, 1]` or more...)
 * [Short syntax for single-value objects](doc/ETCD-structure.md#resource-record-values)
   * or for the last value left when using defaults (e.g. [`target` in `SRV`](doc/ETCD-structure.md#srv))
 * [Default prefix for IP addresses](doc/ETCD-structure.md#a)
@@ -34,8 +36,10 @@ the third development release, considered alpha quality. Any testing is apprecia
 * [Multi-level defaults and options](doc/ETCD-structure.md#defaults-and-options), overridable
 * [Upgrade data structure](doc/ETCD-structure.md#upgrading) (if needed for new program version) without interrupting service
 * Run [standalone](#standalone-modes) for usage as a [Unix or HTTP connector][pdns-remote-usage]
-  * This could be needed for big data sets, because the initialization from PowerDNS is done lazily (at least in v4) on first request (which possibly could time out on "big data"…) :-(
+  * This could be needed for big data sets, because the initialization from PowerDNS is done lazily (at least as of v4) on first request (which possibly could time out on "big data"…) :-(
 
+[JSON5]: https://json5.org/
+[YAML]: https://yaml.org/
 [pdns-qtypes]: https://doc.powerdns.com/authoritative/appendices/types.html
 
 #### Planned
@@ -50,12 +54,10 @@ the third development release, considered alpha quality. Any testing is apprecia
 * "Labels" for selectively applying defaults and/or options to record entries
   * sth. like `com/example/-options-ptr` → `{"auto-ptr": true}` and `com/example/www/-options-collect` → `{"collect": …}` for `com/example/www-1/A+ptr+collect` without global options
   * precedence betweeen QTYPE and id (id > label > QTYPE)
-* Support [YAML][] by [k8s-yaml](https://sigs.k8s.io/yaml)
 * DNSSEC support ([PowerDNS DNSSEC-specific calls][pdns-dnssec])
 
 [pdns-dnssec]: https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dnssec-support
 [pdns-remote-usage]: https://doc.powerdns.com/authoritative/backends/remote.html#usage
-[yaml]: https://yaml.org/
 
 #### Optional
 

@@ -249,3 +249,13 @@ func recoverFunc(v any, name string, exit bool) bool {
 func closeNoError(c io.Closer) {
 	_ = c.Close()
 }
+
+func slicePrefixed[T comparable](slice []T, prefix ...T) bool {
+	l := len(slice)
+	for i, t := range prefix {
+		if i >= l || slice[i] != t {
+			return false
+		}
+	}
+	return true
+}
