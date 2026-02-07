@@ -215,7 +215,7 @@ See [ETCD structure](doc/ETCD-structure.md). The structure lies beneath the `pre
 
 ## Compatibility
 
-pdns-etcd3 is tested on PowerDNS versions 3.y.z and different 4.y.z, and uses an ETCD v3 cluster (API 3.0 or higher).
+pdns-etcd3 is tested on different PowerDNS versions (3.y.z, 4.y.z, and 5.y.z) and uses an ETCD v3 cluster (API 3.0 or higher).
 It's only one version of each minor (.y), but most likely all (later and earlier) "patch" versions (.z) are compatible.
 Therefore, each release shall state which exact versions were used for testing,
 so one can be sure to have a working combination for deploying, when using those (tested) versions.

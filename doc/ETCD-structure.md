@@ -54,10 +54,10 @@ It is also *the* way to store multiple values for a resource record (multiple en
 Normally one need not give a version to any entry. After such an upgrade there should be no versioned entries anymore. See below for details.
 
 Examples:
-* `com/example/www/A`
-* `com/example/NS#1` (record entry with id `1`)
-* `com/example/SOA@1.1` (record entry with version `1.1`)
-* `com/example/TXT#spf@2` (record entry with id `spf` and version `2`)
+* `com/example/www/A` (A record entry for `www.example.com`)
+* `com/example/NS#1` (NS record entry with id `1`)
+* `com/example/SOA@1.1` (SOA record entry with version `1.1`)
+* `com/example/TXT#spf@2` (TXT record entry with id `spf` and version `2`)
 * `com.example/dept.fin/SOA` (mixed `.` and `/`, resulting domain is `fin.dept.example.com.`)
 
 ### Resource Record values
@@ -410,7 +410,7 @@ Values must be positive (that is >= 1 second).
 
 #### `SOA`
 * `primary`: domain name
-* `mail`: an e-mail address, in regular syntax (`mail@example.net.`), but the domain name undergoes the zone append check,
+* `mail`: string; an e-mail address, in regular syntax (`"mail@example.net."`), but the domain name undergoes the zone append check,
 as described in syntax for "domain name"! It also can be only the local part (without `@<domain>`), then the zone domain name is appended.
 * `refresh`: duration
 * `retry`: duration
