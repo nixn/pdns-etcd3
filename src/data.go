@@ -15,18 +15,18 @@ limitations under the License. */
 package src
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"github.com/titanous/json5"
 )
 
 var (
 	// update this when changing data structure (only major/minor, patch is always 0). also change it in docs!
-	dataVersion = VersionType{IsDevelopment: true, Major: 1, Minor: 2}
+	dataVersion = VersionType{IsDevelopment: true, Major: 1, Minor: 3}
 )
 
 type recordType struct {
@@ -345,14 +345,14 @@ func parseEntryContent(value []byte, entryType entryType) (any, error) {
 			return nil, fmt.Errorf("a non-normal entry (defaults or options) must be an object")
 		}
 		var content any
-		err := json.Unmarshal(value[1:], &content)
+		err := json5.Unmarshal(value[1:], &content)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse as JSON value: %s", err)
 		}
 		return lastFieldValueType(content), nil
 	case '{':
 		var values objectType[any]
-		err := json.Unmarshal(value, &values)
+		err := json5.Unmarshal(value, &values)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse as JSON object: %s", err)
 		}

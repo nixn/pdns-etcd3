@@ -82,7 +82,7 @@ The content can be one of the following:
   Effectively the same as a normal plain string, but no interpretation as a special notation (other markers from below) is applied.
   The leading backquote is not included in the resulting value (string). The string remains subject to parsing.
 
-* A JSON object, if it begins with `{`.<br>
+* A [JSON5][] object ("JSON for Humans"), if it begins with `{`.<br>
   Objects are the heart of the data. They store values for the content fields, have multiple syntax possibilities,
   are supported for default/inherited values and options handling (see below for details).<br>
   Objects can only be used for supported resource records. See below for more details to object-supported records.
@@ -92,14 +92,14 @@ The content can be one of the following:
   by some default value (e.g. `SRV`, when `weight`, `priority` and `port` are given by defaults with `target` as the
   "last field"), then the value for that field could be stored with only the value after the `=`. This is very handy
   for such records and prevents much boilerplate.<br>
-  The value must be given in JSON syntax.<br>
+  The value must be given in JSON5 syntax.<br>
   Examples:
     * `com.example/www-1/A` => `="1.2.3.4"` (fills the `ip` field)
     * `com.example/www-2/A` => `=7` (when the option `ip-prefix` is set to something like `1.2.3.`)
     * `com.example/NS#1` => `="ns1"` (still utilizing the automatic zone appending)
 
 * A YAML object, if it begins with `---`, followed by a newline. **(NOT IMPLEMENTED YET)**<br>
-  Same as a JSON object, but written in YAML syntax.
+  Same as a JSON5 object, but written in YAML syntax.
 
 (All markers do not accept whitespace before them, they would be read as plain strings then.)
 
@@ -203,7 +203,7 @@ from above: 1, 2 (only added entries), 4, 6, 8 and 9.
 
 #### Current version
 
-The current data version is `0.1.2` and is described in this document.
+The current data version is `0.1.3` and is described in this document.
 
 ### Defaults and options
 
@@ -250,7 +250,7 @@ The defaults/options with an `#<id>` part are only used for the corresponding `w
 
 Of course, the values in the record itself (`com/example/www/A#<id>`) override all defaults.
 
-Defaults/options entries must be (currently only JSON) objects, with any number of fields (including zero).
+Defaults/options entries must be (currently only [JSON5][]) objects, with any number of fields (including zero).
 Defaults/options entries may be non-existent, which is equivalent to an empty object.
 
 Field names of defaults objects are the same as record field names. That means there could
@@ -260,6 +260,8 @@ so take care yourself.<br>
 An example: the `ip` field from `A` is not compatible to the `ip` field from `AAAA`.
 
 Field names of defaults and options objects are case-sensitive.
+
+[JSON5]: https://json5.org
 
 ## Supported records
 
@@ -504,6 +506,9 @@ Options:
 The changelog lists every change which led to a data version increase (major or minor).
 One can use it to check their data - whether an adjustment is needed for a new program version which has a new data version.
 
+### 0.1.3
+* allow JSON5 syntax
+
 ### 0.1.2
 * added numbers and arrays to `TXT:text`
 
@@ -527,40 +532,40 @@ Initial version (base).
 
 Global defaults:
 ```
-DNS/-defaults- → '{"ttl": "1h"}'
-DNS/-defaults-/SRV → '{"priority": 0, "weight": 0}'
-DNS/-defaults-/SOA → '{"refresh": "1h", "retry": "30m", "expire": 604800, "neg-ttl": "10m"}'
+DNS/-defaults- → '{ttl: "1h"} // can omit quotes on simple keys; and use comments!'
+DNS/-defaults-/SRV → '{priority: 0, weight: 0 /* should set to 10 and override when appropriate */}'
+DNS/-defaults-/SOA → '{refresh: "1h", retry: "30m", expire: 604800, "neg-ttl": "10m"}'
 ```
 
 Forward zone for `example.net`:
 ```
-DNS/net.example/SOA → '{"primary": "ns1", "mail": "horst.master"}'
-DNS/net.example/NS#first → '{"hostname": "ns1"}'
-DNS/net.example/NS#second → '="ns2"'
-DNS/net.example/-options-/A → '{"ip-prefix": [192, 0, 2]}'
+DNS/net.example/SOA → '{primary: "ns1", mail: "horst.master"}'
+DNS/net.example/NS#first → '{hostname: "ns1"} // not valid JSON, but valid JSON5!'
+DNS/net.example/NS#second → '="ns2" // even here a comment is fine'
+DNS/net.example/-options-/A → '{ /* cannot omit quotes here :( */ "ip-prefix": [192, 0, 2]}'
 DNS/net.example/-options-/AAAA → '{"ip-prefix": "20010db8"}'
-DNS/net.example/ns1/A → '=2'
+DNS/net.example/ns1/A → '=/* ns1 has IP 2? */2'
 DNS/net.example/ns1/AAAA → '="02"'
-DNS/net.example/ns2/A → '{"ip": "192.0.2.3"}'
-DNS/net.example/ns2/AAAA → '{"ip": [3]}'
-DNS/net.example/-defaults-/MX → '{"ttl": "2h"}'
-DNS/net.example/MX#1 → '{"priority": 10, "target": "mail"}'
-DNS/net.example/mail/A → '{"ip": [192,0,2,10]}'
+DNS/net.example/ns2/A → '{ip: "192.0.2.3"}'
+DNS/net.example/ns2/AAAA → '{ip: [3]}'
+DNS/net.example/-defaults-/MX → '{ttl: "2h"}'
+DNS/net.example/MX#1 → '{priority: 10, target: "mail"}'
+DNS/net.example/mail/A → '{ip: [192,0,2,10]}'
 DNS/net.example/mail/AAAA → '2001:db8::10'
 DNS/net.example/TXT#spf → 'v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all'
-DNS/net.example/TXT#{} → '{"text":"{text which begins with a curly brace (the id too)}"}'
+DNS/net.example/TXT#{} → '{text:"{text which begins with a curly brace (the id too)}"}'
 DNS/net.example/TXT#"" → '="some string"'
 DNS/net.example/TXT#[] → '=["string 1", 2, "string 3"]'
 DNS/net.example/kerberos1/A#1 → '192.0.2.15'
 DNS/net.example/kerberos1/AAAA#1 → '2001:db8::15'
 DNS/net.example/kerberos2/A# → '192.0.2.25'
 DNS/net.example/kerberos2/AAAA# → '2001:db8::25'
-DNS/net.example/_tcp/_kerberos/-defaults-/SRV → '{"port": 88}'
-DNS/net.example/_tcp/_kerberos/SRV#1 → '{"target": "kerberos1"}'
+DNS/net.example/_tcp/_kerberos/-defaults-/SRV → '{port: 88}'
+DNS/net.example/_tcp/_kerberos/SRV#1 → '{target: "kerberos1"}'
 DNS/net.example/_tcp/_kerberos/SRV#2 → '="kerberos2"'
-DNS/net.example/kerberos-master/CNAME → '{"target": "kerberos1"}'
+DNS/net.example/kerberos-master/CNAME → '{target: "kerberos1"}'
 DNS/net.example/mail/HINFO → '"amd64" "Linux"'
-DNS/net.example/mail/-defaults-/HINFO → '{"ttl": "2h"}'
+DNS/net.example/mail/-defaults-/HINFO → '{ttl: "2h"}'
 DNS/net.example/TYPE123 → '\# 0'
 DNS/net.example/TYPE237 → '\# 1 2a'
 ```
@@ -568,8 +573,8 @@ DNS/net.example/TYPE237 → '\# 1 2a'
 Reverse zone for `192.0.2.0/24`:
 ```
 DNS/arpa.in-addr/192.0.2/-options- → '{"zone-append-domain": "example.net."}'
-DNS/arpa.in-addr/192.0.2/SOA → '{"primary": "ns1", "mail": "horst.master"}'
-DNS/arpa.in-addr/192.0.2/NS#a → '{"hostname": "ns1"}'
+DNS/arpa.in-addr/192.0.2/SOA → '{primary: "ns1", mail: "horst.master"}'
+DNS/arpa.in-addr/192.0.2/NS#a → '{hostname: "ns1"}'
 DNS/arpa.in-addr/192.0.2/NS#b → 'ns2.example.net.'
 DNS/arpa.in-addr/192.0.2/2/PTR → '="ns1"'
 DNS/arpa.in-addr/192.0.2/3/PTR → '="ns2"'
@@ -580,7 +585,7 @@ DNS/arpa.in-addr/192.0.2/25/PTR → '="kerberos2"'
 
 Reverse zone for `2001:db8::/32`:
 ```
-DNS/arpa.ip6/2.0.0.1.0.d.b.8/SOA → '{"primary":"ns1.example.net.", "mail":"horst.master@example.net."}'
+DNS/arpa.ip6/2.0.0.1.0.d.b.8/SOA → '{primary:"ns1.example.net.", mail:"horst.master@example.net."}'
 DNS/arpa.ip6/2.0.0.1.0.d.b.8/NS#1 → 'ns1.example.net.'
 DNS/arpa.ip6/2.0.0.1.0.d.b.8/NS#2 → 'ns2.example.net.'
 DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.2/PTR → 'ns1.example.net.'
@@ -592,7 +597,7 @@ DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.2.5/PTR
 
 Delegation and glue records for `subunit.example.net.`:
 ```
-DNS/net.example/subunit/NS#1 → '{"hostname": "ns1.subunit"}'
+DNS/net.example/subunit/NS#1 → '{hostname: "ns1.subunit"}'
 DNS/net.example/subunit/NS#2 → '="ns2.subunit"'
 DNS/net.example/subunit/ns1/A → '192.0.3.2'
 DNS/net.example/subunit/ns2/A → '=[3, 3]'

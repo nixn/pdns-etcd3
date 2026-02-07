@@ -396,9 +396,9 @@ func TestWithPDNS(t *testing.T) {
 	putSOA3 := put("arpa.ip6/2.0.0.1.0.d.b.8/SOA", `{}`)
 	var rev1, rev2, rev3 int64
 	revs(txnT(t,
-		put("-defaults-", `{"ttl": "1h"}`),
-		put("-defaults-/SOA", `{"refresh": "1h", "retry": "30m", "expire": 604800, "neg-ttl": "10m", "primary": "ns1", "mail": "horst.master"}`),
-		put("-defaults-/SRV", `{"priority": 10, "weight": 1}`),
+		put("-defaults-", `{ttl: "1h"}`),
+		put("-defaults-/SOA", `{refresh: "1h", retry: "30m", expire: 604800, "neg-ttl": "10m", primary: "ns1", mail: "horst.master"}`),
+		put("-defaults-/SRV", `{priority: 10, weight: 1}`),
 		put("arpa.in-addr/192.0.2/-options-", `{"zone-append-domain": "example.net."}`),
 		put("arpa.ip6/2.0.0.1.0.d.b.8/-options-", `{"zone-append-domain": "example.net."}`),
 		put("net.example/-options-/A", `{"ip-prefix": [192, 0, 2]}`),
@@ -511,13 +511,13 @@ func TestWithPDNS(t *testing.T) {
 	t.Run("NS", func(t *testing.T) {
 		revs(withCleanup(t, map[string]string{
 			// NS (second)
-			"net.example/NS#second":         `="ns2"`,
+			"net.example/NS#second":         `="ns2" // the second one`,
 			"arpa.in-addr/192.0.2/NS#b":     `="ns2"`,
 			"arpa.ip6/2.0.0.1.0.d.b.8/NS#2": `="ns2"`,
 			// ns2
-			"net.example/ns2/A":          `=3`,
+			"net.example/ns2/A":          `=3 // nice, huh?`,
 			"net.example/ns2/AAAA":       `=3`,
-			"arpa.in-addr/192.0.2/3/PTR": `="ns2"`,
+			"arpa.in-addr/192.0.2/3/PTR": `= /* nasty place for a comment */ /* and a second one */ "ns2"`,
 			"arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.3/PTR": `="ns2"`,
 		}, func() {
 			waitForRevision(t, rev1, "NS (second) data loaded")
@@ -563,9 +563,9 @@ func TestWithPDNS(t *testing.T) {
 	})
 	t.Run("MX", func(t *testing.T) {
 		revs(withCleanup(t, map[string]string{
-			"net.example/-defaults-/MX": `{"ttl": "2h"}`,
-			"net.example/MX#1":          `{"priority": 5, "target": "mail"}`,
-			"net.example/mail/A":        `{"ip": [192,0,2,10]}`,
+			"net.example/-defaults-/MX": `{/*way too long*/"ttl": "2h"}`,
+			"net.example/MX#1":          "{priority: 5, // single line comment\ntarget: \"mail\"}",
+			"net.example/mail/A":        `{ip: [192,0,2,10]}`,
 			"net.example/mail/AAAA":     `2001:0db8::10`,
 		}, func() {
 			waitForRevision(t, rev1, "MX data loaded")

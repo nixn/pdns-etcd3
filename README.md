@@ -22,7 +22,7 @@ the third development release, considered alpha quality. Any testing is apprecia
 * Automatic serial for [`SOA` records](doc/ETCD-structure.md#soa) (based on the cluster revision).
 * Replication is handled by the ETCD cluster, no additional configuration is needed for using multiple authoritative PowerDNS servers.
   * DNS responses are nearly instantly up-to-date (on every server instance!) after data changes by using a watcher into ETCD (multi-master)
-* [Multiple syntax possibilities](doc/ETCD-structure.md#syntax) for object-supported records
+* [Multiple syntax possibilities](doc/ETCD-structure.md#syntax) for (values of) object-supported records
 * [Short syntax for single-value objects](doc/ETCD-structure.md#resource-record-values)
   * or for the last value left when using defaults (e.g. [`target` in `SRV`](doc/ETCD-structure.md#srv))
 * [Default prefix for IP addresses](doc/ETCD-structure.md#a)
@@ -50,14 +50,12 @@ the third development release, considered alpha quality. Any testing is apprecia
 * "Labels" for selectively applying defaults and/or options to record entries
   * sth. like `com/example/-options-ptr` → `{"auto-ptr": true}` and `com/example/www/-options-collect` → `{"collect": …}` for `com/example/www-1/A+ptr+collect` without global options
   * precedence betweeen QTYPE and id (id > label > QTYPE)
-* Support [JSON5][] by [flynn/json5](https://github.com/flynn/json5) (replace default JSON, because JSON5 is a superset of JSON)
-* Support [YAML][] by [go-yaml](https://github.com/go-yaml/yaml)
+* Support [YAML][] by [k8s-yaml](https://sigs.k8s.io/yaml)
 * DNSSEC support ([PowerDNS DNSSEC-specific calls][pdns-dnssec])
 
 [pdns-dnssec]: https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dnssec-support
 [pdns-remote-usage]: https://doc.powerdns.com/authoritative/backends/remote.html#usage
-[json5]: https://json5.org/
-[yaml]: http://www.yaml.org/
+[yaml]: https://yaml.org/
 
 #### Optional
 

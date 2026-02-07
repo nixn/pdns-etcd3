@@ -61,7 +61,8 @@ func TestParseEntryKey(t *testing.T) {
 }
 
 type contentInput struct {
-	content, entryType string
+	content   string
+	entryType entryType
 }
 type ci = contentInput
 
@@ -72,12 +73,20 @@ func TestParseEntryContent(t *testing.T) {
 	prefix := ""
 	args = programArgs{Prefix: &prefix}
 	for i, spec := range []test[contentInput, any]{
-		{ci{"", "normal"}, ve[any]{v: stringValueType("")}},
-		{ci{"=0", "normal"}, ve[any]{v: lastFieldValueType(float64(0))}},
-		{ci{"=[1]", "normal"}, ve[any]{v: lastFieldValueType([]any{float64(1)})}},
-		{ci{"{a: 1}", "normal"}, ve[any]{e: "failed to parse as JSON"}},
-		{ci{`{"a": 1}`, "normal"}, ve[any]{v: objectValueType{"a": float64(1)}}},
-		{ci{"---\na: 1", "normal"}, ve[any]{v: stringValueType("---\na: 1")}},
+		{ci{"", normalEntry}, ve[any]{v: stringValueType("")}},
+		{ci{"", defaultsEntry}, ve[any]{e: "empty"}},
+		{ci{"", optionsEntry}, ve[any]{e: "empty"}},
+		{ci{`plain`, normalEntry}, ve[any]{v: stringValueType("plain")}},
+		{ci{`plain`, defaultsEntry}, ve[any]{e: "invalid"}},
+		{ci{`plain`, optionsEntry}, ve[any]{e: "invalid"}},
+		{ci{"=0", normalEntry}, ve[any]{v: lastFieldValueType(float64(0))}},
+		{ci{"=0", defaultsEntry}, ve[any]{e: "must be an object"}},
+		{ci{"=0", optionsEntry}, ve[any]{e: "must be an object"}},
+		{ci{"=/*comment*/[1]", normalEntry}, ve[any]{v: lastFieldValueType([]any{float64(1)})}},
+		{ci{"{a: 1}", normalEntry}, ve[any]{v: objectValueType{"a": float64(1)}}},
+		{ci{`{"a": 1}`, normalEntry}, ve[any]{v: objectValueType{"a": float64(1)}}},
+		{ci{`{not-valid: 1}`, normalEntry}, ve[any]{e: "failed to parse as JSON"}},
+		{ci{"---\na: 1", normalEntry}, ve[any]{v: stringValueType("---\na: 1")}},
 	} {
 		checkRun(t, fmt.Sprintf("(%d)%q", i+1, spec.input), tf, spec.input, spec.expected)
 	}

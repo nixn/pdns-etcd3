@@ -3,9 +3,12 @@ module github.com/nixn/pdns-etcd3
 go 1.21
 
 require (
+	github.com/docker/docker v27.1.1+incompatible
+	github.com/docker/go-connections v0.5.0
 	github.com/miekg/dns v1.1.63
 	github.com/sirupsen/logrus v1.9.3
 	github.com/testcontainers/testcontainers-go v0.33.0
+	github.com/titanous/json5 v1.0.0
 	go.etcd.io/etcd/client/v3 v3.5.15
 	golang.org/x/net v0.33.0
 )
@@ -22,8 +25,6 @@ require (
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/cpuguy83/dockercfg v0.3.1 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
-	github.com/docker/docker v27.1.1+incompatible // indirect
-	github.com/docker/go-connections v0.5.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.1 // indirect
