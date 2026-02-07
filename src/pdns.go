@@ -30,7 +30,7 @@ func (req *pdnsRequest) String() string {
 }
 
 type pdnsClient struct {
-	ID          uint
+	ID          string
 	PdnsVersion uint
 	Comm        *commType[pdnsRequest]
 	log         logType
@@ -38,7 +38,7 @@ type pdnsClient struct {
 	out         io.WriteCloser
 }
 
-func newPdnsClient(ctx context.Context, id uint, in io.ReadCloser, out io.WriteCloser) *pdnsClient {
+func newPdnsClient(ctx context.Context, id string, in io.ReadCloser, out io.WriteCloser) *pdnsClient {
 	client := &pdnsClient{
 		ID:          id,
 		PdnsVersion: defaultPdnsVersion,

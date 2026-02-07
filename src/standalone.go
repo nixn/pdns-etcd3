@@ -85,7 +85,7 @@ func unixListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
 				recoverFunc(v, fmt.Sprintf("{unix} serve[%d]", nextClientID), false)
 				return false
 			})
-			serve(ctx, wg, newPdnsClient(ctx, nextClientID, conn, conn), &initialzed)
+			serve(ctx, wg, newPdnsClient(ctx, fmt.Sprintf("%d", nextClientID), conn, conn), &initialzed)
 			log.main().Tracef("{unix} serve[%d] returned normally", nextClientID)
 		})
 		nextClientID++
@@ -126,7 +126,7 @@ func httpListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
 		return mediatype == mt
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.main("method", r.Method, "header", r.Header, "url", r.URL.String()).Trace("{http} new request")
+		log.main("client", r.RemoteAddr, "method", r.Method, "header", r.Header, "url", r.URL.String()).Trace("{http} new request")
 		if r.Method != http.MethodPost {
 			log.main(r.Method).Debug("{http} non-POST method")
 			http.Error(w, "only POST allowed", http.StatusMethodNotAllowed)
@@ -144,8 +144,7 @@ func httpListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		ww := &httpWriter{w}
-		client := newPdnsClient(ctx, 0, r.Body, ww)
+		client := newPdnsClient(ctx, r.RemoteAddr, r.Body, &httpWriter{w})
 		serve(ctx, wg, client, nil)
 	})
 	server := &http.Server{

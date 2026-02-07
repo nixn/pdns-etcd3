@@ -222,11 +222,7 @@ func recoverFunc(v any, name string, exit bool) bool {
 		log.main().Printf("[BUG] deprecated call of log.Fatal(): %s", val2str(v))
 		suffix := ""
 		if v.clientID != nil {
-			if *v.clientID == 0 {
-				suffix = " [*]"
-			} else {
-				suffix = fmt.Sprintf(" [%d]", *v.clientID)
-			}
+			suffix = fmt.Sprintf(" [%s]", *v.clientID)
 		}
 		log.main().Tracef("%s: fatal error in %s%s", name, v.component, suffix)
 		if exit {

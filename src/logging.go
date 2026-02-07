@@ -63,17 +63,13 @@ type logType map[string]*logrus.Logger
 type logFatal struct { // TODO remove after having migrated all log.Fatal calls
 	code      int
 	component string
-	clientID  *uint
+	clientID  *string
 }
 
-func newLog(clientID *uint, components ...string) logType {
+func newLog(clientID *string, components ...string) logType {
 	msgPrefix := ""
 	if clientID != nil {
-		if *clientID == 0 {
-			msgPrefix = "[*] "
-		} else {
-			msgPrefix = fmt.Sprintf("[%d] ", *clientID)
-		}
+		msgPrefix = fmt.Sprintf("[%s] ", *clientID)
 	}
 	newLogger := func(component string) *logrus.Logger {
 		logger := logrus.New()

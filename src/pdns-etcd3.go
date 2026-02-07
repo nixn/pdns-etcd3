@@ -405,7 +405,7 @@ func pipe(ctx context.Context, wg *sync.WaitGroup, in io.ReadCloser, out io.Writ
 		return clientMessages
 	}
 	defer closeClient()
-	serve(ctx, wg, newPdnsClient(ctx, 0, in, out), &initialized)
+	serve(ctx, wg, newPdnsClient(ctx, "*", in, out), &initialized)
 }
 
 func serve(ctx context.Context, wg *sync.WaitGroup, client *pdnsClient, initialized *func(*pdnsClient) []string) {
