@@ -63,7 +63,9 @@ func setupClient() (logMessages []string, err error) {
 }
 
 func closeClient() {
-	_ = cli.Close()
+	if cli != nil {
+		_ = cli.Close()
+	}
 }
 
 type etcdItem struct {
