@@ -340,9 +340,14 @@ func parseEntryContent(value []byte, entryType entryType) (any, error) {
 		return nil, fmt.Errorf("empty")
 	}
 	switch value[0] {
+	case '`':
+		if entryType != normalEntry {
+			return nil, fmt.Errorf("a non-normal entry must be an object")
+		}
+		return stringValueType(value[1:]), nil
 	case '=': // last-field-value syntax
 		if entryType != normalEntry {
-			return nil, fmt.Errorf("a non-normal entry (defaults or options) must be an object")
+			return nil, fmt.Errorf("a non-normal entry must be an object")
 		}
 		var content any
 		err := json5.Unmarshal(value[1:], &content)

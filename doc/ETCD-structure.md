@@ -78,9 +78,9 @@ The content can be one of the following:
   Subject to change (NOT YET IMPLEMENTED): Plain strings for probably most or even all object-supported records will be parsed,
   gaining support for defaults, syntax-checking and more without using object-style notation.
 
-* A forced plain string, if it begins with `` ` `` (a backquote) **(NOT YET IMPLEMENTED)**.<br>
+* A forced plain string, if it begins with `` ` `` (a backquote)<br>
   Effectively the same as a normal plain string, but no interpretation as a special notation (other markers from below) is applied.
-  The leading backquote is not included in the resulting value (string). The string remains subject to parsing.
+  The leading backquote is not included in the resulting value (string). The string remains subject to parsing (parsing not yet implemented).
 
 * A [JSON5][] object ("JSON for Humans"), if it begins with `{`.<br>
   Objects are the heart of the data. They store values for the content fields, have multiple syntax possibilities,
@@ -508,6 +508,7 @@ One can use it to check their data - whether an adjustment is needed for a new p
 
 ### 0.1.3
 * allow JSON5 syntax
+* added `` ` `` (backquote) marker
 
 ### 0.1.2
 * added numbers and arrays to `TXT:text`
@@ -553,7 +554,8 @@ DNS/net.example/MX#1 → '{priority: 10, target: "mail"}'
 DNS/net.example/mail/A → '{ip: [192,0,2,10]}'
 DNS/net.example/mail/AAAA → '2001:db8::10'
 DNS/net.example/TXT#spf → 'v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all'
-DNS/net.example/TXT#{} → '{text:"{text which begins with a curly brace (the id too)}"}'
+DNS/net.example/TXT#{j5} → '{text:"{text in curly braces (the id too)}"}'
+DNS/net.example/TXT#{bq} → '`{text in curly braces}'
 DNS/net.example/TXT#"" → '="some string"'
 DNS/net.example/TXT#[] → '=["string 1", 2, "string 3"]'
 DNS/net.example/kerberos1/A#1 → '192.0.2.15'
@@ -587,7 +589,7 @@ Reverse zone for `2001:db8::/32`:
 ```
 DNS/arpa.ip6/2.0.0.1.0.d.b.8/SOA → '{primary:"ns1.example.net.", mail:"horst.master@example.net."}'
 DNS/arpa.ip6/2.0.0.1.0.d.b.8/NS#1 → 'ns1.example.net.'
-DNS/arpa.ip6/2.0.0.1.0.d.b.8/NS#2 → 'ns2.example.net.'
+DNS/arpa.ip6/2.0.0.1.0.d.b.8/NS#2 → '`ns2.example.net.'
 DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.2/PTR → 'ns1.example.net.'
 DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.3/PTR → 'ns2.example.net.'
 DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.1.0/PTR → 'mail.example.net.'

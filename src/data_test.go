@@ -87,6 +87,12 @@ func TestParseEntryContent(t *testing.T) {
 		{ci{`{"a": 1}`, normalEntry}, ve[any]{v: objectValueType{"a": float64(1)}}},
 		{ci{`{not-valid: 1}`, normalEntry}, ve[any]{e: "failed to parse as JSON"}},
 		{ci{"---\na: 1", normalEntry}, ve[any]{v: stringValueType("---\na: 1")}},
+		{ci{"`", normalEntry}, ve[any]{v: stringValueType("")}},
+		{ci{"`", defaultsEntry}, ve[any]{e: "must be an object"}},
+		{ci{"`", optionsEntry}, ve[any]{e: "must be an object"}},
+		{ci{"`{}", normalEntry}, ve[any]{v: stringValueType("{}")}},
+		{ci{"`{}", defaultsEntry}, ve[any]{e: "must be an object"}},
+		{ci{"`{}", optionsEntry}, ve[any]{e: "must be an object"}},
 	} {
 		checkRun(t, fmt.Sprintf("(%d)%q", i+1, spec.input), tf, spec.input, spec.expected)
 	}
