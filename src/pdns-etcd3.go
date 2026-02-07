@@ -16,9 +16,11 @@ package src
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/url"
 	"os"
 	"os/signal"
@@ -54,6 +56,7 @@ var (
 	serving   = false
 	connected = false
 	populated = false
+	routines  = map[string]string{}
 )
 
 func parseBoolean(s string) (bool, error) {
@@ -152,25 +155,37 @@ func readParameters(params objectType[string], client *pdnsClient) error {
 
 func startReadRequests(ctx context.Context, wg *sync.WaitGroup, client *pdnsClient) <-chan pdnsRequest {
 	ch := make(chan pdnsRequest)
-	wgGo(wg, func() {
+	wgGo(wg, "readRequests", func() {
 		defer recoverPanics(func(v any) bool {
 			recoverFunc(v, "readRequests()", false)
 			return false
 		})
 		defer close(ch)
-		wgGo(wg, func() {
-			<-ctx.Done()
-			closeNoError(client.in)
+		done := make(chan struct{})
+		defer close(done)
+		wgGo(wg, "readRequests done", func() {
+			select {
+			case <-ctx.Done():
+				client.log.pdns().Tracef("{readRequests done} context canceled, closing input")
+				closeNoError(client.in)
+			case <-done:
+				client.log.pdns().Trace("{readRequests done} done")
+			}
 		})
 		for {
+			client.log.pdns().Trace("{readRequests} waiting for next request")
 			if request, err := client.Comm.read(); err != nil {
 				if err == io.EOF {
-					client.log.pdns().Trace("EOF on input stream, terminating")
+					client.log.pdns().Trace("{readRequests} EOF on input stream, terminating")
 					return
 				}
-				client.log.pdns().Panicf("failed to decode request: %s", err)
+				if errors.Is(err, fs.ErrClosed) {
+					client.log.pdns().Trace("{readRequests} input stream closed, terminating")
+					return
+				}
+				client.log.pdns(err).Panicf("{readRequests} failed to decode request: %s", err)
 			} else {
-				client.log.pdns(request).Debug("received new request")
+				client.log.pdns(request).Debug("{readRequests} received new request")
 				ch <- *request
 			}
 		}
@@ -345,24 +360,39 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 		}
 		standalone(ctx, wg, u)
 	} else {
-		pipe(ctx, wg, os.Stdin, os.Stdout)
+		r, w, err := os.Pipe()
+		if err != nil {
+			log.main().Panicf("failed to create os.Pipe(): %s", err)
+		}
+		defer closeNoError(r)
+		defer closeNoError(w)
+		go func() { // do not use wg for the stdin wrapper, because io.Copy does not stop on closing w; just let the system stop it when closing the program
+			_, _ = io.Copy(w, os.Stdin)
+		}()
+		pipe(ctx, wg, r, os.Stdout)
 	}
-	log.main().Debug("{main} request handler returned normally, stopping work")
+	log.main().Debug("request handler returned normally, stopping work")
 	cancel()
-	log.main().Trace("{main} waiting for child routines to finish (15s)")
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer waitCancel()
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		log.main().Trace("{main} all finished, exiting")
-	case <-waitCtx.Done():
-		log.main().Error("{main} timeout while waiting on routines, exiting forcefully")
+WAIT:
+	for i := 1; len(routines) > 0 && i <= 3; i++ {
+		log.main(Keys(routines)).Tracef("waiting for child routines (%d) to finish [%d/3]", len(routines), i)
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		done := make(chan struct{})
+		go func() {
+			defer waitCancel()
+			wg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+			break WAIT
+		case <-waitCtx.Done():
+			if i == 3 {
+				log.main(Keys(routines)).Error("timeout while waiting on routines, exiting forcefully")
+			}
+		}
 	}
+	log.main().Trace("all routines finished, exiting")
 }
 
 func populateData(ctx context.Context, wg *sync.WaitGroup) error {
@@ -381,7 +411,7 @@ func populateData(ctx context.Context, wg *sync.WaitGroup) error {
 	}()
 	populated = true
 	log.main().Debug("starting data watcher")
-	wgGo(wg, func() {
+	wgGo(wg, "watchData", func() {
 		defer recoverPanics(func(v any) bool {
 			recoverFunc(v, "watchData()", false)
 			return false
@@ -405,49 +435,49 @@ func pipe(ctx context.Context, wg *sync.WaitGroup, in io.ReadCloser, out io.Writ
 		return clientMessages
 	}
 	defer closeClient()
-	serve(ctx, wg, newPdnsClient(ctx, "*", in, out), &initialized)
+	serve(ctx, wg, newPdnsClient(ctx, "*", in, out), &initialized, &serving)
 }
 
-func serve(ctx context.Context, wg *sync.WaitGroup, client *pdnsClient, initialized *func(*pdnsClient) []string) {
-	defer closeNoError(client.out)
+func serve(ctx context.Context, wg *sync.WaitGroup, client *pdnsClient, initialized *func(*pdnsClient) []string, serving *bool) {
 	reqChan := startReadRequests(ctx, wg, client)
 	if initialized != nil {
 		// first request must be 'initialize'
-		client.log.pdns().Trace("waiting for initial message")
-		select {
-		case <-ctx.Done():
-			client.log.pdns().Trace("canceled while waiting for initial message")
+		client.log.pdns().Trace("waiting for initialize request")
+		initRequest, ok := <-reqChan
+		if !ok {
+			client.log.pdns().Trace("requests channel closed")
 			return
-		case initRequest := <-reqChan:
-			if initRequest.Method != "initialize" {
-				client.log.pdns("method", initRequest.Method).Panic("wrong request method (waited for 'initialize')")
-			}
-			client.log.main("parameters", initRequest.Parameters).Info("initializing")
-			params := objectType[string]{}
-			for k, v := range initRequest.Parameters {
-				params[k] = v.(string)
-			}
-			err := readParameters(params, client)
-			if err != nil {
-				client.Fatal(err)
-			}
-			client.log.main().Debugf("successfully read parameters")
 		}
+		if initRequest.Method != "initialize" {
+			client.log.pdns("method", initRequest.Method).Panic("wrong request method (waited for 'initialize')")
+		}
+		client.log.main("parameters", initRequest.Parameters).Info("initializing")
+		params := objectType[string]{}
+		for k, v := range initRequest.Parameters {
+			params[k] = v.(string)
+		}
+		err := readParameters(params, client)
+		if err != nil {
+			client.Fatal(err)
+		}
+		client.log.main().Debugf("successfully read parameters")
 		logMessages := (*initialized)(client)
 		client.Respond(makeResponse(true, logMessages...))
 	}
-	serving = true
-REQUESTS:
+	if serving != nil {
+		*serving = true
+	}
 	for {
-		select {
-		case <-ctx.Done():
-			break REQUESTS
-		case request, ok := <-reqChan:
-			if !ok {
-				break REQUESTS
-			}
-			handleRequest(&request, client)
+		client.log.pdns().Trace("waiting for next request")
+		request, ok := <-reqChan
+		if !ok {
+			client.log.pdns().Trace("requests channel closed")
+			break
 		}
+		handleRequest(&request, client)
+	}
+	if serving != nil {
+		*serving = false
 	}
 }
 

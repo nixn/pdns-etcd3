@@ -188,11 +188,13 @@ func float2decimal(n float64) string {
 	return strings.TrimRight(str, "0.,")
 }
 
-func wgGo(wg *sync.WaitGroup, f func()) {
+func wgGo(wg *sync.WaitGroup, name string, f func()) {
 	wg.Add(1)
+	routines[name] = name
 	go func() {
 		defer wg.Done()
 		f()
+		delete(routines, name)
 	}()
 }
 
