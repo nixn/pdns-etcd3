@@ -173,6 +173,15 @@ func ptr2str[T any](ptr *T, format string) string {
 	return fmt.Sprintf(`&%`+format, *ptr)
 }
 
+func ptr2strS[T interface{ String() string }](ptr *T) *string {
+	if ptr == nil {
+		s := "<nil>"
+		return &s
+	}
+	s := (*ptr).String()
+	return &s
+}
+
 func err2str(err error) string {
 	if err == nil {
 		return "<nil>"

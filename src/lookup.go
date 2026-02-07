@@ -110,7 +110,7 @@ type valuePath struct {
 	soe  *searchOrderElement
 }
 
-func (vp *valuePath) String() string {
+func (vp valuePath) String() string {
 	return fmt.Sprintf("%s%s%s%s%s", vp.data.getQname(), keySeparator, vp.soe.qtype, idSeparator, vp.soe.id)
 }
 
