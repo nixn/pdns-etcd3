@@ -149,11 +149,12 @@ func val2strR(value reflect.Value, withType bool) string {
 		}
 		fallthrough
 	case reflect.Array:
-		// TODO check the type for every element and prepend if it differs from array/slice type
-		isAny := value.Type().Elem() == reflect.TypeOf((*any)(nil)).Elem()
+		elemType := value.Type().Elem()
+		isAny := elemType == reflect.TypeOf((*any)(nil)).Elem()
 		var elements []string
 		for i, n := 0, value.Len(); i < n; i++ {
-			elements = append(elements, val2strR(value.Index(i), isAny))
+			v := value.Index(i)
+			elements = append(elements, val2strR(v, isAny || elemType != v.Type()))
 		}
 		return fmt.Sprintf("❲%s❳[%s]", tn(value.Type().Elem()), strings.Join(elements, ", "))
 	default:
