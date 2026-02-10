@@ -301,7 +301,12 @@ func linesReader(lines []string) *strings.Reader {
 	return strings.NewReader(s)
 }
 
-func startPDNS(t *testing.T) (*ctInfo, error) {
+type pdnsInfo struct {
+	*ctInfo
+	Version string
+}
+
+func startPDNS(t *testing.T) (pdnsInfo, error) {
 	t.Helper()
 	var image string
 	var fromDockerfile testcontainers.FromDockerfile
@@ -323,25 +328,26 @@ func startPDNS(t *testing.T) (*ctInfo, error) {
 	default:
 		t.Fatalf("invalid PDNS version: %q", v)
 	}
-	cacheSettings := []string{
+	dynamicSettings := []string{
 		"cache-ttl=0",
 		"query-cache-ttl=0",
 		"negquery-cache-ttl=0",
 	}
 	if v >= "40" {
 		if v < "45" {
-			cacheSettings = append(cacheSettings, "domain-metadata-cache-ttl=0")
+			dynamicSettings = append(dynamicSettings, "domain-metadata-cache-ttl=0")
 		} else {
-			cacheSettings = append(cacheSettings, "zone-metadata-cache-ttl=0")
+			dynamicSettings = append(dynamicSettings, "zone-metadata-cache-ttl=0")
 		}
+		dynamicSettings = append(dynamicSettings, "dname-processing=yes")
 	}
 	if v >= "44" {
-		cacheSettings = append(cacheSettings, "consistent-backends=no")
+		dynamicSettings = append(dynamicSettings, "consistent-backends=no")
 	}
 	if v >= "45" {
-		cacheSettings = append(cacheSettings, "zone-cache-refresh-interval=0")
+		dynamicSettings = append(dynamicSettings, "zone-cache-refresh-interval=0")
 	}
-	return startContainer(t, testcontainers.ContainerRequest{
+	ctInfo, err := startContainer(t, testcontainers.ContainerRequest{
 		Image:          image,
 		FromDockerfile: fromDockerfile,
 		HostConfigModifier: func(hc *container.HostConfig) {
@@ -351,10 +357,11 @@ func startPDNS(t *testing.T) (*ctInfo, error) {
 		LogConsumerCfg: &testcontainers.LogConsumerConfig{Consumers: []testcontainers.LogConsumer{CtLogger{t, "PDNS"}}},
 		Files: []testcontainers.ContainerFile{
 			{HostFilePath: "../testdata/pdns.conf", ContainerFilePath: "/etc/powerdns/pdns.conf", FileMode: 0o555},
-			{Reader: linesReader(cacheSettings), ContainerFilePath: "/etc/powerdns/pdns.d/cache-settings.conf", FileMode: 0o555},
+			{Reader: linesReader(dynamicSettings), ContainerFilePath: "/etc/powerdns/pdns.d/dynamic-settings.conf", FileMode: 0o555},
 		},
 		WaitingFor: wait.ForLog("ready to distribute questions"),
 	}, "53/tcp")
+	return pdnsInfo{ctInfo, v}, err
 }
 
 func TestWithPDNS(t *testing.T) {
@@ -666,6 +673,24 @@ func TestWithPDNS(t *testing.T) {
 			})
 		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
 		waitForRevision(t, rev1, "CNAME data removed")
+	})
+	t.Run("DNAME", func(t *testing.T) {
+		if pdns.Version[0] == '3' {
+			t.Skip("skipping DNAME test, DNAME processing is not available in PDNSv3")
+		}
+		revs(withCleanup(t, map[string]string{
+			"net.example/DNAME":         "example.org.",
+			"org.example/SOA":           `{}`,
+			"org.example/something/TXT": "DNAME works",
+		}, func() {
+			waitForRevision(t, rev1, "DNAME data loaded")
+			queryTest(t, qs("something.example.net.", dns.TypeTXT, dns.Msg{Answer: []dns.RR{
+				&dns.DNAME{Target: "example.org."},
+				&dns.CNAME{Hdr: dns.RR_Header{Name: "something.example.net."}, Target: "something.example.org."},
+				&dns.TXT{Hdr: dns.RR_Header{Name: "something.example.org."}, Txt: []string{"DNAME works"}},
+			}}))
+		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		waitForRevision(t, rev1, "DNAME data removed")
 	})
 	t.Run("HINFO", func(t *testing.T) {
 		revs(withCleanup(t, map[string]string{
