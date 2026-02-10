@@ -182,6 +182,7 @@ func (dn *dataNode) getChild(name nameType, rLock bool) (*dataNode, bool) {
 	return lChild.getChild(name.fromDepth(2), rLock)
 }
 
+// subdomainDepth returns a positive int (the sublevel), if the receiver is a subdomain of 'ancestor', 0 when both are the same domain, -1 otherwise ('ancestor' is not an ancestor)
 func (dn *dataNode) subdomainDepth(ancestor *dataNode) int {
 	for dn, n := dn, 0; dn != nil; dn, n = dn.parent, n+1 {
 		if dn == ancestor {

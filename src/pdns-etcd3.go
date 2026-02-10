@@ -248,14 +248,23 @@ EVENTS:
 		}
 		itemData.rUnlockUpwards(zoneData)
 		qname := zoneData.getQname()
-		for _, dn := range reloadZones {
+		subdomains := make([]string, 0, len(reloadZones))
+		for dnKey, dn := range reloadZones {
 			if zoneData.subdomainDepth(dn) >= 0 {
 				zoneData.rUnlockUpwards(nil)
-				log.data("event", qname, "scheduled", dn.getQname()).Trace("zone already scheduled for reload (possibly ancestor)")
+				log.data("event", qname, "scheduled", dn.getQname()).Trace("event zone already scheduled for reload (possibly ancestor)")
 				continue EVENTS
 			}
+			if dn.subdomainDepth(zoneData) > 0 {
+				dn.rUnlockUpwards(nil)
+				log.data("event", qname, "scheduled", dn.getQname()).Trace("scheduled zone is a subdomain of event zone, marking for replace")
+				subdomains = append(subdomains, dnKey)
+			}
 		}
-		log.data(qname).Debug("scheduling zone for reload")
+		for _, k := range subdomains {
+			delete(reloadZones, k)
+		}
+		log.data("event", qname, "replacing", subdomains).Debug("scheduling event zone for reload")
 		reloadZones[qname] = zoneData
 	}
 	log.data(Keys(reloadZones)).Debug("reloading zones")
