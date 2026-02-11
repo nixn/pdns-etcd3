@@ -199,12 +199,16 @@ func float2decimal(n float64) string {
 }
 
 func wgGo(wg *sync.WaitGroup, name string, f func()) {
+	routines.mutex.Lock()
+	defer routines.mutex.Unlock()
 	wg.Add(1)
-	routines[name] = name
+	routines.store[name] = name
 	go func() {
 		defer wg.Done()
 		f()
-		delete(routines, name)
+		routines.mutex.Lock()
+		defer routines.mutex.Unlock()
+		delete(routines.store, name)
 	}()
 }
 

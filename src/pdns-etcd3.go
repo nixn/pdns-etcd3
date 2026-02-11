@@ -51,12 +51,27 @@ var (
 	dataRoot   *dataNode
 )
 
+type routinesType struct {
+	store map[string]string
+	mutex sync.RWMutex
+}
+
+func (r *routinesType) State(withNames bool) (int, []string) {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+	if withNames {
+		return len(r.store), Keys(r.store)
+	} else {
+		return len(r.store), nil
+	}
+}
+
 var (
 	// these vars may be used in integration tests, so don't bail if not used
 	serving   = false
 	connected = false
 	populated = false
-	routines  = map[string]string{}
+	routines  = &routinesType{store: map[string]string{}}
 )
 
 func parseBoolean(s string) (bool, error) {
@@ -382,9 +397,12 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 	}
 	log.main().Debug("request handler returned normally, stopping work")
 	cancel()
+	nr, _ := routines.State(false)
 WAIT:
-	for i := 1; len(routines) > 0 && i <= 3; i++ {
-		log.main(Keys(routines)).Tracef("waiting for child routines (%d) to finish [%d/3]", len(routines), i)
+	for i := 1; nr > 0 && i <= 3; i++ {
+		var names []string
+		nr, names = routines.State(true)
+		log.main(names).Tracef("waiting for child routines (%d) to finish [%d/3]", nr, i)
 		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		done := make(chan struct{})
 		go func() {
@@ -397,11 +415,14 @@ WAIT:
 			break WAIT
 		case <-waitCtx.Done():
 			if i == 3 {
-				log.main(Keys(routines)).Error("timeout while waiting on routines, exiting forcefully")
+				nr, names = routines.State(true)
+				log.main(names).Error("timeout while waiting on routines, exiting forcefully")
 			}
 		}
 	}
-	log.main().Trace("all routines finished, exiting")
+	if nr == 0 {
+		log.main().Trace("all routines finished, exiting normally")
+	}
 }
 
 func populateData(ctx context.Context, wg *sync.WaitGroup) error {
