@@ -75,7 +75,7 @@ The content can be one of the following:
   * can be used for most supported records too, but often it is more efficient and clearer
     to use the "last-field-value" or an object-style notation (see below for both)
   * have support for using defaults for the values (only most of the supported records):<br>
-    When a field (e.g. `priority` in `MX`) is written as just a `_`, that field is parsed as not being set and
+    When a field is written as just a `_`, that field is parsed as not being set and
     has to be filled by a default value (comparable to object style).
   * have support for automatic zone name appending (e.g. `target` in `SRV`)
   * are very handy for domain name values (as in `CNAME` and the like)
@@ -90,7 +90,8 @@ The content can be one of the following:
   The leading backquote is not included in the resulting value (string). The string remains subject to parsing.
 
 * A forced plain string, which is not subject to parse, if it begins with `` !` ``.<br>
-  That string is absolutely not touched, just passed as-is. Should never be needed, but who knows all cases...
+  The marker prefix is stripped off that string, after that the rest passed as-is without any changes as the record content.
+  Should never be needed, but who knows all cases...
 
 * A [JSON5][] object ("JSON for Humans"), if it begins with `{`.<br>
   Objects are the heart of the data. They store values for the content fields, have multiple syntax possibilities,
