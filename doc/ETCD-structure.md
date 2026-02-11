@@ -67,20 +67,30 @@ the DNS class (`IN`) or the record type (`A`, `MX`, …); these are given in the
 
 The content can be one of the following:
 
-* A plain string (that is without quotation marks), if it does not begin with any marker of the other types of content (see below).<br>
-  Plain strings give the content of the record directly. They are not parsed or changed in any way, just returned as-is.<br>
-  Plain strings have no support for defaults (see below), but they can be used for not supported (or custom) resource records.
-  They can be used for supported records too, but that's not cool and even not possible for entries with a priority field,
-  when using PowerDNS v3, because the priority of such records must be reported in a separate field in the backend protocol.
-  As of PowerDNS v4 the priority fields are part of the content and the restriction does not apply anymore.<br>
-  But there is still one exception to this: the `SOA` record cannot be given as a plain string due to the automatically
-  handled `serial` field.<br>
-  Subject to change (NOT YET IMPLEMENTED): Plain strings for probably most or even all object-supported records will be parsed,
-  gaining support for defaults, syntax-checking and more without using object-style notation.
-
+* A plain string (that is without quotation marks),
+  if it begins with a letter, digit or `_` or if it does not begin with any marker of the other types of content (see below).<br>
+  Plain strings give the content of the record directly.<br>
+  They
+  * can be used for not supported (or custom) resource records
+  * can be used for most supported records too, but often it is more efficient and clearer
+    to use the "last-field-value" or an object-style notation (see below for both)
+  * have support for using defaults for the values (only most of the supported records):<br>
+    When a field (e.g. `priority` in `MX`) is written as just a `_`, that field is parsed as not being set and
+    has to be filled by a default value (comparable to object style).
+  * have support for automatic zone name appending (e.g. `target` in `SRV`)
+  * are very handy for domain name values (as in `CNAME` and the like)
+    * object style: `{target: "something"}` (JSON5)
+    * last-field-value: `="something"`
+    * plain string: `something`
+  
+  But most of the time it is more useful to use the other syntax possibilites.
+ 
 * A forced plain string, if it begins with `` ` `` (a backquote).<br>
   Effectively the same as a normal plain string, but no interpretation as a special notation (other markers from below) is applied.
-  The leading backquote is not included in the resulting value (string). The string remains subject to parsing (parsing not yet implemented).
+  The leading backquote is not included in the resulting value (string). The string remains subject to parsing.
+
+* A forced plain string, which is not subject to parse, if it begins with `` !` ``.<br>
+  That string is absolutely not touched, just passed as-is. Should never be needed, but who knows all cases...
 
 * A [JSON5][] object ("JSON for Humans"), if it begins with `{`.<br>
   Objects are the heart of the data. They store values for the content fields, have multiple syntax possibilities,
@@ -101,9 +111,16 @@ The content can be one of the following:
     * `com.example/www-2/A` => `=7` (when the option `ip-prefix` is set to something like `1.2.3.`)
     * `com.example/NS#1` => `="ns1"` (still utilizing the automatic zone appending)
 
+**WARNING:**<br>
+Please do NOT use the simple plain string syntax (first case), when your data does not begin with an
+alphanumeric character, which is not used yet as a marker. It could be the case in the future (for new features),
+so be safe and protect your data with the backquote marker (second case).<br>
+**The data version will not increase its major number on such changes due to this warning** (albeit it would semantically
+be needed).
+
 (All markers do not accept whitespace before them, they would be read as plain strings then.)
 
-Not all records are implemented, thus are not object-supported. But the list shall be ever-growing.
+Not all records are implemented, thus are not (object-)supported. But the list shall be ever-growing.
 For the other types there is always the possibility to store them as plain strings.<br>
 If a record content is given as an object, but is not supported by the program, it is warned about and ignored.
 (TODO unsupported entries with values starting with markers like `{` or `=`)
@@ -206,7 +223,7 @@ from above: 1, 2 (only added entries), 4, 6, 8 and 9.
 
 #### Current version
 
-The current data version is `0.1.3` and is described in this document.
+The current data version is `0.2.0` and is described in this document.
 
 ### Defaults and options
 
@@ -432,6 +449,10 @@ Options:
         * currently `SOA`, `NS`, `PTR`, `CNAME`, `DNAME`, `MX` and `SRV`
     * constrained to be valid only within a zone (TODO describe better, give examples)
 
+The `SOA` record has some things to be aware of, when using the plaing string notation:
+* The `serial` field has always to be written as `_` (= not set), because it is determined automatically.
+* The `mail` field must be written in the "regular" syntax (see the field description), when not using a default (`_`).
+
 #### `NS`
 * `hostname`: domain name
 
@@ -502,15 +523,19 @@ Options:
 * `text`: string or number or an array of strings or numbers
   * numbers are always converted to strings
 
+The `TXT` record is not parsed, when being written in a plain string syntax.
+
 ## Changelog
 
 The changelog lists every change which led to a data version increase (major or minor).
 One can use it to check their data - whether an adjustment is needed for a new program version which has a new data version.
 
-### 0.1.3
+### 0.2.0
 * allow JSON5 syntax
 * allow YAML syntax for objects
 * added `` ` `` (backquote) marker
+* added `` !` `` marker
+* enabled parsing of plain string entries for supported records, so the underline character `_` gains an effect
 
 ### 0.1.2
 * added numbers and arrays to `TXT:text`
@@ -565,12 +590,13 @@ DNS/net.example/TXT#{j5} → '{text:"{text in curly braces (the id too)}"}'
 DNS/net.example/TXT#{bq} → '`{text in curly braces}'
 DNS/net.example/TXT#"" → '="some string"'
 DNS/net.example/TXT#[] → '=["string 1", 2, "string 3"]'
-DNS/net.example/kerberos1/A#1 → '192.0.2.15'
-DNS/net.example/kerberos1/AAAA#1 → '2001:db8::15'
+DNS/net.example/kerberos1/-defaults-/#ip → '="15"'
+DNS/net.example/kerberos1/A#ip → '_'
+DNS/net.example/kerberos1/AAAA#ip → '_'
 DNS/net.example/kerberos2/A# → '192.0.2.25'
 DNS/net.example/kerberos2/AAAA# → '2001:db8::25'
 DNS/net.example/_tcp/_kerberos/-defaults-/SRV → '{port: 88}'
-DNS/net.example/_tcp/_kerberos/SRV#1 → '{target: "kerberos1"}'
+DNS/net.example/_tcp/_kerberos/SRV#1 → '_ _ _ kerberos1'
 DNS/net.example/_tcp/_kerberos/SRV#2 → '="kerberos2"'
 DNS/net.example/kerberos-master/CNAME → '{target: "kerberos1"}'
 DNS/net.example/mail/HINFO → '"amd64" "Linux"'
@@ -586,8 +612,8 @@ DNS/arpa.in-addr/192.0.2/SOA → '{primary: "ns1", mail: "horst.master"}'
 DNS/arpa.in-addr/192.0.2/NS#a → '{hostname: "ns1"}'
 DNS/arpa.in-addr/192.0.2/NS#b → 'ns2.example.net.'
 DNS/arpa.in-addr/192.0.2/2/PTR → '="ns1"'
-DNS/arpa.in-addr/192.0.2/3/PTR → '="ns2"'
-DNS/arpa.in-addr/192.0.2/10/PTR → '="mail"'
+DNS/arpa.in-addr/192.0.2/3/PTR → 'ns2'
+DNS/arpa.in-addr/192.0.2/10/PTR → 'mail'
 DNS/arpa.in-addr/192.0.2/15/PTR → '="kerberos1"'
 DNS/arpa.in-addr/192.0.2/25/PTR → '="kerberos2"'
 ```

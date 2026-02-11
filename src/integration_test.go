@@ -160,8 +160,8 @@ func TestPipeRequests(t *testing.T) {
 			put("net.example/ns/A", "---\nip: 2"),
 			put("net.example/-options-/AAAA", `{"ip-prefix": "20010db8"}`),
 			put("net.example/ns/AAAA", `="02"`),
-			put("arpa.in-addr/192.0.2/2/PTR", `="ns"`),
-			put("arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.2/PTR", `="ns"`),
+			put("arpa.in-addr/192.0.2/2/PTR", "`ns"),
+			put("arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.2/PTR", `ns`),
 		), &rev1, &rev2, &rev3)
 		waitForRevision(t, rev1, "ns data loaded")
 		lookupTest(t, "example.net", "NS",
@@ -523,7 +523,7 @@ func TestWithPDNS(t *testing.T) {
 			"arpa.ip6/2.0.0.1.0.d.b.8/NS#2": `="ns2"`,
 			// ns2
 			"net.example/ns2/A":          `=3 // nice, huh?`,
-			"net.example/ns2/AAAA":       `=3`,
+			"net.example/ns2/AAAA":       `3`,
 			"arpa.in-addr/192.0.2/3/PTR": `= /* nasty place for a comment */ /* and a second one */ "ns2"`,
 			"arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.3/PTR": `="ns2"`,
 		}, func() {
@@ -627,12 +627,13 @@ func TestWithPDNS(t *testing.T) {
 	})
 	t.Run("SRV", func(t *testing.T) {
 		revs(withCleanup(t, map[string]string{
-			"net.example/kerberos1/A#1":                 `=15`,
-			"net.example/kerberos1/AAAA#1":              `="15"`,
-			"net.example/kerberos2/A#":                  `=25`,
-			"net.example/kerberos2/AAAA#":               `="25"`,
+			"net.example/-defaults-/#1":                 `{ip: "15"}`,
+			"net.example/kerberos1/A#1":                 `_`,
+			"net.example/kerberos1/AAAA#1":              `_`,
+			"net.example/kerberos2/A#":                  `25`,
+			"net.example/kerberos2/AAAA#":               `25`,
 			"net.example/_tcp/_kerberos/-defaults-/SRV": `{"port": 88}`,
-			"net.example/_tcp/_kerberos/SRV#1":          `{"target": "kerberos1", "weight": 2}`,
+			"net.example/_tcp/_kerberos/SRV#1":          `{target: "kerberos1", weight: 2}`,
 			"net.example/_tcp/_kerberos/SRV#2":          `="kerberos2"`,
 			"net.example/_tcp/_kerberos/SRV#invalid":    "---\ntarget: invalid\nport: 70000",
 		}, func() {

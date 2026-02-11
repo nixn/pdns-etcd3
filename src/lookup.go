@@ -114,9 +114,10 @@ func (vp valuePath) String() string {
 	return fmt.Sprintf("%s%s%s%s%s", vp.data.getQname(), keySeparator, vp.soe.qtype, idSeparator, vp.soe.id)
 }
 
-func searchOrder(qtype, id string) (order []searchOrderElement) {
+func searchOrder(qtype, id string) []searchOrderElement {
 	q := qtype != ""
 	i := id != ""
+	order := make([]searchOrderElement, 0, 4)
 	if q && i {
 		order = append(order, searchOrderElement{qtype, id})
 	}
@@ -127,7 +128,7 @@ func searchOrder(qtype, id string) (order []searchOrderElement) {
 		order = append(order, searchOrderElement{qtype, ""})
 	}
 	order = append(order, searchOrderElement{"", ""})
-	return
+	return order
 }
 
 func findValue[T any](key, qtype, id string, data *dataNode, valuesArea entryType, notUpwards bool) (T, *valuePath, error) {
@@ -165,7 +166,7 @@ func findValueOrDefault[V any](key string, values objectType[any], qtype, id str
 		}
 		log.data("value", value).Tracef("invalid type of value for %s.%s (found directly): %T", queryPath.String(), key, value)
 		var zeroValue V
-		return zeroValue, &queryPath, fmt.Errorf("invalid type: %T", value)
+		return zeroValue, &queryPath, fmt.Errorf("invalid type (expected %T): %T", zeroValue, value)
 	}
 	return findValue[V](key, qtype, id, data, defaultsEntry, false)
 }

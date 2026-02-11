@@ -17,6 +17,7 @@ package src
 import (
 	"fmt"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,12 +26,10 @@ import (
 )
 
 type rrParams struct {
-	// TODO refactor into single value, too (combine values and lastFieldValue)
 	values         objectType[any]
 	lastFieldValue *any
 	qtype          string
 	id             string
-	version        *VersionType // TODO remove? not really needed, only used in logging...
 	data           *dataNode
 	ttl            time.Duration
 	//logger         *logrus.Logger // TODO remove?
@@ -45,20 +44,17 @@ func (p *rrParams) SetContent(content string, priority *uint16) {
 	if _, ok := p.data.records[p.qtype]; !ok {
 		p.data.records[p.qtype] = map[string]recordType{}
 	}
-	p.data.records[p.qtype][p.id] = recordType{content, priority, p.ttl, p.version}
+	p.data.records[p.qtype][p.id] = recordType{content, priority, p.ttl}
 	str := fmt.Sprintf("stored record content: %q", content)
 	if priority != nil {
 		str += fmt.Sprintf(" !%d", *priority)
-	}
-	if p.version != nil {
-		str += fmt.Sprintf(" @%s", p.version)
 	}
 	str += fmt.Sprintf(" (%s)", p.ttl)
 	p.log().Trace(str)
 }
 
 func (p *rrParams) log(args ...any) *logrus.Entry {
-	return p.data.log(append([]any{"target", p.Target(), "version", p.version, "ttl", p.ttl}, args...)...)
+	return p.data.log(append([]any{"target", p.Target(), "ttl", p.ttl}, args...)...)
 }
 
 func (p *rrParams) exlog(args ...any) *logrus.Entry {
@@ -67,7 +63,7 @@ func (p *rrParams) exlog(args ...any) *logrus.Entry {
 
 type rrFunc func(params *rrParams)
 
-var rr2func = map[string]rrFunc{
+var rrFuncs = map[string]rrFunc{
 	"A":     a,
 	"AAAA":  aaaa,
 	"CNAME": domainName("target"),
@@ -78,6 +74,56 @@ var rr2func = map[string]rrFunc{
 	"SOA":   soa,
 	"SRV":   srv,
 	"TXT":   txt,
+}
+
+func singleValueRE(key string) *regexp.Regexp {
+	return regexp.MustCompile(fmt.Sprintf(`^\s*(?P<%s>\S+)\s*$`, key))
+}
+
+type parseType struct {
+	re          *regexp.Regexp
+	hasPriority bool
+	uints       map[string]int
+}
+
+var parses = map[string]*parseType{
+	"A":     {re: singleValueRE("ip")},
+	"AAAA":  {re: singleValueRE("ip")},
+	"CNAME": {re: singleValueRE("target")},
+	"DNAME": {re: singleValueRE("name")},
+	"MX":    {re: regexp.MustCompile(`^\s*(?P<priority>\d+|_)\s+(?P<target>\S+)\s*$`), hasPriority: true, uints: map[string]int{"priority": 16}},
+	"NS":    {re: singleValueRE("hostname")},
+	"PTR":   {re: singleValueRE("hostname")},
+	"SOA":   {re: regexp.MustCompile(`^\s*(?P<primary>\S+)\s+(?P<mail>\S+)\s+_\s+(?P<refresh>\d+|_)\s+(?P<retry>\d+|_)\s+(?P<expire>\d+|_)\s+(?P<neg_ttl>\d+|_)\s*$`), hasPriority: false, uints: map[string]int{"refresh": 32, "retry": 32, "expire": 32, "neg-ttl": 32}},
+	"SRV":   {re: regexp.MustCompile(`^\s*(?P<priority>\d+|_)\s+(?P<weight>\d+|_)\s+(?P<port>\d+|_)\s+(?P<target>\S+)\s*$`), hasPriority: true, uints: map[string]int{"priority": 16, "weight": 16, "port": 16}},
+}
+
+func parseContent(parse *parseType, content string) (objectValueType, error) {
+	matches := parse.re.FindStringSubmatch(content)
+	if matches == nil {
+		return nil, fmt.Errorf("not matched")
+	}
+	values := objectValueType{}
+	for _, key := range parse.re.SubexpNames() {
+		if key == "" {
+			continue
+		}
+		val := matches[parse.re.SubexpIndex(key)]
+		if val == "_" {
+			continue
+		}
+		key = strings.ReplaceAll(key, "_", "-")
+		if bits, ok := parse.uints[key]; ok {
+			val, err := strconv.ParseUint(val, 10, bits)
+			if err != nil {
+				return values, fmt.Errorf("out of range: %s", err)
+			}
+			values[key] = uint32(val)
+		} else {
+			values[key] = val
+		}
+	}
+	return values, nil
 }
 
 func fqdn(domain string, params *rrParams) (string, error) {
@@ -140,10 +186,12 @@ func asNumber[T interface {
 		} else {
 			val = v
 		}
+	case uint32:
+		val = int64(value)
 	case int:
 		val = int64(value)
 	default:
-		return 0, fmt.Errorf("not a float64 or int: %T", value)
+		return 0, fmt.Errorf("not a supported number type (float64, uint32, int): %T", value)
 	}
 	if val < min {
 		return 0, fmt.Errorf("out of range: < %d", min)
@@ -178,20 +226,18 @@ func getDuration(key string, params *rrParams) (time.Duration, *valuePath, error
 	}
 	var dur time.Duration
 	switch value := value.(type) {
-	case float64, int:
+	case string:
+		if v, err := time.ParseDuration(value); err != nil {
+			return 0, vPath, fmt.Errorf("failed to parse as duration string: %s", err)
+		} else {
+			dur = v
+		}
+	default:
 		if value, err := asNumber[int64](value, 1, -1); err != nil {
-			return 0, vPath, err
+			return 0, vPath, fmt.Errorf("failed to parse as number: %s", err)
 		} else {
 			dur = time.Duration(value) * time.Second
 		}
-	case string:
-		if v, err := time.ParseDuration(value); err == nil {
-			dur = v
-		} else {
-			return 0, vPath, fmt.Errorf("parse error: %s", err)
-		}
-	default:
-		return 0, vPath, fmt.Errorf("invalid value type (not a float64, int or string): %T", value)
 	}
 	if dur < time.Second {
 		return 0, vPath, fmt.Errorf("must be >= 1s")
@@ -401,6 +447,10 @@ func parseOctets(value any, ipVer int, asPrefix bool) ([]byte, error) {
 			}
 		} else {
 			return nil, fmt.Errorf("invalid syntax")
+		}
+	case []int:
+		for _, n := range value {
+			values = append(values, n)
 		}
 	case []any:
 		values = value

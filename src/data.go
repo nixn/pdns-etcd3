@@ -27,18 +27,20 @@ import (
 
 var (
 	// update this when changing data structure (only major/minor, patch is always 0). also change it in docs!
-	dataVersion = VersionType{IsDevelopment: true, Major: 1, Minor: 3}
+	dataVersion = VersionType{IsDevelopment: true, Major: 2, Minor: 0}
 )
 
 type recordType struct {
 	content  string
 	priority *uint16       // only used when pdnsVersion == 3
 	ttl      time.Duration // TODO make TTL an option, not a value
-	version  *VersionType
 }
 
 type objectValueType objectType[any]
-type stringValueType string
+type stringValueType struct {
+	s         string
+	noParsing bool
+}
 type lastFieldValueType any
 
 type valueType struct {
@@ -338,7 +340,7 @@ func parseEntryContent(value []byte, entryType entryType) (any, error) {
 	l := len(value)
 	if l == 0 {
 		if entryType == normalEntry {
-			return stringValueType(""), nil
+			return stringValueType{s: ""}, nil
 		}
 		return nil, fmt.Errorf("empty")
 	}
@@ -347,7 +349,12 @@ func parseEntryContent(value []byte, entryType entryType) (any, error) {
 		if entryType != normalEntry {
 			return nil, fmt.Errorf("a non-normal entry must be an object")
 		}
-		return stringValueType(value[1:]), nil
+		return stringValueType{s: string(value[1:])}, nil
+	case l >= 2 && slicePrefixed(value, '!', '`'):
+		if entryType != normalEntry {
+			return nil, fmt.Errorf("a non-normal entry must be an object")
+		}
+		return stringValueType{s: string(value[2:]), noParsing: true}, nil
 	case value[0] == '=': // last-field-value syntax
 		if entryType != normalEntry {
 			return nil, fmt.Errorf("a non-normal entry must be an object")
@@ -371,7 +378,7 @@ func parseEntryContent(value []byte, entryType entryType) (any, error) {
 		return values, nil
 	}
 	if entryType == normalEntry {
-		return stringValueType(value), nil
+		return stringValueType{s: string(value)}, nil
 	}
 	return nil, fmt.Errorf("invalid")
 }
@@ -451,25 +458,13 @@ func (dn *dataNode) processValues() {
 		valid := false
 	IDS:
 		for id, value := range values {
-			if id == "" {
-				if _, ok := value.content.(objectValueType); ok {
-					rrParams := rrParams{
-						qtype:   "SOA",
-						id:      id,
-						version: value.version,
-						data:    dn,
-						//logger:  log.data(), // TODO remove?
-					}
-					processValuesEntry(&rrParams, &value)
-					if _, valid = dn.records["SOA"][""]; valid {
-						break IDS
-					}
-				} else {
-					// TODO if stringValueType: parse and handle like an objectValueType
-					dn.log("id", id).Errorf("Ignoring SOA entry: the content must be of object type!")
-				}
-			} else {
-				dn.log("id", id).Errorf("Ignoring SOA entry: a SOA entry may not have a non-empty ID!")
+			if id != "" {
+				dn.log("id", id).Errorf("Ignoring SOA entry %q: a SOA entry may not have a non-empty ID!", value.key)
+				continue
+			}
+			dn.processValuesEntry("SOA", "", &value)
+			if _, valid = dn.records["SOA"][""]; valid {
+				break IDS
 			}
 		}
 		if !valid {
@@ -482,14 +477,7 @@ func (dn *dataNode) processValues() {
 			continue
 		}
 		for id, value := range values {
-			rrParams := rrParams{
-				qtype:   qtype,
-				id:      id,
-				version: value.version,
-				data:    dn,
-				//logger:  log.data(), // TODO remove?
-			}
-			processValuesEntry(&rrParams, &value)
+			dn.processValuesEntry(qtype, id, &value)
 		}
 	}
 	for _, child := range dn.children {
@@ -497,29 +485,38 @@ func (dn *dataNode) processValues() {
 	}
 }
 
-func processValuesEntry(rrParams *rrParams, value *valueType) {
-	// TODO move this to processValues()?
-	switch content := value.content.(type) {
-	case stringValueType:
-		processEntryTTL(rrParams, value)
-		rrParams.data.log("content", content).Tracef("found plain string value for %s", rrParams.Target())
-		// TODO if possible: parse and handle like an objectValueType
-		rrParams.SetContent(string(content), nil)
-		return
-	case objectValueType:
-		rrParams.values = objectType[any](content)
-		rrParams.lastFieldValue = nil
-	case lastFieldValueType:
-		rrParams.values = objectType[any]{}
-		rrParams.lastFieldValue = &value.content
+func (dn *dataNode) processValuesEntry(qtype, id string, value *valueType) {
+	if content, ok := value.content.(stringValueType); ok && !content.noParsing {
+		if parse := parses[qtype]; parse != nil {
+			values, err := parseContent(parse, content.s)
+			if err != nil {
+				dn.log("content", content.s, "regexp", parse.re.String()).Errorf("failed to parse plain string content for %s#%s (ignoring entry): %s", qtype, id, err)
+				return
+			}
+			dn.log("content", content.s, "values", values).Tracef("parsed plain string content for %s#%s into values", qtype, id)
+			value.content = values
+		}
 	}
-	processEntryTTL(rrParams, value)
-	rrFunc := rr2func[rrParams.qtype]
+	params := &rrParams{qtype: qtype, id: id, data: dn}
+	processEntryTTL(params, value)
+	if content, ok := value.content.(stringValueType); ok {
+		dn.log(content).Tracef("found plain string value for %s", params.Target())
+		params.SetContent(content.s, nil)
+		return
+	}
+	rrFunc := rrFuncs[qtype]
 	if rrFunc == nil {
-		rrParams.data.log("entry", value.key).Errorf("record type %q is not object-supported", rrParams.qtype)
+		dn.log("entry", value.key).Errorf("record type %q is not object-supported", qtype)
 		return
 	}
-	rrFunc(rrParams)
+	switch content := value.content.(type) {
+	case objectValueType:
+		params.values = objectType[any](content)
+	case lastFieldValueType:
+		params.values = objectType[any]{}
+		params.lastFieldValue = &value.content
+	}
+	rrFunc(params)
 }
 
 func processEntryTTL(rrParams *rrParams, value *valueType) {

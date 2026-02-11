@@ -24,7 +24,7 @@ the third development release, considered alpha quality. Any testing is apprecia
   * DNS responses are nearly instantly up-to-date (on every server instance!) after data changes by using a watcher into ETCD (multi-master)
 * [Multiple syntax possibilities](doc/ETCD-structure.md#syntax) for (values of) object-supported records
   * [JSON5][] or [YAML][]
-  * different representations of values (e.g. an IPv4 as `"192.0.2.1"` or `[192, 0, 2, 1]` or more...)
+  * different representations of values (e.g. an IPv4 as `"192.0.2.1"` or `[192, 0, 2, 1]`, a duration as `2h`, and more...)
 * [Short syntax for single-value objects](doc/ETCD-structure.md#resource-record-values)
   * or for the last value left when using defaults (e.g. [`target` in `SRV`](doc/ETCD-structure.md#srv))
 * [Default prefix for IP addresses](doc/ETCD-structure.md#a)
@@ -33,6 +33,9 @@ the third development release, considered alpha quality. Any testing is apprecia
 * Support for [automatically appending zone name to unqualified domain names](doc/ETCD-structure.md#domain-name)
 * Override of domain name appended to unqualified names (instead of zone name)
   * useful for [`PTR` records](doc/ETCD-structure.md#ptr) in reverse zones
+* Support for defaults and zone appending in most plain-string records (only supported ones)
+    * e.g. in an `SRV` entry: `20 5 _ server1`, the port will be searched for in default values, the name `server1` will be appended with the zone name
+    * same entry in JSON5 syntax: `{priority: 20, weight: 5, target: "server1"}` (this is longer but clearer)
 * [Multi-level defaults and options](doc/ETCD-structure.md#defaults-and-options), overridable
 * [Upgrade data structure](doc/ETCD-structure.md#upgrading) (if needed for new program version) without interrupting service
 * Run [standalone](#standalone-modes) for usage as a [Unix or HTTP connector][pdns-remote-usage]
@@ -48,7 +51,6 @@ the third development release, considered alpha quality. Any testing is apprecia
   * `A` ⇒ `PTR` (`in-addr.arpa`)
   * `AAAA` ⇒ `PTR` (`ip6.arpa`)
   * …
-* Support for defaults, syntax-checking and zone appending (and possibly more) in plain-string records (those which are also object-supported)
 * "Collect record", automatically combining A and/or AAAA records from "server records"
   * e.g. `etcd.example.com` based on `etcd-1.example.com`, `etcd-2.example.com`, …
 * "Labels" for selectively applying defaults and/or options to record entries
