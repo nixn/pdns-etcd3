@@ -447,7 +447,7 @@ Options:
     * when performing zone append checks, take this value (domain) instead of the FQDN of the current zone
     * undergoes itself a zone append check with the parent zone (if not ending with a `.`)
     * this option can be applied to any QTYPE with a domain name in its value, but is mostly useful here
-        * currently `SOA`, `NS`, `PTR`, `CNAME`, `DNAME`, `MX` and `SRV`
+        * currently `SOA`, `NS`, `PTR`, `ALIAS`, `CNAME`, `DNAME`, `MX` and `SRV`
     * constrained to be valid only within a zone (TODO describe better, give examples)
 
 The `SOA` record has some things to be aware of, when using the plaing string notation:
@@ -483,6 +483,13 @@ Options:
 
 #### `PTR`
 * `hostname`: domain name
+
+Options:
+* `zone-append-domain`: domain name
+  * [see `SOA`](#soa) for description
+
+#### `ALIAS`
+* `target`: domain name
 
 Options:
 * `zone-append-domain`: domain name
@@ -531,12 +538,13 @@ The `TXT` record is not parsed, when being written in a plain string syntax.
 The changelog lists every change which led to a data version increase (major or minor).
 One can use it to check their data - whether an adjustment is needed for a new program version which has a new data version.
 
-### 0.2.0
+### 0.2.0 (unreleased)
 * allow JSON5 syntax
 * allow YAML syntax for objects
 * added `` ` `` (backquote) marker
 * added `` !` `` marker
 * enabled parsing of plain string entries for supported records, so the underline character `_` gains an effect
+* added `ALIAS`
 
 ### 0.1.2
 * added numbers and arrays to `TXT:text`
@@ -602,6 +610,9 @@ DNS/net.example/_tcp/_kerberos/SRV#2 → '="kerberos2"'
 DNS/net.example/kerberos-master/CNAME → '{target: "kerberos1"}'
 DNS/net.example/mail/HINFO → '"amd64" "Linux"'
 DNS/net.example/mail/-defaults-/HINFO → '{ttl: "2h"}'
+DNS/net.example/www/A → '20'
+DNS/net.example/www/AAAA → '20'
+DNS/net.example/ALIAS → 'www'
 DNS/net.example/TYPE123 → '\# 0'
 DNS/net.example/TYPE237 → '\# 1 2a'
 ```

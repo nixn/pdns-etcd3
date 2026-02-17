@@ -66,6 +66,10 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 		records = data.records
 	} else {
 		records[query.qtype] = data.records[query.qtype]
+		switch query.qtype {
+		case "A", "AAAA":
+			records["ALIAS"] = data.records["ALIAS"]
+		}
 	}
 	for qtype, records := range records {
 		for _, record := range records {

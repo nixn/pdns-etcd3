@@ -342,6 +342,9 @@ func startPDNS(t *testing.T) (pdnsInfo, error) {
 		}
 		dynamicSettings = append(dynamicSettings, "dname-processing=yes")
 	}
+	if v >= "41" {
+		dynamicSettings = append(dynamicSettings, "resolver=127.0.0.1", "expand-alias=yes")
+	}
 	if v >= "44" {
 		cacheSettings = append(cacheSettings, "consistent-backends=no")
 	}
@@ -747,6 +750,46 @@ func TestWithPDNS(t *testing.T) {
 			}}))
 		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
 		waitForRevision(t, rev1, "CaSe data removed")
+	})
+	t.Run("ALIAS", func(t *testing.T) {
+		if pdns.Version < "41" {
+			t.Skip("skipping ALIAS test, expanding ALIAS is not available in PDNS v3.x and does not work properly for integration test in v4.0")
+		}
+		revs(withCleanup(t, map[string]string{
+			"net.example/non-alias/A":    `10`,
+			"net.example/non-alias/AAAA": `10`,
+			"net.example/ALIAS":          `target`,
+			"net.example/target/A":       `12`,
+			"net.example/target/AAAA":    `12`,
+			"net.example/alias/ALIAS":    `target`,
+		}, func() {
+			waitForRevision(t, rev1, "ALIAS data loaded")
+			t.Run("non-alias", func(t *testing.T) {
+				queryTest(t, qs("non-alias.example.net.", dns.TypeA, dns.Msg{Answer: []dns.RR{
+					&dns.A{Hdr: dns.RR_Header{Name: "non-alias.example.net."}, A: []byte{192, 0, 2, 10}},
+				}}))
+				queryTest(t, qs("non-alias.example.net.", dns.TypeAAAA, dns.Msg{Answer: []dns.RR{
+					&dns.AAAA{Hdr: dns.RR_Header{Name: "non-alias.example.net."}, AAAA: net.ParseIP("2001:db8::10")},
+				}}))
+			})
+			t.Run("(apex)", func(t *testing.T) {
+				queryTest(t, qs("example.net.", dns.TypeA, dns.Msg{Answer: []dns.RR{
+					&dns.A{Hdr: dns.RR_Header{Name: "example.net."}, A: []byte{192, 0, 2, 12}},
+				}}))
+				queryTest(t, qs("example.net.", dns.TypeAAAA, dns.Msg{Answer: []dns.RR{
+					&dns.AAAA{Hdr: dns.RR_Header{Name: "example.net."}, AAAA: net.ParseIP("2001:db8::12")},
+				}}))
+			})
+			t.Run("alias", func(t *testing.T) {
+				queryTest(t, qs("alias.example.net.", dns.TypeA, dns.Msg{Answer: []dns.RR{
+					&dns.A{Hdr: dns.RR_Header{Name: "alias.example.net."}, A: []byte{192, 0, 2, 12}},
+				}}))
+				queryTest(t, qs("alias.example.net.", dns.TypeAAAA, dns.Msg{Answer: []dns.RR{
+					&dns.AAAA{Hdr: dns.RR_Header{Name: "alias.example.net."}, AAAA: net.ParseIP("2001:db8::12")},
+				}}))
+			})
+		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		waitForRevision(t, rev1, "ALIAS data removed")
 	})
 }
 

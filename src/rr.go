@@ -66,6 +66,7 @@ type rrFunc func(params *rrParams)
 var rrFuncs = map[string]rrFunc{
 	"A":     a,
 	"AAAA":  aaaa,
+	"ALIAS": domainName("target"),
 	"CNAME": domainName("target"),
 	"DNAME": domainName("name"),
 	"MX":    mx,
@@ -89,12 +90,13 @@ type parseType struct {
 var parses = map[string]*parseType{
 	"A":     {re: singleValueRE("ip")},
 	"AAAA":  {re: singleValueRE("ip")},
+	"ALIAS": {re: singleValueRE("target")},
 	"CNAME": {re: singleValueRE("target")},
 	"DNAME": {re: singleValueRE("name")},
 	"MX":    {re: regexp.MustCompile(`^\s*(?P<priority>\d+|_)\s+(?P<target>\S+)\s*$`), hasPriority: true, uints: map[string]int{"priority": 16}},
 	"NS":    {re: singleValueRE("hostname")},
 	"PTR":   {re: singleValueRE("hostname")},
-	"SOA":   {re: regexp.MustCompile(`^\s*(?P<primary>\S+)\s+(?P<mail>\S+)\s+_\s+(?P<refresh>\d+|_)\s+(?P<retry>\d+|_)\s+(?P<expire>\d+|_)\s+(?P<neg_ttl>\d+|_)\s*$`), hasPriority: false, uints: map[string]int{"refresh": 32, "retry": 32, "expire": 32, "neg-ttl": 32}},
+	"SOA":   {re: regexp.MustCompile(`^\s*(?P<primary>\S+)\s+(?P<mail>\S+)\s+_\s+(?P<refresh>\d+|_)\s+(?P<retry>\d+|_)\s+(?P<expire>\d+|_)\s+(?P<neg_ttl>\d+|_)\s*$`), uints: map[string]int{"refresh": 32, "retry": 32, "expire": 32, "neg-ttl": 32}},
 	"SRV":   {re: regexp.MustCompile(`^\s*(?P<priority>\d+|_)\s+(?P<weight>\d+|_)\s+(?P<port>\d+|_)\s+(?P<target>\S+)\s*$`), hasPriority: true, uints: map[string]int{"priority": 16, "weight": 16, "port": 16}},
 }
 

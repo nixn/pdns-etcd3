@@ -36,6 +36,7 @@ the third development release, considered alpha quality. Any testing is apprecia
 * Support for defaults and zone appending in most plain-string records (only supported ones)
     * e.g. in an `SRV` entry: `20 5 _ server1`, the port will be searched for in default values, the name `server1` will be appended with the zone name
     * same entry in JSON5 syntax: `{priority: 20, weight: 5, target: "server1"}` (this is longer but clearer)
+* [`ALIAS`](https://doc.powerdns.com/authoritative/guides/alias.html) support
 * [Multi-level defaults and options](doc/ETCD-structure.md#defaults-and-options), overridable
 * [Upgrade data structure](doc/ETCD-structure.md#upgrading) (if needed for new program version) without interrupting service
 * Run [standalone](#standalone-modes) for usage as a [Unix or HTTP connector][pdns-remote-usage]
