@@ -45,6 +45,8 @@ func checkT[Input any, Value any](t *testing.T, f testFunc[Input, Value], in Inp
 			t.Errorf(`%#+v -> expected error with %q, got value: %s`, in, expected.e, val2str(got))
 		} else if !strings.Contains(err.Error(), expected.e) {
 			t.Errorf(`%#+v -> expected error with %q, got error: %s`, in, expected.e, err)
+		} else {
+			t.Logf("got expected error")
 		}
 	} else {
 		if err != nil {
@@ -52,6 +54,8 @@ func checkT[Input any, Value any](t *testing.T, f testFunc[Input, Value], in Inp
 		} else {
 			if unequal := testEqual(t, expected.v, got, expected.c, ""); unequal != nil {
 				t.Errorf(`%s -> expected: %s (conditions: %s), got: %s (%s)`, val2str(in), val2str(expected.v), val2str(expected.c), val2str(got), unequal)
+			} else {
+				t.Logf("got expected value")
 			}
 		}
 	}

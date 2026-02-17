@@ -328,25 +328,28 @@ func startPDNS(t *testing.T) (pdnsInfo, error) {
 	default:
 		t.Fatalf("invalid PDNS version: %q", v)
 	}
-	dynamicSettings := []string{
+	cacheSettings := []string{
 		"cache-ttl=0",
 		"query-cache-ttl=0",
 		"negquery-cache-ttl=0",
 	}
+	dynamicSettings := []string{}
 	if v >= "40" {
 		if v < "45" {
-			dynamicSettings = append(dynamicSettings, "domain-metadata-cache-ttl=0")
+			cacheSettings = append(cacheSettings, "domain-metadata-cache-ttl=0")
 		} else {
-			dynamicSettings = append(dynamicSettings, "zone-metadata-cache-ttl=0")
+			cacheSettings = append(cacheSettings, "zone-metadata-cache-ttl=0")
 		}
 		dynamicSettings = append(dynamicSettings, "dname-processing=yes")
 	}
 	if v >= "44" {
-		dynamicSettings = append(dynamicSettings, "consistent-backends=no")
+		cacheSettings = append(cacheSettings, "consistent-backends=no")
 	}
 	if v >= "45" {
-		dynamicSettings = append(dynamicSettings, "zone-cache-refresh-interval=0")
+		cacheSettings = append(cacheSettings, "zone-cache-refresh-interval=0")
 	}
+	t.Logf("PDNS cache settings: %v", cacheSettings)
+	t.Logf("PDNS dynamic settings: %v", dynamicSettings)
 	ctInfo, err := startContainer(t, testcontainers.ContainerRequest{
 		Image:          image,
 		FromDockerfile: fromDockerfile,
@@ -357,6 +360,7 @@ func startPDNS(t *testing.T) (pdnsInfo, error) {
 		LogConsumerCfg: &testcontainers.LogConsumerConfig{Consumers: []testcontainers.LogConsumer{CtLogger{t, "PDNS"}}},
 		Files: []testcontainers.ContainerFile{
 			{HostFilePath: "../testdata/pdns.conf", ContainerFilePath: "/etc/powerdns/pdns.conf", FileMode: 0o555},
+			{Reader: linesReader(cacheSettings), ContainerFilePath: "/etc/powerdns/pdns.d/cache-settings.conf", FileMode: 0o555},
 			{Reader: linesReader(dynamicSettings), ContainerFilePath: "/etc/powerdns/pdns.d/dynamic-settings.conf", FileMode: 0o555},
 		},
 		WaitingFor: wait.ForLog("ready to distribute questions"),
