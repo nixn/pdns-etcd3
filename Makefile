@@ -70,7 +70,7 @@ integration-tests-matrix-etcd:
 	-@set -u; \
 	for etcd_version in $(ETCD_VERSIONS); do \
 	  echo ETCD_VERSION=$$etcd_version ; \
-	  $(MAKE) --no-print-directory integration-tests ETCD_VERSION=$$etcd_version ONLY=Requests ; \
+	  $(MAKE) --no-print-directory integration-tests ETCD_VERSION=$$etcd_version ONLY=PipeRequests ; \
 	done
 
 integration-tests-matrix-pdns:

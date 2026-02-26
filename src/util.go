@@ -199,17 +199,14 @@ func float2decimal(n float64) string {
 }
 
 func wgGo(wg *sync.WaitGroup, name string, f func()) {
-	routines.mutex.Lock()
-	defer routines.mutex.Unlock()
-	wg.Add(1)
-	routines.store[name] = name
-	go func() {
-		defer wg.Done()
-		f()
-		routines.mutex.Lock()
-		defer routines.mutex.Unlock()
-		delete(routines.store, name)
-	}()
+	status.routines.Put(name, name, func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer status.routines.Delete(name)
+			f()
+		}()
+	})
 }
 
 func recoverPanics(f func(any) bool) {
@@ -262,4 +259,85 @@ func slicePrefixed[T comparable](slice []T, prefix ...T) bool {
 		}
 	}
 	return true
+}
+
+type SyncAccess struct {
+	mutex sync.RWMutex
+}
+
+func (sa *SyncAccess) WithLock(fn func()) {
+	sa.mutex.Lock()
+	defer sa.mutex.Unlock()
+	fn()
+}
+
+func WithLock[R any](sa *SyncAccess, fn func() R) R {
+	sa.mutex.Lock()
+	defer sa.mutex.Unlock()
+	return fn()
+}
+
+func (sa *SyncAccess) WithRLock(fn func()) {
+	sa.mutex.RLock()
+	defer sa.mutex.RUnlock()
+	fn()
+}
+
+func WithRLock[R any](sa *SyncAccess, fn func() R) R {
+	sa.mutex.RLock()
+	defer sa.mutex.RUnlock()
+	return fn()
+}
+
+func WithRLock2[R1 any, R2 any](sa *SyncAccess, fn func() (R1, R2)) (R1, R2) {
+	sa.mutex.RLock()
+	defer sa.mutex.RUnlock()
+	return fn()
+}
+
+type MapSyncAccess[K comparable, V any] struct {
+	SyncAccess
+	Map map[K]V
+}
+
+func (m *MapSyncAccess[K, V]) Init() *MapSyncAccess[K, V] {
+	m.WithLock(func() { m.Map = map[K]V{} })
+	return m
+}
+
+func (m *MapSyncAccess[K, V]) Len() int {
+	return WithRLock(&m.SyncAccess, func() int { return len(m.Map) })
+}
+
+func (m *MapSyncAccess[K, V]) Put(k K, v V, postFns ...func()) {
+	m.WithLock(func() {
+		m.Map[k] = v
+		for _, fn := range postFns {
+			fn()
+		}
+	})
+}
+
+func (m *MapSyncAccess[K, V]) Get(k K) V {
+	return WithRLock(&m.SyncAccess, func() V { return m.Map[k] })
+}
+
+func (m *MapSyncAccess[K, V]) Delete(k K) {
+	m.WithLock(func() { delete(m.Map, k) })
+}
+
+func (m *MapSyncAccess[K, V]) ComputeIfAbsent(k K, compute func(k *K) V) V {
+	m.mutex.RLock()
+	if v, ok := m.Map[k]; ok {
+		defer m.mutex.RUnlock()
+		return v
+	}
+	m.mutex.RUnlock()
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	if v, ok := m.Map[k]; ok {
+		return v
+	}
+	m.Map[k] = compute(&k)
+	return m.Map[k]
 }

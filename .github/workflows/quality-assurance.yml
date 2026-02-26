@@ -46,7 +46,7 @@ jobs:
           go-version: ${{ matrix.go-version }}
       - run: go test -tags unit -v ./src
   integration-tests-requests:
-    name: Integration tests (Requests on ETCD ${{ matrix.etcd-version }})
+    name: Integration tests (PipeRequests on ETCD ${{ matrix.etcd-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -60,7 +60,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: stable
-      - run: go test -tags integration -count=1 -v -run Requests ./src
+      - run: go test -tags integration -count=1 -v -run PipeRequests ./src
   integration-tests-pdns:
     name: Integration tests (PDNS ${{ matrix.pdns-version }})
     runs-on: ubuntu-latest

@@ -24,19 +24,20 @@ import (
 	"golang.org/x/net/context"
 )
 
-var (
-	cli             *clientv3.Client
-	currentRevision int64
-)
+type etcdClient struct {
+	*clientv3.Client
+	Connected       bool
+	CurrentRevision int64
+}
 
-func setupClient() (logMessages []string, err error) {
+func (cli *etcdClient) Setup(args *programArgs) (logMessages []string, err error) {
 	if *args.ConfigFile != "" {
 		cfg, fileErr := clientv3yaml.NewConfig(*args.ConfigFile)
 		if fileErr != nil {
 			err = fmt.Errorf("failed to read config from file %q: %s", *args.ConfigFile, fileErr)
 			return
 		}
-		cli, err = clientv3.New(*cfg)
+		cli.Client, err = clientv3.New(*cfg)
 		if err != nil {
 			err = fmt.Errorf("failed to create client instance: %s", err)
 			return
@@ -52,19 +53,19 @@ func setupClient() (logMessages []string, err error) {
 		fmt.Sprintf("%s: %s", dialTimeoutParam, *args.DialTimeout),
 		fmt.Sprintf("%s: %s", endpointsParam, *args.Endpoints),
 	)
-	cli, err = clientv3.New(cfg)
+	cli.Client, err = clientv3.New(cfg)
 	if err != nil {
 		err = fmt.Errorf("failed to create ETCD client instance: %s", err)
 		return
 	}
-	connected = true
+	cli.Connected = true
 	logMessages = append(logMessages, fmt.Sprintf("%s: %v", endpointsParam, cfg.Endpoints))
 	return
 }
 
-func closeClient() {
-	if cli != nil {
-		_ = cli.Close()
+func (cli *etcdClient) Close() {
+	if cli.Client != nil {
+		_ = cli.Client.Close()
 	}
 }
 
@@ -90,7 +91,7 @@ func getResponse(response *clientv3.GetResponse) *getResponseType {
 	return &getResponseType{response.Header.Revision, ch}
 }
 
-func get(key string, multi bool, revision *int64) (*getResponseType, error) {
+func (cli *etcdClient) Get(key string, multi bool, revision *int64, timeout time.Duration) (*getResponseType, error) {
 	log.etcd("multi", multi, "rev", revision).Tracef("get %q", key)
 	opts := []clientv3.OpOption(nil)
 	if multi {
@@ -99,10 +100,10 @@ func get(key string, multi bool, revision *int64) (*getResponseType, error) {
 	if revision != nil {
 		opts = append(opts, clientv3.WithRev(*revision))
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), *args.DialTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	since := time.Now()
-	response, err := cli.Get(ctx, key, opts...)
+	response, err := cli.Client.Get(ctx, key, opts...)
 	dur := time.Since(since)
 	if err != nil {
 		return nil, fmt.Errorf("[dur %s] %s", dur, err)
@@ -111,10 +112,10 @@ func get(key string, multi bool, revision *int64) (*getResponseType, error) {
 	return getResponse(response), nil
 }
 
-func put(key string, value string, timeout time.Duration) (*clientv3.PutResponse, error) {
+func (cli *etcdClient) Put(key string, value string, timeout time.Duration) (*clientv3.PutResponse, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	return cli.Put(ctx, key, value)
+	return cli.Client.Put(ctx, key, value)
 }
 
 func delOp(key string) clientv3.Op {
@@ -125,16 +126,16 @@ func putOp(key, value string) clientv3.Op {
 	return clientv3.OpPut(key, value)
 }
 
-func txn(timeout time.Duration, ops ...clientv3.Op) (*clientv3.TxnResponse, error) {
+func (cli *etcdClient) Txn(timeout time.Duration, ops ...clientv3.Op) (*clientv3.TxnResponse, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	txn := cli.Txn(ctx)
+	txn := cli.Client.Txn(ctx)
 	txn.Then(ops...)
 	return txn.Commit()
 }
 
-func watchData(ctx context.Context, prefix string) {
-	watcher := clientv3.NewWatcher(cli)
+func (cli *etcdClient) WatchData(ctx context.Context, prefix string) {
+	watcher := clientv3.NewWatcher(cli.Client)
 	defer closeNoError(watcher)
 	watchRetryInterval := 5 * time.Second // TODO make a program argument
 WATCH:
@@ -145,12 +146,12 @@ WATCH:
 			break WATCH
 		default:
 		}
-		log.etcd("currRev", currentRevision).Tracef("creating watch")
+		log.etcd("currRev", cli.CurrentRevision).Tracef("creating watch")
 		watchCtx := clientv3.WithRequireLeader(ctx)
-		watchChan := watcher.Watch(watchCtx, prefix, clientv3.WithPrefix(), clientv3.WithRev(currentRevision+1))
+		watchChan := watcher.Watch(watchCtx, prefix, clientv3.WithPrefix(), clientv3.WithRev(cli.CurrentRevision+1))
 	EVENTS:
 		for {
-			log.etcd("currRev", currentRevision).Trace("waiting for next event")
+			log.etcd("currRev", cli.CurrentRevision).Trace("waiting for next event")
 			watchResponse, ok := <-watchChan
 			if !ok {
 				log.etcd().Trace("watch channel closed")
@@ -167,11 +168,11 @@ WATCH:
 				n := len(watchResponse.Events)
 				log.etcd("compact-rev", watchResponse.CompactRevision, "#events", n, "rev", watchResponse.Header.Revision).Debug("watch event")
 				if n == 0 {
-					log.etcd("currRev", currentRevision).Tracef("stopping watch")
+					log.etcd("currRev", cli.CurrentRevision).Tracef("stopping watch")
 					break WATCH
 				}
 				handleEvents(watchResponse.Header.Revision, watchResponse.Events)
-				currentRevision = watchResponse.Header.Revision
+				cli.CurrentRevision = watchResponse.Header.Revision
 			}
 		}
 		log.etcd().Debugf("retrying watch in %s", watchRetryInterval)

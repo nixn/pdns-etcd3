@@ -20,12 +20,15 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"math/rand"
 	"net"
 	"net/url"
 	"os"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,7 +42,7 @@ import (
 
 func txnT(t *testing.T, ops ...clientv3.Op) int64 {
 	t.Helper()
-	if resp, err := txn(10*time.Second, ops...); err != nil {
+	if resp, err := cli.Txn(10*time.Second, ops...); err != nil {
 		Fatalf(t, "failed to commit transaction (%d ops): %s", len(ops), err)
 		return -1
 	} else if !resp.Succeeded {
@@ -52,7 +55,7 @@ func txnT(t *testing.T, ops ...clientv3.Op) int64 {
 
 func putT(t *testing.T, prefix, key, value string) int64 {
 	t.Helper()
-	if resp, err := put(prefix+key, value, 10*time.Second); err != nil {
+	if resp, err := cli.Put(prefix+key, value, 10*time.Second); err != nil {
 		Fatalf(t, "failed to put %q: %s", prefix+key, err)
 		return -1
 	} else {
@@ -62,7 +65,7 @@ func putT(t *testing.T, prefix, key, value string) int64 {
 
 func waitForRevision(t *testing.T, rev int64, desc string) {
 	t.Helper()
-	err := waitFor(t, desc, func() bool { return currentRevision >= rev }, 10*time.Millisecond, 10*time.Second)
+	err := waitFor(t, desc, func() bool { return cli.CurrentRevision >= rev }, 10*time.Millisecond, 10*time.Second)
 	fatalOnErr(t, "wait for "+desc, err)
 }
 
@@ -81,6 +84,9 @@ func TestPipeRequests(t *testing.T) {
 	Logf(t, "ETCD endpoint: %s", etcd.Endpoint)
 	sleepT(t, 1*time.Second)
 	// start pdns-etcd3 (main function)
+	Logf(t, "starting pdns-etcd3")
+	cli = &etcdClient{}
+	status = (&statusType{}).Init()
 	inR, inW, _ := os.Pipe()
 	defer func() {
 		t.Log("closing input stream to pdns-etcd3")
@@ -97,11 +103,10 @@ func TestPipeRequests(t *testing.T) {
 		DialTimeout: &timeout,
 		Prefix:      &prefix,
 	}
-	Logf(t, "starting pdns-etcd3.serve() with ETCD endpoint %s", etcd.Endpoint)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	wg := new(sync.WaitGroup)
-	go pipe(ctx, wg, inR, outW)
+	go pipe(ctx, wg, inR, outW, false)
 	pe3 := newComm[any](ctx, outR, inW)
 	action := func(t *testing.T, request pdnsRequest) (any, error) {
 		Logf(t, "request: %s", val2str(request))
@@ -121,7 +126,7 @@ func TestPipeRequests(t *testing.T) {
 			Fatalf(t, "prefix mismatch after initialize: expected %q, got %q", testPrefix, prefix)
 		}
 	}
-	err = waitFor(t, "populated", func() bool { return populated }, 10*time.Millisecond, 30*time.Second)
+	err = waitFor(t, "populated", func() bool { return status.populated }, 10*time.Millisecond, 30*time.Second)
 	fatalOnErr(t, "wait for populated", err)
 	sleepT(t, 1*time.Second)
 	put := func(key, value string) clientv3.Op {
@@ -250,18 +255,16 @@ type pe3Info struct {
 	Prefix      string
 }
 
-func startPE3(t *testing.T, etcdEndpoint, prefix, pdnsVersion string) pe3Info {
+func startPE3(t *testing.T, etcdEndpoint, prefix string, moreArgs ...string) pe3Info {
 	t.Helper()
 	httpAddress, _ := url.Parse("http://0.0.0.0:8053") // the port is fixed, it is set in pdns.conf too
 	doneCtx, done := context.WithCancel(context.Background())
 	osSignals := make(chan os.Signal, 1)
 	go func() {
 		defer done()
-		args := []string{"-standalone=" + httpAddress.String(), "-endpoints=" + etcdEndpoint, "-prefix=" + prefix, "-timeout=5s", "-log-trace=main+pdns+etcd+data"}
-		if pdnsVersion != "" {
-			args = append(args, "-pdns-version="+pdnsVersion)
-		}
-		main(VersionType{IsDevelopment: true}, getGitVersion(t), args, osSignals)
+		args := []string{"-standalone=" + httpAddress.String(), "-timeout=5s", "-endpoints=" + etcdEndpoint, "-prefix=" + prefix}
+		args = append(args, moreArgs...)
+		main(VersionType{IsDevelopment: true}, getGitVersion(t), args, osSignals, true)
 		Logf(t, "pe3 finished")
 	}()
 	return pe3Info{
@@ -307,7 +310,7 @@ type pdnsInfo struct {
 	Version string
 }
 
-func startPDNS(t *testing.T) (pdnsInfo, error) {
+func startPDNS(t *testing.T, dynamicSettings map[string]string) (pdnsInfo, error) {
 	t.Helper()
 	var image string
 	var fromDockerfile testcontainers.FromDockerfile
@@ -329,31 +332,30 @@ func startPDNS(t *testing.T) (pdnsInfo, error) {
 	default:
 		Fatalf(t, "invalid PDNS version: %q", v)
 	}
-	cacheSettings := []string{
+	settings := []string{
 		"cache-ttl=0",
 		"query-cache-ttl=0",
 		"negquery-cache-ttl=0",
 	}
-	dynamicSettings := []string{}
 	if v >= "40" {
 		if v < "45" {
-			cacheSettings = append(cacheSettings, "domain-metadata-cache-ttl=0")
+			settings = append(settings, "domain-metadata-cache-ttl=0")
 		} else {
-			cacheSettings = append(cacheSettings, "zone-metadata-cache-ttl=0")
+			settings = append(settings, "zone-metadata-cache-ttl=0")
 		}
-		dynamicSettings = append(dynamicSettings, "dname-processing=yes")
-	}
-	if v >= "41" {
-		dynamicSettings = append(dynamicSettings, "resolver=127.0.0.1", "expand-alias=yes")
 	}
 	if v >= "44" {
-		cacheSettings = append(cacheSettings, "consistent-backends=no")
+		settings = append(settings, "consistent-backends=no")
 	}
 	if v >= "45" {
-		cacheSettings = append(cacheSettings, "zone-cache-refresh-interval=0")
+		settings = append(settings, "zone-cache-refresh-interval=0")
 	}
-	Logf(t, "PDNS cache settings: %v", cacheSettings)
-	Logf(t, "PDNS dynamic settings: %v", dynamicSettings)
+	for setting, sinceVersion := range dynamicSettings {
+		if v >= sinceVersion {
+			settings = append(settings, setting)
+		}
+	}
+	Logf(t, "PDNS settings: %v", settings)
 	ctInfo, err := startContainer(t, testcontainers.ContainerRequest{
 		Image:          image,
 		FromDockerfile: fromDockerfile,
@@ -364,12 +366,119 @@ func startPDNS(t *testing.T) (pdnsInfo, error) {
 		LogConsumerCfg: &testcontainers.LogConsumerConfig{Consumers: []testcontainers.LogConsumer{CtLogger{t, "PDNS"}}},
 		Files: []testcontainers.ContainerFile{
 			{HostFilePath: "../testdata/pdns.conf", ContainerFilePath: "/etc/powerdns/pdns.conf", FileMode: 0o555},
-			{Reader: linesReader(cacheSettings), ContainerFilePath: "/etc/powerdns/pdns.d/cache-settings.conf", FileMode: 0o555},
-			{Reader: linesReader(dynamicSettings), ContainerFilePath: "/etc/powerdns/pdns.d/dynamic-settings.conf", FileMode: 0o555},
+			{Reader: linesReader(settings), ContainerFilePath: "/etc/powerdns/pdns.d/settings.conf", FileMode: 0o555},
 		},
-		WaitingFor: wait.ForLog("ready to distribute questions"),
+		WaitingFor: wait.ForLog("ready to distribute questions|operating unthreaded").AsRegexp(),
 	}, "53/tcp")
 	return pdnsInfo{ctInfo, v}, err
+}
+
+func basicDataTxn(t *testing.T, prefix string) (int64, []clientv3.Op) {
+	t.Helper()
+	put := func(key, value string) clientv3.Op {
+		return putOp(prefix+key, value)
+	}
+	putSOA1 := put("net.example/SOA", `{}`)
+	putSOA2 := put("arpa.in-addr/192.0.2/SOA", `{}`)
+	putSOA3 := put("arpa.ip6/2.0.0.1.0.d.b.8/SOA", `{}`)
+	return txnT(t,
+		put("-defaults-", `{ttl: "1h"}`),
+		put("-defaults-/SOA", "---\n#this is yaml\nrefresh: 1h\nretry: 30m\nexpire: 604800\nneg-ttl: 10m\nprimary: ns1\nmail: horst.master\n"),
+		put("-defaults-/SRV", `{priority: 10, weight: 1}`),
+		put("arpa.in-addr/192.0.2/-options-", `{"zone-append-domain": "example.net."}`),
+		put("arpa.ip6/2.0.0.1.0.d.b.8/-options-", `{"zone-append-domain": "example.net."}`),
+		put("net.example/-options-/A", `{"ip-prefix": [192, 0, 2]}`),
+		put("net.example/-options-/AAAA", `{"ip-prefix": "20010db8"}`),
+		// SOAs
+		putSOA1,
+		putSOA2,
+		putSOA3,
+		// NS (first)
+		put("net.example/NS#first", `="ns1"`),
+		put("arpa.in-addr/192.0.2/NS#a", `="ns1"`),
+		put("arpa.ip6/2.0.0.1.0.d.b.8/NS#1", `="ns1"`),
+		// ns1
+		put("net.example/ns1/A", `=2`),
+		put("net.example/ns1/AAAA", `=2`),
+		put("arpa.in-addr/192.0.2/2/PTR", `="ns1"`),
+		put("arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.2/PTR", `="ns1"`),
+	), []clientv3.Op{putSOA1, putSOA2, putSOA3}
+}
+
+type querySpecT struct {
+	name       string
+	qtype      uint16
+	answer     dns.Msg
+	conditions map[string]Condition
+}
+
+var defaultConditions = map[string]Condition{
+	`->MsgHdr>Response`:                    CompareWith[bool]{true},
+	`->MsgHdr>Authoritative`:               CompareWith[bool]{true}, // OtherDefault does not work here, because the zero value is a valid response value
+	`->(Answer|Ns)`:                        SliceContains{All: true, Only: true},
+	`->(Answer|Ns|Extra)@\d->Hdr>Class`:    OtherDefault[uint16]{Value: dns.ClassINET},
+	`->Answer@\d->Hdr>Name`:                WhenDefault[string]{}, // do not apply to Extra, because the RRs there are of other names! // TODO use OnDefaultSameAs(->Question@0>Name) instead (only on default, because it could be another name, like in CNAME'd answers)
+	`->(Answer|Extra)@\d->Hdr>Rrtype`:      WhenDefault[uint16]{}, // applied to Extra, too, because the type is already given in element type and checked by reflection
+	`->(Answer|Ns|Extra)@\d->Hdr>Rdlength`: Ignore{},
+	`->(Answer|Ns|Extra)@\d->Hdr>Ttl`:      OtherDefault[uint32]{Value: 3600},
+	`->Extra`:                              Ignore{},
+}
+
+func QueryTest(t *testing.T, pdnsEndpoint string, qs querySpecT, timeout time.Duration, quiet bool) time.Duration {
+	t.Helper()
+	q := new(dns.Msg)
+	q.Id = uint16(rand.Uint32() & 0xffff)
+	qs.answer.Id = q.Id
+	q.Question = make([]dns.Question, 1)
+	q.Question[0] = dns.Question{Name: qs.name, Qtype: qs.qtype, Qclass: dns.ClassINET}
+	qs.answer.Question = q.Question
+	c := qs.conditions
+	if c == nil {
+		c = defaultConditions
+	}
+	var duration time.Duration
+	checkT(t, func(t *testing.T, query *dns.Msg) (*dns.Msg, error) {
+		dc := &dns.Client{
+			Net:     "tcp",
+			Timeout: timeout,
+		}
+		if !quiet {
+			Logf(t, "sending query to PDNS: %v", query.Question)
+		}
+		msg, dur, err := dc.Exchange(query, pdnsEndpoint)
+		duration = dur
+		if err == nil {
+			if !quiet {
+				Logf(t, "PDNS response (in %s):\n%s", dur, msg)
+			}
+			if len(msg.Answer) == 0 {
+				if len(msg.Extra) > 0 {
+					if !quiet {
+						Logf(t, "Answer seems to be in Extra, moving")
+					}
+					msg.Answer = msg.Extra
+					msg.Extra = nil
+				}
+			} else if qs.qtype == dns.TypeANY && len(msg.Extra) > 0 { // len(msg.Answer) is > 0!
+				if !quiet {
+					Logf(t, "ANY query, and Answer seems to be partially split into Extra, merging")
+				}
+				msg.Answer = append(msg.Answer, msg.Extra...)
+				msg.Extra = nil
+			}
+		}
+		return msg, err
+	}, q, ve[*dns.Msg]{v: &qs.answer, c: c}, quiet)
+	return duration
+}
+
+func querySpec(name string, qtype uint16, answer dns.Msg, extraConditions ...map[string]Condition) querySpecT {
+	qs := querySpecT{name, qtype, answer, defaultConditions}
+	for _, newConditions := range extraConditions {
+		qs.conditions = maps.Clone(qs.conditions)
+		maps.Copy(qs.conditions, newConditions)
+	}
+	return qs
 }
 
 func TestWithPDNS(t *testing.T) {
@@ -381,10 +490,10 @@ func TestWithPDNS(t *testing.T) {
 	Logf(t, "ETCD endpoint (2379): %s", etcd.Endpoint)
 	// PDNS-ETCD3
 	sleepT(t, 1*time.Second)
-	pe3 := startPE3(t, etcd.Endpoint, "", getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1])
+	pe3 := startPE3(t, etcd.Endpoint, "", "-log-trace=main+etcd+pdns+data", "-pdns-version="+getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1])
 	defer pe3.Terminate()
 	Logf(t, "PDNS-ETCD3 endpoint: %s", pe3.HttpAddress)
-	err = waitFor(t, "PE3 ready", func() bool { return serving }, 10*time.Millisecond, 30*time.Second)
+	err = waitFor(t, "PE3 ready", func() bool { return status.serving }, 10*time.Millisecond, 30*time.Second)
 	fatalOnErr(t, "wait for PE3 ready", err)
 	sleepT(t, 1*time.Second)
 	// fill data
@@ -406,68 +515,21 @@ func TestWithPDNS(t *testing.T) {
 		return txnT(t, ds...)
 	}
 	// fill with basic data to have the minimal number of entries to keep logs small when reloading zones
-	putSOA1 := put("net.example/SOA", `{}`)
-	putSOA2 := put("arpa.in-addr/192.0.2/SOA", `{}`)
-	putSOA3 := put("arpa.ip6/2.0.0.1.0.d.b.8/SOA", `{}`)
-	var rev1, rev2, rev3 int64
-	revs(txnT(t,
-		put("-defaults-", `{ttl: "1h"}`),
-		put("-defaults-/SOA", "---\n#this is yaml\nrefresh: 1h\nretry: 30m\nexpire: 604800\nneg-ttl: 10m\nprimary: ns1\nmail: horst.master\n"),
-		put("-defaults-/SRV", `{priority: 10, weight: 1}`),
-		put("arpa.in-addr/192.0.2/-options-", `{"zone-append-domain": "example.net."}`),
-		put("arpa.ip6/2.0.0.1.0.d.b.8/-options-", `{"zone-append-domain": "example.net."}`),
-		put("net.example/-options-/A", `{"ip-prefix": [192, 0, 2]}`),
-		put("net.example/-options-/AAAA", `{"ip-prefix": "20010db8"}`),
-		// SOAs
-		putSOA1,
-		putSOA2,
-		putSOA3,
-		// NS (first)
-		put("net.example/NS#first", `="ns1"`),
-		put("arpa.in-addr/192.0.2/NS#a", `="ns1"`),
-		put("arpa.ip6/2.0.0.1.0.d.b.8/NS#1", `="ns1"`),
-		// ns1
-		put("net.example/ns1/A", `=2`),
-		put("net.example/ns1/AAAA", `=2`),
-		put("arpa.in-addr/192.0.2/2/PTR", `="ns1"`),
-		put("arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.2/PTR", `="ns1"`),
-	), &rev1, &rev2, &rev3)
+	rev1, putSOA := basicDataTxn(t, pe3.Prefix)
+	var rev2, rev3 int64
+	revs(rev1, &rev2, &rev3)
 	waitForRevision(t, rev1, "basic data loaded")
 	// PDNS
-	pdns, err := startPDNS(t)
+	pdns, err := startPDNS(t, map[string]string{
+		"resolver=127.0.0.1":   "41",
+		"expand-alias=yes":     "41",
+		"dname-processing=yes": "40",
+	})
 	fatalOnErr(t, "start PDNS container", err)
 	defer pdns.Terminate()
 	Logf(t, "PDNS endpoint: %s", pdns.Endpoint)
 	// queries
-	dc := &dns.Client{
-		Net:     "tcp",
-		Timeout: 10 * time.Second,
-	}
-	type querySpec struct {
-		name       string
-		qtype      uint16
-		answer     dns.Msg
-		conditions map[string]Condition
-	}
-	conditions := map[string]Condition{
-		`->MsgHdr>Response`:                    CompareWith[bool]{true},
-		`->MsgHdr>Authoritative`:               CompareWith[bool]{true}, // OtherDefault does not work here, because the zero value is a valid response value
-		`->(Answer|Ns)`:                        SliceContains{All: true, Only: true},
-		`->(Answer|Ns|Extra)@\d->Hdr>Class`:    OtherDefault[uint16]{Value: dns.ClassINET},
-		`->Answer@\d->Hdr>Name`:                WhenDefault[string]{}, // do not apply to Extra, because the RRs there are of other names! // TODO use OnDefaultSameAs(->Question@0>Name) instead (only on default, because it could be another name, like in CNAME'd answers)
-		`->(Answer|Extra)@\d->Hdr>Rrtype`:      WhenDefault[uint16]{}, // applied to Extra, too, because the type is already given in element type and checked by reflection
-		`->(Answer|Ns|Extra)@\d->Hdr>Rdlength`: Ignore{},
-		`->(Answer|Ns|Extra)@\d->Hdr>Ttl`:      OtherDefault[uint32]{Value: 3600},
-		`->Extra`:                              Ignore{},
-	}
-	qs := func(name string, qtype uint16, answer dns.Msg, extraConditions ...map[string]Condition) querySpec {
-		qs := querySpec{name, qtype, answer, conditions}
-		for _, newConditions := range extraConditions {
-			qs.conditions = maps.Clone(qs.conditions)
-			maps.Copy(qs.conditions, newConditions)
-		}
-		return qs
-	}
+	qs := querySpec
 	soa := func(name string, rev *int64) func(ttl uint32) *dns.SOA {
 		return func(ttl uint32) *dns.SOA {
 			return &dns.SOA{Hdr: dns.RR_Header{Name: name, Rrtype: dns.TypeSOA, Ttl: ttl},
@@ -480,37 +542,8 @@ func TestWithPDNS(t *testing.T) {
 	exampleNetSOA := soa(exampleNet+".", &rev1)
 	v4arpaSOA := soa(v4arpa+".", &rev2)
 	v6arpaSOA := soa(v6arpa+".", &rev3)
-	var queryId uint16
-	queryTest := func(t *testing.T, q querySpec) {
-		query := new(dns.Msg)
-		queryId++
-		query.Id = queryId
-		q.answer.Id = queryId
-		query.Question = make([]dns.Question, 1)
-		query.Question[0] = dns.Question{Name: q.name, Qtype: q.qtype, Qclass: dns.ClassINET}
-		q.answer.Question = query.Question
-		c := q.conditions
-		if c == nil {
-			c = conditions
-		}
-		checkT(t, func(t *testing.T, query *dns.Msg) (*dns.Msg, error) {
-			msg, dur, err := dc.Exchange(query, pdns.Endpoint)
-			if err == nil {
-				Logf(t, "PDNS response (in %s):\n%s", dur, msg)
-				if len(msg.Answer) == 0 {
-					if len(msg.Extra) > 0 {
-						Logf(t, "Answer seems to be in Extra, moving")
-						msg.Answer = msg.Extra
-						msg.Extra = nil
-					}
-				} else if q.qtype == dns.TypeANY && len(msg.Extra) > 0 { // len(msg.Answer) is > 0!
-					Logf(t, "ANY query, and Answer seems to be partially split into Extra, merging")
-					msg.Answer = append(msg.Answer, msg.Extra...)
-					msg.Extra = nil
-				}
-			}
-			return msg, err
-		}, query, ve[*dns.Msg]{v: &q.answer, c: c}, false)
+	queryTest := func(t *testing.T, qs querySpecT) {
+		QueryTest(t, pdns.Endpoint, qs, 10*time.Second, false)
 	}
 	t.Run("SOA", func(t *testing.T) {
 		for zone, soa := range map[string]func(uint32) *dns.SOA{
@@ -549,7 +582,7 @@ func TestWithPDNS(t *testing.T) {
 					}}, map[string]Condition{`->Extra`: SliceContains{All: false, Only: true}}))
 				})
 			}
-		}, []clientv3.Op{putSOA1, putSOA2, putSOA3}, &rev1, &rev2, &rev3), &rev1, &rev2, &rev3)
+		}, putSOA, &rev1, &rev2, &rev3), &rev1, &rev2, &rev3)
 		waitForRevision(t, rev1, "NS (second) data removed")
 	})
 	t.Run("ANY", func(t *testing.T) {
@@ -565,7 +598,7 @@ func TestWithPDNS(t *testing.T) {
 		}))
 	})
 	t.Run("PTR", func(t *testing.T) {
-		for _, q := range []querySpec{
+		for _, q := range []querySpecT{
 			qs("2.2.0.192.in-addr.arpa.", dns.TypePTR, dns.Msg{Answer: []dns.RR{
 				&dns.PTR{Ptr: "ns1.example.net."},
 			}}),
@@ -590,7 +623,7 @@ func TestWithPDNS(t *testing.T) {
 				&dns.A{Hdr: dns.RR_Header{Name: "mail.example.net."}, A: []byte{192, 0, 2, 10}},
 				&dns.AAAA{Hdr: dns.RR_Header{Name: "mail.example.net."}, AAAA: net.ParseIP("2001:db8::10")},
 			}}, map[string]Condition{`->Extra`: SliceContains{All: true, Only: true}}))
-		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		}, putSOA[:1], &rev1), &rev1)
 		waitForRevision(t, rev1, "MX data removed")
 	})
 	t.Run("TXT", func(t *testing.T) {
@@ -617,7 +650,7 @@ func TestWithPDNS(t *testing.T) {
 				&dns.TXT{Txt: []string{"42"}},
 				&dns.TXT{Txt: []string{"12.34"}},
 			}}))
-		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		}, putSOA[:1], &rev1), &rev1)
 		waitForRevision(t, rev1, "TXT data removed")
 	})
 	t.Run("versioned", func(t *testing.T) {
@@ -630,7 +663,7 @@ func TestWithPDNS(t *testing.T) {
 			queryTest(t, qs("versioned.example.net.", dns.TypeTXT, dns.Msg{Answer: []dns.RR{
 				&dns.TXT{Txt: []string{fmt.Sprintf("@%s", dataVersion)}},
 			}}))
-		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		}, putSOA[:1], &rev1), &rev1)
 		waitForRevision(t, rev1, "versioned data removed")
 	})
 	t.Run("SRV", func(t *testing.T) {
@@ -655,7 +688,7 @@ func TestWithPDNS(t *testing.T) {
 				&dns.AAAA{Hdr: dns.RR_Header{Name: "kerberos1.example.net."}, AAAA: net.ParseIP("2001:db8::15")},
 				&dns.AAAA{Hdr: dns.RR_Header{Name: "kerberos2.example.net."}, AAAA: net.ParseIP("2001:db8::25")},
 			}}, map[string]Condition{"->Extra": SliceContains{All: true, Only: true}}))
-		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		}, putSOA[:1], &rev1), &rev1)
 		waitForRevision(t, rev1, "SRV data removed")
 	})
 	t.Run("CNAME", func(t *testing.T) {
@@ -680,7 +713,7 @@ func TestWithPDNS(t *testing.T) {
 					&dns.A{Hdr: dns.RR_Header{Name: "ns1.example.net."}, A: []byte{192, 0, 2, 2}},
 				}}, map[string]Condition{"->Extra": SliceContains{All: true, Only: true}}))
 			})
-		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		}, putSOA[:1], &rev1), &rev1)
 		waitForRevision(t, rev1, "CNAME data removed")
 	})
 	t.Run("DNAME", func(t *testing.T) {
@@ -698,7 +731,7 @@ func TestWithPDNS(t *testing.T) {
 				&dns.CNAME{Hdr: dns.RR_Header{Name: "something.example.net."}, Target: "something.example.org."},
 				&dns.TXT{Hdr: dns.RR_Header{Name: "something.example.org."}, Txt: []string{"DNAME works"}},
 			}}))
-		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		}, putSOA[:1], &rev1), &rev1)
 		waitForRevision(t, rev1, "DNAME data removed")
 	})
 	t.Run("HINFO", func(t *testing.T) {
@@ -710,7 +743,7 @@ func TestWithPDNS(t *testing.T) {
 			queryTest(t, qs("hinfo.example.net.", dns.TypeHINFO, dns.Msg{Answer: []dns.RR{
 				&dns.HINFO{Cpu: "amd64", Os: "Linux"},
 			}}))
-		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		}, putSOA[:1], &rev1), &rev1)
 		waitForRevision(t, rev1, "HINFO data removed")
 	})
 	t.Run("TYPExxx", func(t *testing.T) {
@@ -727,7 +760,7 @@ func TestWithPDNS(t *testing.T) {
 					&dns.RFC3597{Rdata: data},
 				}}))
 			}
-		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		}, putSOA[:1], &rev1), &rev1)
 		waitForRevision(t, rev1, "TYPExxx data removed")
 	})
 	t.Run("*", func(t *testing.T) {
@@ -738,7 +771,7 @@ func TestWithPDNS(t *testing.T) {
 			queryTest(t, qs("something.wildcard.example.net.", dns.TypeTXT, dns.Msg{Answer: []dns.RR{
 				&dns.TXT{Hdr: dns.RR_Header{Name: "something.wildcard.example.net."}, Txt: []string{"wildcard"}},
 			}}))
-		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		}, putSOA[:1], &rev1), &rev1)
 		waitForRevision(t, rev1, "wildcard data removed")
 	})
 	t.Run("CaSe", func(t *testing.T) {
@@ -749,7 +782,7 @@ func TestWithPDNS(t *testing.T) {
 			queryTest(t, qs("CaSe.eXample.Net.", dns.TypeTXT, dns.Msg{Answer: []dns.RR{
 				&dns.TXT{Hdr: dns.RR_Header{Name: "CaSe.eXample.Net."}, Txt: []string{"PR #1"}},
 			}}))
-		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		}, putSOA[:1], &rev1), &rev1)
 		waitForRevision(t, rev1, "CaSe data removed")
 	})
 	t.Run("ALIAS", func(t *testing.T) {
@@ -789,7 +822,7 @@ func TestWithPDNS(t *testing.T) {
 					&dns.AAAA{Hdr: dns.RR_Header{Name: "alias.example.net."}, AAAA: net.ParseIP("2001:db8::12")},
 				}}))
 			})
-		}, []clientv3.Op{putSOA1}, &rev1), &rev1)
+		}, putSOA[:1], &rev1), &rev1)
 		waitForRevision(t, rev1, "ALIAS data removed")
 	})
 }
@@ -800,4 +833,122 @@ func TestUnixListener(t *testing.T) {
 
 func TestHttpListener(t *testing.T) {
 	t.Skip("not implemented yet")
+}
+
+func wgGoT[T any](wg *sync.WaitGroup, fn func(T), t T) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		fn(t)
+	}()
+}
+
+func TestParallelRequests(t *testing.T) {
+	defer recoverPanicsT(t)
+	// ETCD
+	etcd, err := startETCD(t)
+	fatalOnErr(t, "start ETCD container", err)
+	defer etcd.Terminate()
+	Logf(t, "ETCD endpoint (2379): %s", etcd.Endpoint)
+	// PDNS-ETCD3
+	pe3 := startPE3(t, etcd.Endpoint, "", "-pdns-version="+getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1])
+	defer pe3.Terminate()
+	Logf(t, "PDNS-ETCD3 endpoint: %s", pe3.HttpAddress)
+	err = waitFor(t, "PE3 ready", func() bool { return status.serving }, 10*time.Millisecond, 30*time.Second)
+	fatalOnErr(t, "wait for PE3 ready", err)
+	rev, _ := basicDataTxn(t, pe3.Prefix)
+	waitForRevision(t, rev, "basic data loaded")
+	pdns := make([]pdnsInfo, 0)
+	nCPU := runtime.NumCPU()
+	t.Logf("Using %d parallel PDNS (single-threaded) instances", nCPU+1)
+	for i := 0; i <= nCPU; i++ {
+		pdnsN, err := startPDNS(t, map[string]string{
+			"receiver-threads=1":      "34",
+			"distributor-threads=1":   "34",
+			"max-tcp-connections=200": "34",
+		})
+		fatalOnErr(t, fmt.Sprintf("start PDNS#%d container", i+1), err)
+		defer pdnsN.Terminate()
+		Logf(t, "PDNS#%d endpoint: %s", i+1, pdnsN.Endpoint)
+		pdns = append(pdns, pdnsN)
+	}
+	wg := new(sync.WaitGroup)
+	queryCount := struct {
+		count atomic.Int32
+		par   struct{ cur, max atomic.Int32 }
+		dur   struct{ total, min, max atomic.Int64 }
+	}{}
+	for i, pdns := range pdns {
+		Logf(t, "starting PDNS#%d queries", i+1)
+		type pdnsP struct {
+			n            int
+			pdnsEndpoint string
+		}
+		wgGoT(wg, func(p pdnsP) {
+			wg := new(sync.WaitGroup)
+			for i := 0; i < 3; i++ {
+				since := time.Now()
+				for j, qs := range []querySpecT{
+					querySpec("example.net.", dns.TypeSOA, dns.Msg{Answer: []dns.RR{
+						&dns.SOA{Hdr: dns.RR_Header{Name: "example.net.", Rrtype: dns.TypeSOA, Ttl: 3600},
+							Ns: "ns1.example.net.", Mbox: "horst\\.master.example.net.", Serial: uint32(rev), Refresh: 3600, Retry: 1800, Expire: 604800, Minttl: 600},
+					}}),
+					querySpec("example.net.", dns.TypeNS, dns.Msg{Answer: []dns.RR{
+						&dns.NS{Ns: "ns1.example.net."},
+					}, Extra: []dns.RR{
+						&dns.A{Hdr: dns.RR_Header{Name: "ns1.example.net."}, A: []byte{192, 0, 2, 2}},
+						&dns.AAAA{Hdr: dns.RR_Header{Name: "ns1.example.net."}, AAAA: net.ParseIP("2001:db8::2")},
+					}}, map[string]Condition{`->Extra`: SliceContains{All: false, Only: true}}),
+					querySpec("ns1.example.net.", dns.TypeA, dns.Msg{Answer: []dns.RR{
+						&dns.A{Hdr: dns.RR_Header{Name: "ns1.example.net."}, A: []byte{192, 0, 2, 2}},
+					}}),
+					querySpec("2.2.0.192.in-addr.arpa.", dns.TypePTR, dns.Msg{Answer: []dns.RR{
+						&dns.PTR{Ptr: "ns1.example.net."},
+					}}),
+					querySpec("2.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa.", dns.TypePTR, dns.Msg{Answer: []dns.RR{
+						&dns.PTR{Ptr: "ns1.example.net."},
+					}}),
+				} {
+					type runTestP = struct {
+						pdnsEndpoint string
+						ns           []int
+						qs           querySpecT
+					}
+					wgGoT(wg, func(p runTestP) {
+						Logf(t, "PDNS#%v: starting query test (%s/%s)", p.ns, p.qs.name, dns.TypeToString[p.qs.qtype])
+						queryCount.count.Add(1)
+						cur := queryCount.par.cur.Add(1)
+						queryCount.par.max.CompareAndSwap(cur-1, cur)
+						dur := int64(QueryTest(t, p.pdnsEndpoint, p.qs, 10*time.Second, true))
+						queryCount.dur.total.Add(dur)
+						queryCount.dur.min.CompareAndSwap(0, dur) // only done once (on first result)
+						queryCount.dur.min.CompareAndSwap(queryCount.dur.min.Load(), min(dur, queryCount.dur.min.Load()))
+						queryCount.dur.max.CompareAndSwap(queryCount.dur.max.Load(), max(dur, queryCount.dur.max.Load()))
+						queryCount.par.cur.Add(-1)
+						Logf(t, "PDNS#%v: finished query test (%s/%s) in %s", p.ns, p.qs.name, dns.TypeToString[p.qs.qtype], time.Duration(dur))
+					}, runTestP{p.pdnsEndpoint, []int{p.n, i + 1, j + 1}, qs})
+					wg.Wait()
+				}
+				wg.Wait()
+				dur := time.Since(since)
+				Logf(t, "PDNS#%d run %d finished in %s (requests: %d, queries: %d)", p.n, i+1, dur, requestsCount.max.Load(), queryCount.par.max.Load())
+			}
+		}, pdnsP{i + 1, pdns.Endpoint})
+	}
+	wg.Wait()
+	Logf(t, "finished (queries: %d) (max parallel readers: %d, requests: %d, queries: %d) (duration total: %s, min: %s, max: %s, average: %s)",
+		queryCount.count.Load(),
+		dataRoot.readers.max.Load(), requestsCount.max.Load(), queryCount.par.max.Load(),
+		time.Duration(queryCount.dur.total.Load()), time.Duration(queryCount.dur.min.Load()), time.Duration(queryCount.dur.max.Load()), time.Duration(queryCount.dur.total.Load()/int64(queryCount.count.Load())))
+	var pr func(*dataNode)
+	pr = func(data *dataNode) {
+		Logf(t, "-- %s: %d", data.getName().asKey(false), data.readers.max.Load())
+		for _, child := range data.children {
+			pr(child)
+		}
+	}
+	pr(dataRoot)
+	if dataRoot.readers.max.Load() < int32(nCPU)/2 {
+		t.Errorf("too less parallel requests (CPUs: %d, max parallel requests: %d", nCPU, dataRoot.readers.max.Load())
+	}
 }

@@ -1,3 +1,5 @@
+//go:build unit || integration
+
 /* Copyright 2016-2026 nix <https://keybase.io/nixn>
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -245,7 +247,7 @@ func testEqual(t *testing.T, a, b any, conditions map[string]Condition, path str
 	return testEqualR(t, reflect.ValueOf(a), reflect.ValueOf(b), conditions, path)
 }
 
-var compiledConditionsCache = map[string]*regexp.Regexp{}
+var compiledConditionsCache = (&MapSyncAccess[string, *regexp.Regexp]{}).Init()
 
 func testEqualR(t *testing.T, a, b reflect.Value, conditions map[string]Condition, path string) *DeepError {
 	t.Helper()
@@ -257,11 +259,9 @@ func testEqualR(t *testing.T, a, b reflect.Value, conditions map[string]Conditio
 	}
 	vt := a.Type()
 	for re, cond := range conditions {
-		var rec *regexp.Regexp
-		if rec = compiledConditionsCache[re]; rec == nil {
-			rec = regexp.MustCompile("^" + re + "$")
-			compiledConditionsCache[re] = rec
-		}
+		rec := compiledConditionsCache.ComputeIfAbsent(re, func(_ *string) *regexp.Regexp {
+			return regexp.MustCompile("^" + re + "$")
+		})
 		if rec.MatchString(path) {
 			if strings.HasPrefix(path, "!") {
 				path = path[1:]

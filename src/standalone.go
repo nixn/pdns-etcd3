@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -73,7 +74,7 @@ func unixListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
 		client.log.pdns().Trace("initialzed")
 		return nil
 	}
-	serving = true
+	status.serving = true
 	var nextClientID uint64 = 1
 	for {
 		conn, err := socket.Accept()
@@ -97,6 +98,7 @@ func unixListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
 		})
 		nextClientID++
 	}
+	status.serving = false
 }
 
 type httpWriter struct {
@@ -106,6 +108,12 @@ type httpWriter struct {
 func (w *httpWriter) Close() error {
 	return nil
 }
+
+var (
+	requestsCount struct {
+		cur, max atomic.Int32
+	}
+)
 
 func httpListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
 	if u.Hostname() == "" {
@@ -149,9 +157,12 @@ func httpListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
 			http.Error(w, "Accept must be application/json", http.StatusUnsupportedMediaType)
 			return
 		}
+		cur := requestsCount.cur.Add(1)
+		requestsCount.max.CompareAndSwap(cur-1, cur)
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		serve(ctx, wg, newPdnsClient(ctx, fmt.Sprintf("%s #%04x", r.RemoteAddr, rand.Uint32()&0xffff), r.Body, &httpWriter{w}), nil, nil)
+		requestsCount.cur.Add(-1)
 	})
 	server := &http.Server{
 		Handler:           handler,
@@ -177,8 +188,9 @@ func httpListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
 		}
 	})
 	log.main(socket.Addr()).Debugf("http: starting server (%s)", socket.Addr())
-	serving = true
+	status.serving = true
 	err = server.Serve(socket)
+	status.serving = false
 	if !errors.Is(err, http.ErrServerClosed) {
 		log.main(err).Panicf("http: Serve() failed: %v", err)
 	}

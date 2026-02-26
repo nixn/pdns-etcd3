@@ -55,7 +55,7 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 	//goland:noinspection GoPreferNilSlice
 	result := []objectType[any]{}
 	data, found := dataRoot.getChild(query.name, true)
-	defer data.rUnlockUpwards(nil)
+	defer data.rUnlockUpwards(nil, true)
 	if !found {
 		client.log.data(query.name).Tracef("search returned %q", data.getQname())
 		client.log.data(query.name).Debug("no such domain")
@@ -78,7 +78,7 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 			result = append(result, item)
 		}
 	}
-	client.log.pdns("#", len(result)).Debug("request result items count")
+	client.log.pdns(result).Debugf("request result (%d)", len(result))
 	return result, nil
 }
 

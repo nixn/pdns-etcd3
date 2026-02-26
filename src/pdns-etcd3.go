@@ -44,34 +44,43 @@ func (pa programArgs) String() string {
 	return fmt.Sprintf("ConfigFile=%s, Endpoints=%s, DialTimeout=%s, Prefix=%s", val2str(pa.ConfigFile), val2str(pa.Endpoints), val2str(pa.DialTimeout), val2str(pa.Prefix))
 }
 
+type routinesType struct {
+	MapSyncAccess[string, string]
+}
+
+func (r *routinesType) Init() *routinesType {
+	r.MapSyncAccess = *r.MapSyncAccess.Init()
+	return r
+}
+
+func (r *routinesType) State(withNames bool) (int, []string) {
+	return WithRLock2(&r.SyncAccess, func() (int, []string) {
+		if withNames {
+			return len(r.Map), Keys(r.Map)
+		} else {
+			return len(r.Map), nil
+		}
+	})
+}
+
+type statusType struct {
+	populated, serving bool
+	routines           *routinesType
+}
+
+func (s *statusType) Init() *statusType {
+	s.routines = (&routinesType{}).Init()
+	return s
+}
+
 var (
+	// TODO encapsulate (most of?) global vars into a "main struct" (needed to do this with status and cli for integration tests already, perhaps better for the whole thing?)
 	log        = newLog(nil, "main", "pdns", "etcd", "data") // TODO timings
 	args       programArgs
 	standalone bool
 	dataRoot   *dataNode
-)
-
-type routinesType struct {
-	store map[string]string
-	mutex sync.RWMutex
-}
-
-func (r *routinesType) State(withNames bool) (int, []string) {
-	r.mutex.RLock()
-	defer r.mutex.RUnlock()
-	if withNames {
-		return len(r.store), Keys(r.store)
-	} else {
-		return len(r.store), nil
-	}
-}
-
-var (
-	// these vars may be used in integration tests, so don't bail if not used
-	serving   = false
-	connected = false
-	populated = false
-	routines  = &routinesType{store: map[string]string{}}
+	cli        *etcdClient
+	status     *statusType
 )
 
 func parseBoolean(s string) (bool, error) {
@@ -170,7 +179,7 @@ func readParameters(params objectType[string], client *pdnsClient) error {
 
 func startReadRequests(ctx context.Context, wg *sync.WaitGroup, client *pdnsClient) <-chan pdnsRequest {
 	ch := make(chan pdnsRequest)
-	wgGo(wg, "readRequests", func() {
+	wgGo(wg, fmt.Sprintf("readRequests [%s]", client.ID), func() {
 		defer recoverPanics(func(v any) bool {
 			recoverFunc(v, "readRequests()", false)
 			return false
@@ -178,7 +187,7 @@ func startReadRequests(ctx context.Context, wg *sync.WaitGroup, client *pdnsClie
 		defer close(ch)
 		done := make(chan struct{})
 		defer close(done)
-		wgGo(wg, "readRequests done", func() {
+		wgGo(wg, fmt.Sprintf("readRequests [%s] done", client.ID), func() {
 			select {
 			case <-ctx.Done():
 				client.log.pdns().Tracef("{readRequests done} context canceled, closing input")
@@ -209,7 +218,7 @@ func startReadRequests(ctx context.Context, wg *sync.WaitGroup, client *pdnsClie
 }
 
 func handleRequest(request *pdnsRequest, client *pdnsClient) {
-	client.log.main(request).Debug("handling request")
+	client.log.main(request).Trace("handling request")
 	since := time.Now()
 	var result any
 	var err error
@@ -231,7 +240,7 @@ func handleRequest(request *pdnsRequest, client *pdnsClient) {
 		client.Respond(makeResponse(result, err.Error()))
 	}
 	dur := time.Since(since)
-	client.log.main("dur", dur, "err", err, "val", result).Trace("result")
+	client.log.main("dur", dur, "err", err, "request", request, "result", result).Debug("request and result")
 }
 
 func handleEvents(revision int64, events []*clientv3.Event) {
@@ -252,7 +261,7 @@ EVENTS:
 			log.data(err.Error()).Errorf("failed to parse entry key %q, ignoring event", entryKey)
 			continue
 		}
-		itemData, _ := dataRoot.getChild(name, true)
+		itemData, _ := dataRoot.getChild(name, false)
 		zoneData := itemData.findZone()
 		if event.Type == clientv3.EventTypeDelete && qtype == "SOA" && id == "" && entryType == normalEntry && zoneData != nil && zoneData.parent != nil {
 			// deleting the SOA record deletes the zone, so the parent zone must be reloaded instead. this results in a full data reload for top-level zones.
@@ -261,17 +270,17 @@ EVENTS:
 		if zoneData == nil {
 			zoneData = dataRoot
 		}
-		itemData.rUnlockUpwards(zoneData)
+		itemData.rUnlockUpwards(zoneData, false)
 		qname := zoneData.getQname()
 		subdomains := make([]string, 0, len(reloadZones))
 		for dnKey, dn := range reloadZones {
 			if zoneData.subdomainDepth(dn) >= 0 {
-				zoneData.rUnlockUpwards(nil)
+				zoneData.rUnlockUpwards(nil, false)
 				log.data("event", qname, "scheduled", dn.getQname()).Trace("event zone already scheduled for reload (possibly ancestor)")
 				continue EVENTS
 			}
 			if dn.subdomainDepth(zoneData) > 0 {
-				dn.rUnlockUpwards(nil)
+				dn.rUnlockUpwards(nil, false)
 				log.data("event", qname, "scheduled", dn.getQname()).Trace("scheduled zone is a subdomain of event zone, marking for replace")
 				subdomains = append(subdomains, dnKey)
 			}
@@ -287,9 +296,9 @@ EVENTS:
 		qname := dn.getQname()
 		log.data().Tracef("reloading zone %q", qname)
 		since := time.Now()
-		getResponse, err := get(*args.Prefix+dn.prefixKey(), true, &revision)
+		getResponse, err := cli.Get(*args.Prefix+dn.prefixKey(), true, &revision, *args.DialTimeout)
 		if err != nil {
-			dn.rUnlockUpwards(nil)
+			dn.rUnlockUpwards(nil, false)
 			log.data().Warnf("failed to get data for zone %q (not reloading): %s", qname, err)
 			continue
 		}
@@ -297,7 +306,7 @@ EVENTS:
 		func() {
 			dn.mutex.RUnlock()
 			if dn.parent != nil {
-				defer dn.parent.rUnlockUpwards(nil)
+				defer dn.parent.rUnlockUpwards(nil, false)
 			}
 			dn.mutex.Lock()
 			defer dn.mutex.Unlock()
@@ -312,11 +321,27 @@ EVENTS:
 
 // Main is the "moved" program entrypoint, but with git version argument (which is set in real main package)
 func Main(programVersion VersionType, gitVersion string) {
-	main(programVersion, gitVersion, os.Args[1:], make(chan os.Signal, 1))
+	main(programVersion, gitVersion, os.Args[1:], make(chan os.Signal, 1), false)
 	log.main().Trace("main() returned normally")
 }
 
-func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, osSignals chan os.Signal) {
+var (
+	standaloneArg  = flag.String("standalone", "", `Use a standalone mode determined by the given URL (unix:///path/to/socket[?relative=<bool>] or http://<listen-address>:<listen-port>)`)
+	configFileArg  = flag.String(configFileParam, "", "Use the given configuration file for the ETCD connection (overrides -endpoints)")
+	endpointsArg   = flag.String(endpointsParam, defaultEndpointIPv6+"|"+defaultEndpointIPv4, "Use the endpoints configuration for ETCD connection")
+	dialTimeoutArg = flag.Duration(dialTimeoutParam, defaultDialTimeout, "ETCD dial timeout")
+	prefixArg      = flag.String(prefixParam, "", "Global key prefix")
+	pdnsVersionArg = flag.String(pdnsVersionParam, "", "default PDNS version")
+	loggingArgs    = func() map[logrus.Level]*string {
+		args := map[logrus.Level]*string{}
+		for _, level := range logrus.AllLevels {
+			args[level] = flag.String(logParamPrefix+level.String(), "", fmt.Sprintf("Set logging level %s to the given components (separated by +)", level))
+		}
+		return args
+	}()
+)
+
+func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, osSignals chan os.Signal, trackReaders bool) {
 	// recoverPanics must be used here, because integration test calls main(...) directly, not Main(...)
 	defer recoverPanics(func(v any) bool {
 		return !recoverFunc(v, "main()", true)
@@ -327,22 +352,16 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 	}
 	log.main().Printf("pdns-etcd3 %s, Copyright © 2016-2026 nix <https://keybase.io/nixn>", releaseVersion)
 	// handle arguments // TODO handle more arguments, f.e. 'show-defaults' standalone command
-	standaloneArg := flag.String("standalone", "", `Use a standalone mode determined by the given URL (unix:///path/to/socket[?relative=<bool>] or http://<listen-address>:<listen-port>)`)
 	args = programArgs{
-		ConfigFile:  flag.String(configFileParam, "", "Use the given configuration file for the ETCD connection (overrides -endpoints)"),
-		Endpoints:   flag.String(endpointsParam, defaultEndpointIPv6+"|"+defaultEndpointIPv4, "Use the endpoints configuration for ETCD connection"),
-		DialTimeout: flag.Duration(dialTimeoutParam, defaultDialTimeout, "ETCD dial timeout"),
-		Prefix:      flag.String(prefixParam, "", "Global key prefix"),
-	}
-	pdnsVersionArg := flag.String(pdnsVersionParam, "", "default PDNS version")
-	logging := map[logrus.Level]*string{}
-	for _, level := range logrus.AllLevels {
-		logging[level] = flag.String(logParamPrefix+level.String(), "", fmt.Sprintf("Set logging level %s to the given components (separated by +)", level))
+		ConfigFile:  configFileArg,
+		Endpoints:   endpointsArg,
+		DialTimeout: dialTimeoutArg,
+		Prefix:      prefixArg,
 	}
 	if err := flag.CommandLine.Parse(cmdLineArgs); err != nil { // same as flag.Parse(), but we can pass the arguments instead of being fixed to os.Args[1:] (needed for integration testing)
 		log.main().Panicf("failed to parse command line arguments: %s", err)
 	}
-	for level, components := range logging {
+	for level, components := range loggingArgs {
 		if len(*components) > 0 {
 			log.setLoggingLevel(*components, level)
 		}
@@ -362,6 +381,8 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 		log.main().Debugf("{signal} caught signal %s, shutting down", sig)
 		cancel()
 	}()
+	cli = &etcdClient{}
+	status = (&statusType{}).Init()
 	wg := new(sync.WaitGroup)
 	standalone = *standaloneArg != ""
 	if standalone {
@@ -373,13 +394,13 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 		if !ok {
 			log.main("scheme", u.Scheme).Panic("unknown scheme in standalone URL")
 		}
-		if messages, err := setupClient(); err != nil {
+		if messages, err := cli.Setup(&args); err != nil {
 			log.main().Panicf("setupClient() failed: %s", err)
 		} else {
 			log.main(messages).Debug("setupClient messages")
 		}
-		defer closeClient()
-		if err = populateData(ctx, wg); err != nil {
+		defer cli.Close()
+		if err = populateData(ctx, wg, trackReaders); err != nil {
 			log.main().Panicf("populateData() failed: %s", err)
 		}
 		standalone(ctx, wg, u)
@@ -393,16 +414,16 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 		go func() { // do not use wg for the stdin wrapper, because io.Copy does not stop on closing w; just let the system stop it when closing the program
 			_, _ = io.Copy(w, os.Stdin)
 		}()
-		pipe(ctx, wg, r, os.Stdout)
+		pipe(ctx, wg, r, os.Stdout, trackReaders)
 	}
 	log.main().Debug("request handler returned normally, stopping work")
 	cancel()
-	nr, _ := routines.State(false)
+	nr, _ := status.routines.State(false)
 WAIT:
-	for i := 1; nr > 0 && i <= 3; i++ {
+	for n, N := 1, 3; nr > 0 && n <= N; n++ {
 		var names []string
-		nr, names = routines.State(true)
-		log.main(names).Tracef("waiting for child routines (%d) to finish [%d/3]", nr, i)
+		nr, names = status.routines.State(true)
+		log.main(names).Tracef("waiting for child routines (%d) to finish [%d/%d]", nr, n, N)
 		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		done := make(chan struct{})
 		go func() {
@@ -414,8 +435,8 @@ WAIT:
 		case <-done:
 			break WAIT
 		case <-waitCtx.Done():
-			if i == 3 {
-				nr, names = routines.State(true)
+			if n == N {
+				nr, names = status.routines.State(true)
 				log.main(names).Error("timeout while waiting on routines, exiting forcefully")
 			}
 		}
@@ -425,47 +446,47 @@ WAIT:
 	}
 }
 
-func populateData(ctx context.Context, wg *sync.WaitGroup) error {
+func populateData(ctx context.Context, wg *sync.WaitGroup, trackReaders bool) error {
 	log.main().Debug("populating data")
-	getResponse, err := get(*args.Prefix, true, nil)
+	getResponse, err := cli.Get(*args.Prefix, true, nil, *args.DialTimeout)
 	if err != nil {
 		return fmt.Errorf("get() failed: %s", err)
 	}
-	currentRevision = getResponse.Revision
+	cli.CurrentRevision = getResponse.Revision
 	func() {
-		dataRoot = newDataNode(nil, "", "")
+		dataRoot = newDataNode(nil, "", "", trackReaders)
 		dataRoot.mutex.Lock()
 		defer dataRoot.mutex.Unlock()
 		dataRoot.reload(getResponse.DataChan)
 		log.main("#records", dataRoot.recordsCount(), "#zones", dataRoot.zonesCount(), "revision", getResponse.Revision).Debug("loaded data")
 	}()
-	populated = true
+	status.populated = true
 	log.main().Debug("starting data watcher")
 	wgGo(wg, "watchData", func() {
 		defer recoverPanics(func(v any) bool {
 			recoverFunc(v, "watchData()", false)
 			return false
 		})
-		watchData(ctx, *args.Prefix)
+		cli.WatchData(ctx, *args.Prefix)
 		log.main().Trace("watchData() returned normally")
 	})
 	return nil
 }
 
-func pipe(ctx context.Context, wg *sync.WaitGroup, in io.ReadCloser, out io.WriteCloser) {
+func pipe(ctx context.Context, wg *sync.WaitGroup, in io.ReadCloser, out io.WriteCloser, trackReaders bool) {
 	initialized := func(client *pdnsClient) []string {
-		clientMessages, err := setupClient()
+		clientMessages, err := cli.Setup(&args)
 		if err != nil {
 			client.Fatal(fmt.Errorf("setupClient() failed: %s", err))
 		}
 		log.etcd().Debugf("connected")
-		if err := populateData(ctx, wg); err != nil {
+		if err := populateData(ctx, wg, trackReaders); err != nil {
 			client.Fatal(fmt.Errorf("populateData() failed: %s", err))
 		}
 		return clientMessages
 	}
-	defer closeClient()
-	serve(ctx, wg, newPdnsClient(ctx, "*", in, out), &initialized, &serving)
+	defer cli.Close()
+	serve(ctx, wg, newPdnsClient(ctx, "*", in, out), &initialized, &status.serving)
 }
 
 func serve(ctx context.Context, wg *sync.WaitGroup, client *pdnsClient, initialized *func(*pdnsClient) []string, serving *bool) {

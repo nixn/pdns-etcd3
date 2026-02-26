@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -50,7 +51,10 @@ type valueType struct {
 }
 
 type dataNode struct {
-	mutex     sync.RWMutex
+	mutex   sync.RWMutex
+	readers *struct {
+		cur, max atomic.Int32
+	}
 	parent    *dataNode
 	lname     string // local name
 	keyPrefix string
@@ -62,8 +66,8 @@ type dataNode struct {
 	maxRev    int64                            // the maximum of Rev of all ETCD items
 }
 
-func newDataNode(parent *dataNode, lname, keyPrefix string) *dataNode {
-	return &dataNode{
+func newDataNode(parent *dataNode, lname, keyPrefix string, trackReaders bool) *dataNode {
+	dn := &dataNode{
 		mutex:     sync.RWMutex{},
 		parent:    parent,
 		lname:     lname,
@@ -75,6 +79,10 @@ func newDataNode(parent *dataNode, lname, keyPrefix string) *dataNode {
 		children:  map[string]*dataNode{},
 		maxRev:    0,
 	}
+	if trackReaders {
+		dn.readers = &struct{ cur, max atomic.Int32 }{}
+	}
+	return dn
 }
 
 func (dn *dataNode) String() string {
@@ -163,15 +171,17 @@ func (dn *dataNode) getChildCreate(name nameType) *dataNode {
 	childLName := name.lname(1)
 	lChild, ok := dn.children[childLName]
 	if !ok || lChild == nil {
-		lChild = newDataNode(dn, childLName, name.keyPrefix(1))
+		lChild = newDataNode(dn, childLName, name.keyPrefix(1), dn.readers != nil)
 		dn.children[childLName] = lChild
 	}
 	return lChild.getChildCreate(name.fromDepth(2))
 }
 
-func (dn *dataNode) getChild(name nameType, rLock bool) (*dataNode, bool) {
-	if rLock {
-		dn.mutex.RLock()
+func (dn *dataNode) getChild(name nameType, countReader bool) (*dataNode, bool) {
+	dn.mutex.RLock()
+	if dn.readers != nil && countReader {
+		cur := dn.readers.cur.Add(1)
+		dn.readers.max.CompareAndSwap(cur-1, cur)
 	}
 	if name.len() == 0 {
 		return dn, true
@@ -181,7 +191,7 @@ func (dn *dataNode) getChild(name nameType, rLock bool) (*dataNode, bool) {
 	if !ok || lChild == nil {
 		return dn, false
 	}
-	return lChild.getChild(name.fromDepth(2), rLock)
+	return lChild.getChild(name.fromDepth(2), countReader)
 }
 
 // subdomainDepth returns a positive int (the sublevel), if the receiver is a subdomain of 'ancestor', 0 when both are the same domain, -1 otherwise ('ancestor' is not an ancestor)
@@ -194,8 +204,11 @@ func (dn *dataNode) subdomainDepth(ancestor *dataNode) int {
 	return -1
 }
 
-func (dn *dataNode) rUnlockUpwards(stopAt *dataNode) {
+func (dn *dataNode) rUnlockUpwards(stopAt *dataNode, countReader bool) {
 	for dn := dn; dn != stopAt; dn = dn.parent {
+		if dn.readers != nil && countReader {
+			dn.readers.cur.Add(-1)
+		}
 		dn.mutex.RUnlock()
 	}
 }

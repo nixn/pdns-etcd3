@@ -225,6 +225,8 @@ It's only one version of each minor (.y), but most likely all (later and earlier
 Therefore, each release shall state which exact versions were used for testing,
 so one can be sure to have a working combination for deploying, when using those (tested) versions.
 
+*TODO describe (recommended) cache settings*
+
 ## Testing / Debugging
 
 There is much logging in the program for being able to test and debug it properly.

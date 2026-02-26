@@ -152,7 +152,7 @@ func TestProcessValues(t *testing.T) {
 			return data.records, nil
 		}
 	}
-	root := newDataNode(nil, "", "TEST/")
+	root := newDataNode(nil, "", "TEST/", false)
 	root.defaults = map[string]map[string]valueType{
 		"":    {"": {content: objectValueType{"ttl": "1h"}}},
 		"SOA": {"": {content: objectValueType{"refresh": "1h", "retry": "30m", "expire": 604800, "neg-ttl": "10m", "primary": "ns", "mail": "horst.master"}}},
