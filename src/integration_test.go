@@ -40,10 +40,10 @@ import (
 func txnT(t *testing.T, ops ...clientv3.Op) int64 {
 	t.Helper()
 	if resp, err := txn(10*time.Second, ops...); err != nil {
-		t.Fatalf("failed to commit transaction (%d ops): %s", len(ops), err)
+		Fatalf(t, "failed to commit transaction (%d ops): %s", len(ops), err)
 		return -1
 	} else if !resp.Succeeded {
-		t.Fatalf("transaction did not succeed (%d ops)", len(ops))
+		Fatalf(t, "transaction did not succeed (%d ops)", len(ops))
 		return -1
 	} else {
 		return resp.Header.Revision
@@ -53,7 +53,7 @@ func txnT(t *testing.T, ops ...clientv3.Op) int64 {
 func putT(t *testing.T, prefix, key, value string) int64 {
 	t.Helper()
 	if resp, err := put(prefix+key, value, 10*time.Second); err != nil {
-		t.Fatalf("failed to put %q: %s", prefix+key, err)
+		Fatalf(t, "failed to put %q: %s", prefix+key, err)
 		return -1
 	} else {
 		return resp.Header.Revision
@@ -78,7 +78,7 @@ func TestPipeRequests(t *testing.T) {
 	etcd, err := startETCD(t)
 	fatalOnErr(t, "start ETCD container", err)
 	defer etcd.Terminate()
-	t.Logf("ETCD endpoint: %s", etcd.Endpoint)
+	Logf(t, "ETCD endpoint: %s", etcd.Endpoint)
 	sleepT(t, 1*time.Second)
 	// start pdns-etcd3 (main function)
 	inR, inW, _ := os.Pipe()
@@ -97,17 +97,17 @@ func TestPipeRequests(t *testing.T) {
 		DialTimeout: &timeout,
 		Prefix:      &prefix,
 	}
-	t.Logf("starting pdns-etcd3.serve() with ETCD endpoint %s", etcd.Endpoint)
+	Logf(t, "starting pdns-etcd3.serve() with ETCD endpoint %s", etcd.Endpoint)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	wg := new(sync.WaitGroup)
 	go pipe(ctx, wg, inR, outW)
 	pe3 := newComm[any](ctx, outR, inW)
 	action := func(t *testing.T, request pdnsRequest) (any, error) {
-		t.Logf("request: %s", val2str(request))
+		Logf(t, "request: %s", val2str(request))
 		_ = pe3.write(request)
 		response, err := pe3.read()
-		t.Logf("response: %s, err: %v", val2str(*response), err)
+		Logf(t, "response: %s, err: %v", val2str(*response), err)
 		return *response, err
 	}
 	{
@@ -115,10 +115,10 @@ func TestPipeRequests(t *testing.T) {
 		request := pdnsRequest{"initialize", objectType[any]{"pdns-version": "3", "prefix": testPrefix, "log-trace": "main+pdns+etcd+data"}}
 		expectedResponse := map[string]any{"result": true, "log": Ignore{}}
 		if !checkRun(t, "initialize", action, request, ve[any]{v: expectedResponse}, false) {
-			t.Fatalf("failed to initialize")
+			Fatalf(t, "failed to initialize")
 		}
 		if prefix != testPrefix {
-			t.Fatalf("prefix mismatch after initialize: expected %q, got %q", testPrefix, prefix)
+			Fatalf(t, "prefix mismatch after initialize: expected %q, got %q", testPrefix, prefix)
 		}
 	}
 	err = waitFor(t, "populated", func() bool { return populated }, 10*time.Millisecond, 30*time.Second)
@@ -184,7 +184,7 @@ type CtLogger struct {
 }
 
 func (ctl CtLogger) Accept(log testcontainers.Log) {
-	ctl.t.Logf("%s[%s]: %s", ctl.name, log.LogType, log.Content)
+	Logf(ctl.t, "%s[%s]: %s", ctl.name, log.LogType, log.Content)
 }
 
 type ctInfo struct {
@@ -207,7 +207,7 @@ func startContainer(t *testing.T, cr testcontainers.ContainerRequest, endpoint n
 		Container: ct,
 		Terminate: func() {
 			if err := ct.Terminate(ctx); err != nil {
-				t.Errorf("failed to terminate container: %s", err)
+				Errorf(t, "failed to terminate container: %s", err)
 			}
 		},
 	}
@@ -224,7 +224,7 @@ func startContainer(t *testing.T, cr testcontainers.ContainerRequest, endpoint n
 func startETCD(t *testing.T) (*ctInfo, error) {
 	t.Helper()
 	image := fmt.Sprintf("quay.io/coreos/etcd:v%s", getenvT("ETCD_VERSION", "3.6.7"))
-	t.Logf("Using ETCD image %s", image)
+	Logf(t, "Using ETCD image %s", image)
 	return startContainer(t, testcontainers.ContainerRequest{
 		Image:          image,
 		Hostname:       "etcd",
@@ -262,14 +262,14 @@ func startPE3(t *testing.T, etcdEndpoint, prefix, pdnsVersion string) pe3Info {
 			args = append(args, "-pdns-version="+pdnsVersion)
 		}
 		main(VersionType{IsDevelopment: true}, getGitVersion(t), args, osSignals)
-		t.Logf("pe3 finished")
+		Logf(t, "pe3 finished")
 	}()
 	return pe3Info{
 		func() {
-			t.Logf("sending os.Interrupt to pe3")
+			Logf(t, "sending os.Interrupt to pe3")
 			osSignals <- os.Interrupt
 			<-doneCtx.Done()
-			t.Logf("pe3 context done")
+			Logf(t, "pe3 context done")
 		},
 		httpAddress,
 		prefix,
@@ -315,7 +315,7 @@ func startPDNS(t *testing.T) (pdnsInfo, error) {
 	v := getenvT("PDNS_VERSION", "50")
 	switch v {
 	case "34", "40", "41":
-		t.Logf("Using PDNS image %s:%s (from testdata/pdns-%s/Dockerfile)", repo, v, v)
+		Logf(t, "Using PDNS image %s:%s (from testdata/pdns-%s/Dockerfile)", repo, v, v)
 		fromDockerfile = testcontainers.FromDockerfile{
 			Context:   "../testdata/pdns-" + v,
 			Repo:      repo,
@@ -325,9 +325,9 @@ func startPDNS(t *testing.T) (pdnsInfo, error) {
 		}
 	case "44", "45", "46", "47", "48", "49", "50", "51":
 		image = fmt.Sprintf("powerdns/pdns-auth-%s", v)
-		t.Logf("Using PDNS image %s", image)
+		Logf(t, "Using PDNS image %s", image)
 	default:
-		t.Fatalf("invalid PDNS version: %q", v)
+		Fatalf(t, "invalid PDNS version: %q", v)
 	}
 	cacheSettings := []string{
 		"cache-ttl=0",
@@ -352,8 +352,8 @@ func startPDNS(t *testing.T) (pdnsInfo, error) {
 	if v >= "45" {
 		cacheSettings = append(cacheSettings, "zone-cache-refresh-interval=0")
 	}
-	t.Logf("PDNS cache settings: %v", cacheSettings)
-	t.Logf("PDNS dynamic settings: %v", dynamicSettings)
+	Logf(t, "PDNS cache settings: %v", cacheSettings)
+	Logf(t, "PDNS dynamic settings: %v", dynamicSettings)
 	ctInfo, err := startContainer(t, testcontainers.ContainerRequest{
 		Image:          image,
 		FromDockerfile: fromDockerfile,
@@ -378,12 +378,12 @@ func TestWithPDNS(t *testing.T) {
 	etcd, err := startETCD(t)
 	fatalOnErr(t, "start ETCD container", err)
 	defer etcd.Terminate()
-	t.Logf("ETCD endpoint (2379): %s", etcd.Endpoint)
+	Logf(t, "ETCD endpoint (2379): %s", etcd.Endpoint)
 	// PDNS-ETCD3
 	sleepT(t, 1*time.Second)
 	pe3 := startPE3(t, etcd.Endpoint, "", getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1])
 	defer pe3.Terminate()
-	t.Logf("PDNS-ETCD3 endpoint: %s", pe3.HttpAddress)
+	Logf(t, "PDNS-ETCD3 endpoint: %s", pe3.HttpAddress)
 	err = waitFor(t, "PE3 ready", func() bool { return serving }, 10*time.Millisecond, 30*time.Second)
 	fatalOnErr(t, "wait for PE3 ready", err)
 	sleepT(t, 1*time.Second)
@@ -437,7 +437,7 @@ func TestWithPDNS(t *testing.T) {
 	pdns, err := startPDNS(t)
 	fatalOnErr(t, "start PDNS container", err)
 	defer pdns.Terminate()
-	t.Logf("PDNS endpoint: %s", pdns.Endpoint)
+	Logf(t, "PDNS endpoint: %s", pdns.Endpoint)
 	// queries
 	dc := &dns.Client{
 		Net:     "tcp",
@@ -496,15 +496,15 @@ func TestWithPDNS(t *testing.T) {
 		checkT(t, func(t *testing.T, query *dns.Msg) (*dns.Msg, error) {
 			msg, dur, err := dc.Exchange(query, pdns.Endpoint)
 			if err == nil {
-				t.Logf("PDNS response (in %s):\n%s", dur, msg)
+				Logf(t, "PDNS response (in %s):\n%s", dur, msg)
 				if len(msg.Answer) == 0 {
 					if len(msg.Extra) > 0 {
-						t.Logf("Answer seems to be in Extra, moving")
+						Logf(t, "Answer seems to be in Extra, moving")
 						msg.Answer = msg.Extra
 						msg.Extra = nil
 					}
 				} else if q.qtype == dns.TypeANY && len(msg.Extra) > 0 { // len(msg.Answer) is > 0!
-					t.Logf("ANY query, and Answer seems to be partially split into Extra, merging")
+					Logf(t, "ANY query, and Answer seems to be partially split into Extra, merging")
 					msg.Answer = append(msg.Answer, msg.Extra...)
 					msg.Extra = nil
 				}

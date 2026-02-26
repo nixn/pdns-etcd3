@@ -37,25 +37,43 @@ type test[Input any, Value any] struct {
 
 type testFunc[Input any, Value any] func(*testing.T, Input) (Value, error)
 
+func Logf(t *testing.T, format string, args ...any) {
+	t.Helper()
+	now := time.Now()
+	t.Logf("[%s] "+format, append([]any{now.Format("2006-01-02 15:04:05.000")}, args...)...)
+}
+
+func Errorf(t *testing.T, format string, args ...any) {
+	t.Helper()
+	Logf(t, format, args...)
+	t.Fail()
+}
+
+func Fatalf(t *testing.T, format string, args ...any) {
+	t.Helper()
+	Logf(t, format, args...)
+	t.FailNow()
+}
+
 func checkT[Input any, Value any](t *testing.T, f testFunc[Input, Value], in Input, expected ve[Value], quiet bool) {
 	t.Helper()
 	got, err := f(t, in)
 	if expected.e != "" {
 		if err == nil {
-			t.Errorf(`%#+v -> expected error with %q, got value: %s`, in, expected.e, val2str(got))
+			Errorf(t, `%#+v -> expected error with %q, got value: %s`, in, expected.e, val2str(got))
 		} else if !strings.Contains(err.Error(), expected.e) {
-			t.Errorf(`%#+v -> expected error with %q, got error: %s`, in, expected.e, err)
+			Errorf(t, `%#+v -> expected error with %q, got error: %s`, in, expected.e, err)
 		} else if !quiet {
-			t.Logf("got expected error")
+			Logf(t, "got expected error")
 		}
 	} else {
 		if err != nil {
-			t.Errorf(`%#+v -> expected value: %s, got error: %s`, in, val2str(expected.v), err)
+			Errorf(t, `%#+v -> expected value: %s, got error: %s`, in, val2str(expected.v), err)
 		} else {
 			if unequal := testEqual(t, expected.v, got, expected.c, ""); unequal != nil {
-				t.Errorf(`%s -> expected: %s (conditions: %s), got: %s (%s)`, val2str(in), val2str(expected.v), val2str(expected.c), val2str(got), unequal)
+				Errorf(t, `%s -> expected: %s (conditions: %s), got: %s (%s)`, val2str(in), val2str(expected.v), val2str(expected.c), val2str(got), unequal)
 			} else if !quiet {
-				t.Logf("got expected value")
+				Logf(t, "got expected value")
 			}
 		}
 	}
@@ -328,36 +346,36 @@ func recoverPanicsT(t *testing.T) {
 	if r := recover(); r != nil {
 		if e, ok := r.(exitErr); ok {
 			if e.Code != 1 {
-				t.Fatalf("unexpected exit code: %d", e.Code)
+				Fatalf(t, "unexpected exit code: %d", e.Code)
 			}
-			t.Logf("expected exit code (1)")
+			Logf(t, "expected exit code (1)")
 			// expected exit
 			return
 		}
-		t.Fatalf("unexpected panic: %v", r)
+		Fatalf(t, "unexpected panic: %v", r)
 	}
 }
 
 func waitFor(t *testing.T, desc string, condition func() bool, interval time.Duration, timeout time.Duration) error {
 	t.Helper()
-	t.Logf("waiting for condition %q (interval: %s, timeout: %s)", desc, interval, timeout)
+	Logf(t, "waiting for condition %q (interval: %s, timeout: %s)", desc, interval, timeout)
 	checkTime := max(min(timeout/10, 1*time.Second), interval)
 	checkIncr := checkTime
 	since := time.Now()
 	for !condition() {
 		passed := time.Since(since)
 		if timeout > 0 && passed >= timeout {
-			t.Logf("condition %q timed out after %s", desc, timeout)
+			Logf(t, "condition %q timed out after %s", desc, timeout)
 			return fmt.Errorf("timed out after %s", timeout)
 		}
 		if timeout > 0 && passed >= checkTime {
-			t.Logf("waiting for condition %q (%s)", desc, checkTime)
+			Logf(t, "waiting for condition %q (%s)", desc, checkTime)
 			checkTime += checkIncr
 		}
 		time.Sleep(interval)
 	}
 	duration := time.Since(since)
-	t.Logf("condition %q fulfilled after %s", desc, duration)
+	Logf(t, "condition %q fulfilled after %s", desc, duration)
 	return nil
 }
 
@@ -372,7 +390,7 @@ func sleepT(t *testing.T, duration time.Duration, interval ...time.Duration) {
 func fatalOnErr(t *testing.T, desc string, err error) {
 	t.Helper()
 	if err != nil {
-		t.Fatalf("failed to %s: %s", desc, err)
+		Fatalf(t, "failed to %s: %s", desc, err)
 	}
 }
 
