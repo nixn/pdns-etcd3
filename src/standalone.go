@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"mime"
 	"net"
 	"net/http"
@@ -150,7 +151,7 @@ func httpListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		serve(ctx, wg, newPdnsClient(ctx, r.RemoteAddr, r.Body, &httpWriter{w}), nil, nil)
+		serve(ctx, wg, newPdnsClient(ctx, fmt.Sprintf("%s #%04x", r.RemoteAddr, rand.Uint32()&0xffff), r.Body, &httpWriter{w}), nil, nil)
 	})
 	server := &http.Server{
 		Handler:           handler,
