@@ -114,7 +114,7 @@ func TestPipeRequests(t *testing.T) {
 		testPrefix := "/DNS/"
 		request := pdnsRequest{"initialize", objectType[any]{"pdns-version": "3", "prefix": testPrefix, "log-trace": "main+pdns+etcd+data"}}
 		expectedResponse := map[string]any{"result": true, "log": Ignore{}}
-		if !checkRun(t, "initialize", action, request, ve[any]{v: expectedResponse}) {
+		if !checkRun(t, "initialize", action, request, ve[any]{v: expectedResponse}, false) {
 			t.Fatalf("failed to initialize")
 		}
 		if prefix != testPrefix {
@@ -130,7 +130,8 @@ func TestPipeRequests(t *testing.T) {
 	lookupTest := func(t *testing.T, qname, qtype string, result ...any) {
 		checkRun[pdnsRequest, any](t, fmt.Sprintf("lookup %s %s", qname, qtype), action,
 			pdnsRequest{Method: "lookup", Parameters: objectType[any]{"qname": qname, "qtype": qtype}},
-			ve[any]{v: map[string]any{"result": SliceContains{All: true, Only: true, Elements: result}}})
+			ve[any]{v: map[string]any{"result": SliceContains{All: true, Only: true, Elements: result}}},
+			false)
 	}
 	rev1 := txnT(t,
 		put("net.example/SOA", `{"primary": "ns1", "mail": "horst.master"}`),
@@ -509,7 +510,7 @@ func TestWithPDNS(t *testing.T) {
 				}
 			}
 			return msg, err
-		}, query, ve[*dns.Msg]{v: &q.answer, c: c})
+		}, query, ve[*dns.Msg]{v: &q.answer, c: c}, false)
 	}
 	t.Run("SOA", func(t *testing.T) {
 		for zone, soa := range map[string]func(uint32) *dns.SOA{

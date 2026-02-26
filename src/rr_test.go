@@ -176,10 +176,10 @@ func TestParseOctets(t *testing.T) {
 		}
 		for _, ipVer := range []int{4, 6} {
 			if (spec.input.ver == 0 || spec.input.ver == ipVer) && spec.input.pos < 1 {
-				checkRun[any, bs](t, fmt.Sprintf("(%d)v%d,prefix:%#v", i+1, ipVer, spec.input.in), pf(ipVer, true), spec.input.in, spec.expected)
+				checkRun[any, bs](t, fmt.Sprintf("(%d)v%d,prefix:%#v", i+1, ipVer, spec.input.in), pf(ipVer, true), spec.input.in, spec.expected, true)
 			}
 			if (spec.input.ver == 0 || spec.input.ver == ipVer) && spec.input.pos > -1 {
-				checkRun[any, bs](t, fmt.Sprintf("(%d)v%d,suffix:%#v", i+1, ipVer, spec.input.in), pf(ipVer, false), spec.input.in, spec.expected)
+				checkRun[any, bs](t, fmt.Sprintf("(%d)v%d,suffix:%#v", i+1, ipVer, spec.input.in), pf(ipVer, false), spec.input.in, spec.expected, true)
 			}
 		}
 	}

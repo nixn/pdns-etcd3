@@ -37,7 +37,7 @@ type test[Input any, Value any] struct {
 
 type testFunc[Input any, Value any] func(*testing.T, Input) (Value, error)
 
-func checkT[Input any, Value any](t *testing.T, f testFunc[Input, Value], in Input, expected ve[Value]) {
+func checkT[Input any, Value any](t *testing.T, f testFunc[Input, Value], in Input, expected ve[Value], quiet bool) {
 	t.Helper()
 	got, err := f(t, in)
 	if expected.e != "" {
@@ -45,7 +45,7 @@ func checkT[Input any, Value any](t *testing.T, f testFunc[Input, Value], in Inp
 			t.Errorf(`%#+v -> expected error with %q, got value: %s`, in, expected.e, val2str(got))
 		} else if !strings.Contains(err.Error(), expected.e) {
 			t.Errorf(`%#+v -> expected error with %q, got error: %s`, in, expected.e, err)
-		} else {
+		} else if !quiet {
 			t.Logf("got expected error")
 		}
 	} else {
@@ -54,17 +54,17 @@ func checkT[Input any, Value any](t *testing.T, f testFunc[Input, Value], in Inp
 		} else {
 			if unequal := testEqual(t, expected.v, got, expected.c, ""); unequal != nil {
 				t.Errorf(`%s -> expected: %s (conditions: %s), got: %s (%s)`, val2str(in), val2str(expected.v), val2str(expected.c), val2str(got), unequal)
-			} else {
+			} else if !quiet {
 				t.Logf("got expected value")
 			}
 		}
 	}
 }
 
-func checkRun[Input any, Value any](t *testing.T, id string, f testFunc[Input, Value], in Input, expected ve[Value]) bool {
+func checkRun[Input any, Value any](t *testing.T, id string, f testFunc[Input, Value], in Input, expected ve[Value], quiet bool) bool {
 	t.Helper()
 	return t.Run(id, func(t *testing.T) {
-		checkT(t, f, in, expected)
+		checkT(t, f, in, expected, quiet)
 	})
 }
 

@@ -59,7 +59,7 @@ func TestParseEntryKey(t *testing.T) {
 		{"com.example/dept.fin/-defaults-/NS#1@2.3", ve[pk]{v: pk{[]namePart{{"com", ""}, {"example", "."}, {"dept", "/"}, {"fin", "."}}, "defaults", "NS", "1", &VersionType{false, 2, 3, 0}}}},
 		{"SOA#id", ve[pk]{e: "SOA entry cannot have an id"}},
 	} {
-		checkRun(t, fmt.Sprintf("(%d)%q", i+1, spec.input), tf, spec.input, spec.expected)
+		checkRun(t, fmt.Sprintf("(%d)%q", i+1, spec.input), tf, spec.input, spec.expected, false)
 	}
 }
 
@@ -109,7 +109,7 @@ func TestParseEntryContent(t *testing.T) {
 		{ci{"---\ra: 1\nb: two", optionsEntry}, ve[any]{v: objectValueType{"a": 1, "b": "two"}}},
 		{ci{"---\r\na: 1\r\nb: two", normalEntry}, ve[any]{v: objectValueType{"a": 1, "b": "two"}}},
 	} {
-		checkRun(t, fmt.Sprintf("(%d)%q", i+1, spec.input), tf, spec.input, spec.expected)
+		checkRun(t, fmt.Sprintf("(%d)%q", i+1, spec.input), tf, spec.input, spec.expected, false)
 	}
 }
 
@@ -191,7 +191,7 @@ func TestProcessValues(t *testing.T) {
 			checkRun[map[string]map[string]any, any](t, name, checkRecordsFn(zone), spec.values, ve[any]{
 				v: spec.expected,
 				c: conditions,
-			})
+			}, false)
 		}
 	})
 	zone.values = map[string]map[string]valueType{
@@ -223,7 +223,7 @@ func TestProcessValues(t *testing.T) {
 			checkRun[map[string]map[string]any, any](t, name, checkRecordsFn(subd), spec.values, ve[any]{
 				v: spec.expected,
 				c: conditions,
-			})
+			}, false)
 		}
 	})
 }
