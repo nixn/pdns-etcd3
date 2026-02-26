@@ -79,8 +79,8 @@ var (
 	args       programArgs
 	standalone bool
 	dataRoot   *dataNode
-	cli        *etcdClient
-	status     *statusType
+	cli        = &etcdClient{}
+	status     = (&statusType{}).Init()
 )
 
 func parseBoolean(s string) (bool, error) {
@@ -381,8 +381,6 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 		log.main().Debugf("{signal} caught signal %s, shutting down", sig)
 		cancel()
 	}()
-	cli = &etcdClient{}
-	status = (&statusType{}).Init()
 	wg := new(sync.WaitGroup)
 	standalone = *standaloneArg != ""
 	if standalone {

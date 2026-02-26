@@ -21,6 +21,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -352,7 +353,7 @@ func recoverPanicsT(t *testing.T) {
 			// expected exit
 			return
 		}
-		Fatalf(t, "unexpected panic: %v", r)
+		Fatalf(t, "unexpected panic: %v\nstack:\n%s", r, debug.Stack())
 	}
 }
 

@@ -490,6 +490,8 @@ func TestWithPDNS(t *testing.T) {
 	Logf(t, "ETCD endpoint (2379): %s", etcd.Endpoint)
 	// PDNS-ETCD3
 	sleepT(t, 1*time.Second)
+	cli = &etcdClient{}
+	status = (&statusType{}).Init()
 	pe3 := startPE3(t, etcd.Endpoint, "", "-log-trace=main+etcd+pdns+data", "-pdns-version="+getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1])
 	defer pe3.Terminate()
 	Logf(t, "PDNS-ETCD3 endpoint: %s", pe3.HttpAddress)
