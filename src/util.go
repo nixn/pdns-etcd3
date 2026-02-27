@@ -198,14 +198,69 @@ func float2decimal(n float64) string {
 	return strings.TrimRight(str, "0.,")
 }
 
-func wgGo(wg *sync.WaitGroup, name string, f func()) {
-	status.routines.Put(name, name, func() {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			defer status.routines.Delete(name)
-			f()
-		}()
+type WaitGroup struct {
+	sync.WaitGroup
+	routines *MapSyncAccess[string, uint64]
+}
+
+func (wg *WaitGroup) Init() *WaitGroup {
+	wg.routines = new(MapSyncAccess[string, uint64]).Init()
+	return wg
+}
+
+func (wg *WaitGroup) add(name string, f *func(any), p any) {
+	wg.routines.Compute(name, func(_ string, count *uint64) *uint64 {
+		var n uint64
+		if count == nil {
+			n = 1
+		} else {
+			n = *count + 1
+		}
+		wg.WaitGroup.Add(1) //nolint:staticcheck // I want this clear reference here
+		if f != nil {
+			go func(p any) {
+				defer wg.Done(name)
+				(*f)(p)
+			}(p)
+		}
+		return &n
+	})
+}
+
+func (wg *WaitGroup) Go(name string, f func(any), p any) {
+	wg.add(name, &f, p)
+}
+
+func (wg *WaitGroup) Register(name string) {
+	wg.add(name, nil, nil)
+}
+
+func (wg *WaitGroup) Done(name string) {
+	defer wg.WaitGroup.Done()
+	wg.routines.Compute(name, func(_ string, count *uint64) *uint64 {
+		if *count == 1 {
+			return nil
+		} else {
+			n := *count - 1
+			return &n
+		}
+	})
+}
+
+func (wg *WaitGroup) State(withNames bool) (uint64, []string) {
+	return WithRLock2(&wg.routines.SyncAccess, func() (count uint64, names []string) {
+		if !withNames {
+			count = uint64(len(wg.routines.Map))
+			return
+		}
+		for name, cnt := range wg.routines.Map {
+			count += cnt
+			if cnt != 1 {
+				name = fmt.Sprintf("%s (%d)", name, cnt)
+			}
+			names = append(names, name)
+		}
+		return
 	})
 }
 
@@ -326,7 +381,7 @@ func (m *MapSyncAccess[K, V]) Delete(k K) {
 	m.WithLock(func() { delete(m.Map, k) })
 }
 
-func (m *MapSyncAccess[K, V]) ComputeIfAbsent(k K, compute func(k *K) V) V {
+func (m *MapSyncAccess[K, V]) ComputeIfAbsent(k K, compute func(k K) V) V {
 	m.mutex.RLock()
 	if v, ok := m.Map[k]; ok {
 		defer m.mutex.RUnlock()
@@ -338,6 +393,26 @@ func (m *MapSyncAccess[K, V]) ComputeIfAbsent(k K, compute func(k *K) V) V {
 	if v, ok := m.Map[k]; ok {
 		return v
 	}
-	m.Map[k] = compute(&k)
+	m.Map[k] = compute(k)
 	return m.Map[k]
+}
+
+func (m *MapSyncAccess[K, V]) Compute(k K, compute func(k K, v *V) *V) *V {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	var nv *V
+	v, found := m.Map[k]
+	if found {
+		nv = compute(k, &v)
+	} else {
+		nv = compute(k, nil)
+	}
+	if nv == nil {
+		if found {
+			delete(m.Map, k)
+		}
+	} else {
+		m.Map[k] = *nv
+	}
+	return nv
 }

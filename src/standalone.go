@@ -25,12 +25,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"time"
 )
 
-type standaloneFunc func(context.Context, *sync.WaitGroup, *url.URL)
+type standaloneFunc func(context.Context, *WaitGroup, *url.URL)
 
 var (
 	standalones = map[string]standaloneFunc{
@@ -39,7 +38,7 @@ var (
 	}
 )
 
-func unixListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
+func unixListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 	if u.Path == "" {
 		log.main().Panicf("unix: the socket path cannot be empty")
 	}
@@ -59,13 +58,13 @@ func unixListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
 	defer closeNoError(socket)
 	done := make(chan struct{})
 	defer close(done)
-	wgGo(wg, "unixListener done", func() {
+	wg.Go("unixListener done", func(_ any) {
 		select {
 		case <-ctx.Done():
 		case <-done:
 		}
 		closeNoError(socket)
-	})
+	}, nil)
 	if err = os.Chmod(path, 0777); err != nil {
 		log.main().Errorf("unix: failed to chmod socket to 0777: %s", err)
 	}
@@ -87,15 +86,16 @@ func unixListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
 			continue
 		}
 		log.main().Debugf("unix: new connection [%d]: %+v", nextClientID, conn)
-		wgGo(wg, fmt.Sprintf("serve[%d]", nextClientID), func() {
+		wg.Go(fmt.Sprintf("serve[%d]", nextClientID), func(clientID_ any) {
+			clientID := clientID_.(uint64)
 			defer recoverPanics(func(v any) bool {
-				recoverFunc(v, fmt.Sprintf("unix: serve[%d]", nextClientID), false)
+				recoverFunc(v, fmt.Sprintf("unix: serve[%d]", clientID), false)
 				return false
 			})
 			defer closeNoError(conn)
-			serve(ctx, wg, newPdnsClient(ctx, fmt.Sprintf("%d,%s", nextClientID, conn.RemoteAddr()), conn, conn), &initialzed, nil)
-			log.main().Tracef("unix: serve[%d] returned normally", nextClientID)
-		})
+			serve(ctx, wg, newPdnsClient(ctx, fmt.Sprintf("%d,%s", clientID, conn.RemoteAddr()), conn, conn), &initialzed, nil)
+			log.main().Tracef("unix: serve[%d] returned normally", clientID)
+		}, nextClientID)
 		nextClientID++
 	}
 	status.serving = false
@@ -115,7 +115,7 @@ var (
 	}
 )
 
-func httpListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
+func httpListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 	if u.Hostname() == "" {
 		log.main().Panic("http: <listen-address> may not be empty")
 	}
@@ -141,6 +141,9 @@ func httpListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
 		return mediatype == mt
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := fmt.Sprintf("%s #%04x", r.RemoteAddr, rand.Uint32())
+		wg.Register(id)
+		defer wg.Done(id)
 		log.main("client", r.RemoteAddr, "method", r.Method, "header", r.Header, "url", r.URL.String()).Trace("http: new request")
 		if r.Method != http.MethodPost {
 			log.main(r.Method).Debug("http: non-POST method")
@@ -161,7 +164,7 @@ func httpListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
 		requestsCount.max.CompareAndSwap(cur-1, cur)
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		serve(ctx, wg, newPdnsClient(ctx, fmt.Sprintf("%s #%04x", r.RemoteAddr, rand.Uint32()&0xffff), r.Body, &httpWriter{w}), nil, nil)
+		serve(ctx, wg, newPdnsClient(ctx, id, r.Body, &httpWriter{w}), nil, nil)
 		requestsCount.cur.Add(-1)
 	})
 	server := &http.Server{
@@ -170,7 +173,7 @@ func httpListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
 		IdleTimeout:       10 * time.Second,
 	}
 	done := make(chan struct{})
-	wgGo(wg, "shutdown http", func() {
+	wg.Go("shutdown http", func(_ any) {
 		defer close(done)
 		<-ctx.Done()
 		log.main().Debug("{shutdown http} shutting down")
@@ -186,7 +189,7 @@ func httpListener(ctx context.Context, wg *sync.WaitGroup, u *url.URL) {
 		} else {
 			log.main().Trace("{shutdown http} Shutdown() succeeded")
 		}
-	})
+	}, nil)
 	log.main(socket.Addr()).Debugf("http: starting server (%s)", socket.Addr())
 	status.serving = true
 	err = server.Serve(socket)

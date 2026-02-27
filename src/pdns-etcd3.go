@@ -25,7 +25,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -44,33 +43,8 @@ func (pa programArgs) String() string {
 	return fmt.Sprintf("ConfigFile=%s, Endpoints=%s, DialTimeout=%s, Prefix=%s", val2str(pa.ConfigFile), val2str(pa.Endpoints), val2str(pa.DialTimeout), val2str(pa.Prefix))
 }
 
-type routinesType struct {
-	MapSyncAccess[string, string]
-}
-
-func (r *routinesType) Init() *routinesType {
-	r.MapSyncAccess = *r.MapSyncAccess.Init()
-	return r
-}
-
-func (r *routinesType) State(withNames bool) (int, []string) {
-	return WithRLock2(&r.SyncAccess, func() (int, []string) {
-		if withNames {
-			return len(r.Map), Keys(r.Map)
-		} else {
-			return len(r.Map), nil
-		}
-	})
-}
-
 type statusType struct {
 	populated, serving bool
-	routines           *routinesType
-}
-
-func (s *statusType) Init() *statusType {
-	s.routines = (&routinesType{}).Init()
-	return s
 }
 
 var (
@@ -80,7 +54,7 @@ var (
 	standalone bool
 	dataRoot   *dataNode
 	cli        = &etcdClient{}
-	status     = (&statusType{}).Init()
+	status     = &statusType{}
 )
 
 func parseBoolean(s string) (bool, error) {
@@ -177,9 +151,9 @@ func readParameters(params objectType[string], client *pdnsClient) error {
 	return nil
 }
 
-func startReadRequests(ctx context.Context, wg *sync.WaitGroup, client *pdnsClient) <-chan pdnsRequest {
+func startReadRequests(ctx context.Context, wg *WaitGroup, client *pdnsClient) <-chan pdnsRequest {
 	ch := make(chan pdnsRequest)
-	wgGo(wg, fmt.Sprintf("readRequests [%s]", client.ID), func() {
+	wg.Go(fmt.Sprintf("readRequests [%s]", client.ID), func(_ any) {
 		defer recoverPanics(func(v any) bool {
 			recoverFunc(v, "readRequests()", false)
 			return false
@@ -187,7 +161,7 @@ func startReadRequests(ctx context.Context, wg *sync.WaitGroup, client *pdnsClie
 		defer close(ch)
 		done := make(chan struct{})
 		defer close(done)
-		wgGo(wg, fmt.Sprintf("readRequests [%s] done", client.ID), func() {
+		wg.Go(fmt.Sprintf("readRequests [%s] done", client.ID), func(_ any) {
 			select {
 			case <-ctx.Done():
 				client.log.pdns().Tracef("{readRequests done} context canceled, closing input")
@@ -195,7 +169,7 @@ func startReadRequests(ctx context.Context, wg *sync.WaitGroup, client *pdnsClie
 			case <-done:
 				client.log.pdns().Trace("{readRequests done} done")
 			}
-		})
+		}, nil)
 		for {
 			client.log.pdns().Trace("{readRequests} waiting for next request")
 			if request, err := client.Comm.read(); err != nil {
@@ -213,7 +187,7 @@ func startReadRequests(ctx context.Context, wg *sync.WaitGroup, client *pdnsClie
 				ch <- *request
 			}
 		}
-	})
+	}, nil)
 	return ch
 }
 
@@ -381,7 +355,7 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 		log.main().Debugf("{signal} caught signal %s, shutting down", sig)
 		cancel()
 	}()
-	wg := new(sync.WaitGroup)
+	wg := new(WaitGroup).Init()
 	standalone = *standaloneArg != ""
 	if standalone {
 		u, err := url.Parse(*standaloneArg)
@@ -416,11 +390,11 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 	}
 	log.main().Debug("request handler returned normally, stopping work")
 	cancel()
-	nr, _ := status.routines.State(false)
+	nr, _ := wg.State(false)
 WAIT:
 	for n, N := 1, 3; nr > 0 && n <= N; n++ {
 		var names []string
-		nr, names = status.routines.State(true)
+		nr, names = wg.State(true)
 		log.main(names).Tracef("waiting for child routines (%d) to finish [%d/%d]", nr, n, N)
 		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		done := make(chan struct{})
@@ -434,7 +408,7 @@ WAIT:
 			break WAIT
 		case <-waitCtx.Done():
 			if n == N {
-				nr, names = status.routines.State(true)
+				nr, names = wg.State(true)
 				log.main(names).Error("timeout while waiting on routines, exiting forcefully")
 			}
 		}
@@ -444,7 +418,7 @@ WAIT:
 	}
 }
 
-func populateData(ctx context.Context, wg *sync.WaitGroup, trackReaders bool) error {
+func populateData(ctx context.Context, wg *WaitGroup, trackReaders bool) error {
 	log.main().Debug("populating data")
 	getResponse, err := cli.Get(*args.Prefix, true, nil, *args.DialTimeout)
 	if err != nil {
@@ -460,18 +434,18 @@ func populateData(ctx context.Context, wg *sync.WaitGroup, trackReaders bool) er
 	}()
 	status.populated = true
 	log.main().Debug("starting data watcher")
-	wgGo(wg, "watchData", func() {
+	wg.Go("watchData", func(_ any) {
 		defer recoverPanics(func(v any) bool {
 			recoverFunc(v, "watchData()", false)
 			return false
 		})
 		cli.WatchData(ctx, *args.Prefix)
 		log.main().Trace("watchData() returned normally")
-	})
+	}, nil)
 	return nil
 }
 
-func pipe(ctx context.Context, wg *sync.WaitGroup, in io.ReadCloser, out io.WriteCloser, trackReaders bool) {
+func pipe(ctx context.Context, wg *WaitGroup, in io.ReadCloser, out io.WriteCloser, trackReaders bool) {
 	initialized := func(client *pdnsClient) []string {
 		clientMessages, err := cli.Setup(&args)
 		if err != nil {
@@ -487,7 +461,7 @@ func pipe(ctx context.Context, wg *sync.WaitGroup, in io.ReadCloser, out io.Writ
 	serve(ctx, wg, newPdnsClient(ctx, "*", in, out), &initialized, &status.serving)
 }
 
-func serve(ctx context.Context, wg *sync.WaitGroup, client *pdnsClient, initialized *func(*pdnsClient) []string, serving *bool) {
+func serve(ctx context.Context, wg *WaitGroup, client *pdnsClient, initialized *func(*pdnsClient) []string, serving *bool) {
 	reqChan := startReadRequests(ctx, wg, client)
 	if initialized != nil {
 		// first request must be 'initialize'

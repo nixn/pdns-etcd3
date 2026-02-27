@@ -260,7 +260,7 @@ func testEqualR(t *testing.T, a, b reflect.Value, conditions map[string]Conditio
 	}
 	vt := a.Type()
 	for re, cond := range conditions {
-		rec := compiledConditionsCache.ComputeIfAbsent(re, func(_ *string) *regexp.Regexp {
+		rec := compiledConditionsCache.ComputeIfAbsent(re, func(_ string) *regexp.Regexp {
 			return regexp.MustCompile("^" + re + "$")
 		})
 		if rec.MatchString(path) {

@@ -27,7 +27,6 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -85,8 +84,8 @@ func TestPipeRequests(t *testing.T) {
 	sleepT(t, 1*time.Second)
 	// start pdns-etcd3 (main function)
 	Logf(t, "starting pdns-etcd3")
-	cli = &etcdClient{}
-	status = (&statusType{}).Init()
+	cli = new(etcdClient)
+	status = new(statusType)
 	inR, inW, _ := os.Pipe()
 	defer func() {
 		t.Log("closing input stream to pdns-etcd3")
@@ -105,7 +104,7 @@ func TestPipeRequests(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	wg := new(sync.WaitGroup)
+	wg := new(WaitGroup).Init()
 	go pipe(ctx, wg, inR, outW, false)
 	pe3 := newComm[any](ctx, outR, inW)
 	action := func(t *testing.T, request pdnsRequest) (any, error) {
@@ -490,8 +489,8 @@ func TestWithPDNS(t *testing.T) {
 	Logf(t, "ETCD endpoint (2379): %s", etcd.Endpoint)
 	// PDNS-ETCD3
 	sleepT(t, 1*time.Second)
-	cli = &etcdClient{}
-	status = (&statusType{}).Init()
+	cli = new(etcdClient)
+	status = new(statusType)
 	pe3 := startPE3(t, etcd.Endpoint, "", "-log-trace=main+etcd+pdns+data", "-pdns-version="+getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1])
 	defer pe3.Terminate()
 	Logf(t, "PDNS-ETCD3 endpoint: %s", pe3.HttpAddress)
@@ -837,14 +836,6 @@ func TestHttpListener(t *testing.T) {
 	t.Skip("not implemented yet")
 }
 
-func wgGoT[T any](wg *sync.WaitGroup, fn func(T), t T) {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		fn(t)
-	}()
-}
-
 func TestParallelRequests(t *testing.T) {
 	defer recoverPanicsT(t)
 	// ETCD
@@ -874,21 +865,23 @@ func TestParallelRequests(t *testing.T) {
 		Logf(t, "PDNS#%d endpoint: %s", i+1, pdnsN.Endpoint)
 		pdns = append(pdns, pdnsN)
 	}
-	wg := new(sync.WaitGroup)
+	wg := new(WaitGroup).Init()
 	queryCount := struct {
 		count atomic.Int32
 		par   struct{ cur, max atomic.Int32 }
-		dur   struct{ total, min, max atomic.Int64 }
+		dur   struct{ min, max atomic.Int64 }
 	}{}
+	runs := 3
+	since := time.Now()
 	for i, pdns := range pdns {
 		Logf(t, "starting PDNS#%d queries", i+1)
 		type pdnsP struct {
 			n            int
 			pdnsEndpoint string
 		}
-		wgGoT(wg, func(p pdnsP) {
-			wg := new(sync.WaitGroup)
-			for i := 0; i < 3; i++ {
+		wg.Go(fmt.Sprintf("PDNS#%d queries", i+1), func(p_ any) {
+			p := p_.(pdnsP)
+			for i := 0; i < runs; i++ {
 				since := time.Now()
 				for j, qs := range []querySpecT{
 					querySpec("example.net.", dns.TypeSOA, dns.Msg{Answer: []dns.RR{
@@ -911,37 +904,29 @@ func TestParallelRequests(t *testing.T) {
 						&dns.PTR{Ptr: "ns1.example.net."},
 					}}),
 				} {
-					type runTestP = struct {
-						pdnsEndpoint string
-						ns           []int
-						qs           querySpecT
-					}
-					wgGoT(wg, func(p runTestP) {
-						Logf(t, "PDNS#%v: starting query test (%s/%s)", p.ns, p.qs.name, dns.TypeToString[p.qs.qtype])
-						queryCount.count.Add(1)
-						cur := queryCount.par.cur.Add(1)
-						queryCount.par.max.CompareAndSwap(cur-1, cur)
-						dur := int64(QueryTest(t, p.pdnsEndpoint, p.qs, 10*time.Second, true))
-						queryCount.dur.total.Add(dur)
-						queryCount.dur.min.CompareAndSwap(0, dur) // only done once (on first result)
-						queryCount.dur.min.CompareAndSwap(queryCount.dur.min.Load(), min(dur, queryCount.dur.min.Load()))
-						queryCount.dur.max.CompareAndSwap(queryCount.dur.max.Load(), max(dur, queryCount.dur.max.Load()))
-						queryCount.par.cur.Add(-1)
-						Logf(t, "PDNS#%v: finished query test (%s/%s) in %s", p.ns, p.qs.name, dns.TypeToString[p.qs.qtype], time.Duration(dur))
-					}, runTestP{p.pdnsEndpoint, []int{p.n, i + 1, j + 1}, qs})
-					wg.Wait()
+					ns := []int{p.n, i + 1, j + 1}
+					Logf(t, "PDNS#%v: starting query test (%s/%s)", ns, qs.name, dns.TypeToString[qs.qtype])
+					queryCount.count.Add(1)
+					cur := queryCount.par.cur.Add(1)
+					queryCount.par.max.CompareAndSwap(cur-1, cur)
+					dur := int64(QueryTest(t, p.pdnsEndpoint, qs, 10*time.Second, true))
+					queryCount.dur.min.CompareAndSwap(0, dur) // only done once (on first result)
+					queryCount.dur.min.CompareAndSwap(queryCount.dur.min.Load(), min(dur, queryCount.dur.min.Load()))
+					queryCount.dur.max.CompareAndSwap(queryCount.dur.max.Load(), max(dur, queryCount.dur.max.Load()))
+					queryCount.par.cur.Add(-1)
+					Logf(t, "PDNS#%v: finished query test (%s/%s) in %s", ns, qs.name, dns.TypeToString[qs.qtype], time.Duration(dur))
 				}
-				wg.Wait()
 				dur := time.Since(since)
-				Logf(t, "PDNS#%d run %d finished in %s (requests: %d, queries: %d)", p.n, i+1, dur, requestsCount.max.Load(), queryCount.par.max.Load())
+				Logf(t, "PDNS#%d run %d finished in %s", p.n, i+1, dur)
 			}
 		}, pdnsP{i + 1, pdns.Endpoint})
 	}
 	wg.Wait()
-	Logf(t, "finished (queries: %d) (max parallel readers: %d, requests: %d, queries: %d) (duration total: %s, min: %s, max: %s, average: %s)",
+	overall := time.Since(since)
+	Logf(t, "finished (queries: %d) (max parallel readers: %d, requests: %d, queries: %d) (duration min: %s, max: %s, overall: %s, run average: %s)",
 		queryCount.count.Load(),
 		dataRoot.readers.max.Load(), requestsCount.max.Load(), queryCount.par.max.Load(),
-		time.Duration(queryCount.dur.total.Load()), time.Duration(queryCount.dur.min.Load()), time.Duration(queryCount.dur.max.Load()), time.Duration(queryCount.dur.total.Load()/int64(queryCount.count.Load())))
+		time.Duration(queryCount.dur.min.Load()), time.Duration(queryCount.dur.max.Load()), overall, time.Duration(int64(overall)/int64(runs)))
 	var pr func(*dataNode)
 	pr = func(data *dataNode) {
 		Logf(t, "-- %s: %d", data.getName().asKey(false), data.readers.max.Load())
