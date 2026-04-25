@@ -32,15 +32,20 @@ const (
 	defaultDialKeepAliveTime    = 10 * time.Second
 	defaultDialKeepAliveTimeout = 5 * time.Second
 	defaultAutoSyncInterval     = 60 * time.Second
+	defaultPermitWithoutStream  = true
 )
 
 const (
-	pdnsVersionParam = "pdns-version"
-	prefixParam      = "prefix"
-	logParamPrefix   = "log-"
-	configFileParam  = "config-file"
-	endpointsParam   = "endpoints"
-	dialTimeoutParam = "timeout"
+	pdnsVersionParam          = "pdns-version"
+	prefixParam               = "prefix"
+	logParamPrefix            = "log-"
+	configFileParam           = "config-file"
+	endpointsParam            = "endpoints"
+	dialTimeoutParam          = "timeout"
+	dialKeepAliveTimeParam    = "dial-keep-alive-time"
+	dialKeepAliveTimeoutParam = "dial-keep-alive-timeout"
+	autoSyncIntervalParam     = "auto-sync-interval"
+	permitWithoutStreamParam  = "permit-without-stream"
 )
 
 const (

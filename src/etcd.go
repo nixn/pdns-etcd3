@@ -47,14 +47,18 @@ func (cli *etcdClient) Setup(args *programArgs) (logMessages []string, err error
 	}
 	cfg := clientv3.Config{
 		DialTimeout:          *args.DialTimeout,
-		DialKeepAliveTime:    defaultDialKeepAliveTime,
-		DialKeepAliveTimeout: defaultDialKeepAliveTimeout,
-		PermitWithoutStream:  true,
-		AutoSyncInterval:     defaultAutoSyncInterval,
+		DialKeepAliveTime:    *args.DialKeepAliveTime,
+		DialKeepAliveTimeout: *args.DialKeepAliveTimeout,
+		PermitWithoutStream:  *args.PermitWithoutStream,
+		AutoSyncInterval:     *args.AutoSyncInterval,
 		Endpoints:            strings.Split(*args.Endpoints, `|`),
 	}
 	logMessages = append(logMessages,
 		fmt.Sprintf("%s: %s", dialTimeoutParam, *args.DialTimeout),
+		fmt.Sprintf("%s: %s", dialKeepAliveTimeParam, *args.DialKeepAliveTime),
+		fmt.Sprintf("%s: %s", dialKeepAliveTimeoutParam, *args.DialKeepAliveTimeout),
+		fmt.Sprintf("%s: %s", autoSyncIntervalParam, *args.AutoSyncInterval),
+		fmt.Sprintf("%s: %v", permitWithoutStreamParam, *args.PermitWithoutStream),
 		fmt.Sprintf("%s: %s", endpointsParam, *args.Endpoints),
 	)
 	cli.Client, err = clientv3.New(cfg)
