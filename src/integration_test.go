@@ -95,12 +95,20 @@ func TestPipeRequests(t *testing.T) {
 	defer closeNoError(outR) // this should be done automatically by pdns-etcd3, but just in case
 	config := ""
 	timeout, _ := time.ParseDuration("5s")
+	keepAliveTime := defaultDialKeepAliveTime
+	keepAliveTimeout := defaultDialKeepAliveTimeout
+	autoSync := defaultAutoSyncInterval
+	permitWithoutStream := defaultPermitWithoutStream
 	prefix := ""
 	args = programArgs{
-		ConfigFile:  &config,
-		Endpoints:   &etcd.Endpoint,
-		DialTimeout: &timeout,
-		Prefix:      &prefix,
+		ConfigFile:           &config,
+		Endpoints:            &etcd.Endpoint,
+		DialTimeout:          &timeout,
+		DialKeepAliveTime:    &keepAliveTime,
+		DialKeepAliveTimeout: &keepAliveTimeout,
+		AutoSyncInterval:     &autoSync,
+		PermitWithoutStream:  &permitWithoutStream,
+		Prefix:               &prefix,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
