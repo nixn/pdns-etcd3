@@ -46,8 +46,12 @@ func (cli *etcdClient) Setup(args *programArgs) (logMessages []string, err error
 		return
 	}
 	cfg := clientv3.Config{
-		DialTimeout: *args.DialTimeout,
-		Endpoints:   strings.Split(*args.Endpoints, `|`),
+		DialTimeout:          *args.DialTimeout,
+		DialKeepAliveTime:    defaultDialKeepAliveTime,
+		DialKeepAliveTimeout: defaultDialKeepAliveTimeout,
+		PermitWithoutStream:  true,
+		AutoSyncInterval:     defaultAutoSyncInterval,
+		Endpoints:            strings.Split(*args.Endpoints, `|`),
 	}
 	logMessages = append(logMessages,
 		fmt.Sprintf("%s: %s", dialTimeoutParam, *args.DialTimeout),

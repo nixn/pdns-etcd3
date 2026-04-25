@@ -25,10 +25,13 @@ var (
 )
 
 const (
-	defaultEndpointIPv4 = "127.0.0.1:2379"
-	defaultEndpointIPv6 = "[::1]:2379"
-	defaultDialTimeout  = 2 * time.Second
-	minimumDialTimeout  = 10 * time.Millisecond
+	defaultEndpointIPv4         = "127.0.0.1:2379"
+	defaultEndpointIPv6         = "[::1]:2379"
+	defaultDialTimeout          = 2 * time.Second
+	minimumDialTimeout          = 10 * time.Millisecond
+	defaultDialKeepAliveTime    = 10 * time.Second
+	defaultDialKeepAliveTimeout = 5 * time.Second
+	defaultAutoSyncInterval     = 60 * time.Second
 )
 
 const (
