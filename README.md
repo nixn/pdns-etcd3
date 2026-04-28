@@ -107,7 +107,7 @@ enough to connect to ETCD, read all data, and reply to this first request. This 
 Example PowerDNS configuration file:
 ```
 launch=remote
-remote-connection-string=pipe:command=/path/to/pdns-etcd3[,pdns-version=3|4|5][,<config>][,prefix=<string>][,timeout=<integer>][,log-<level>=<components>]
+remote-connection-string=pipe:command=/path/to/pdns-etcd3[,pdns-version=3|4|5][,<config>][,prefix=<string>][,timeout=<integer>][,dial-keep-alive-time=<duration>][,dial-keep-alive-timeout=<duration>][,auto-sync-interval=<duration>][,permit-without-stream=<bool>][,log-<level>=<components>]
 # since in pipe mode every instance connects to ETCD and loads the data for itself (uses memory), possibly do this:
 distributor-threads=1
 ```
@@ -199,6 +199,25 @@ are tagged by *#STANDALONE*):
   `timeout=<integer>` *config file* (in milliseconds, e.g. `1500` for 1.5 seconds)<br>
   An optional parameter which sets the dial timeout to ETCD. Must be a positive value (>= 1ms).<br>
   Defaults to 2 seconds.
+* `dial-keep-alive-time=<duration>` *#STANDALONE*<br>
+  Interval at which the client sends keep-alive pings to ETCD on the underlying gRPC (HTTP/2) connection.
+  These pings allow the client to detect a dead endpoint (e.g. a host that vanished without sending a TCP RST/FIN)
+  and rotate to another endpoint instead of waiting for the kernel TCP timeout (~13–15 minutes).
+  Set to `0` to disable keep-alive pings.<br>
+  Defaults to 10 seconds.
+* `dial-keep-alive-timeout=<duration>` *#STANDALONE*<br>
+  Time the client waits for an acknowledgement after sending a keep-alive ping. If no ack arrives within this timeout,
+  the connection is considered dead and the client reconnects (to another endpoint if available).<br>
+  Defaults to 5 seconds.
+* `auto-sync-interval=<duration>` *#STANDALONE*<br>
+  Interval at which the client refreshes its view of the ETCD cluster member list.
+  This makes new endpoints (e.g. cluster members added or rotated in after the client connected) reachable
+  without restarting the backend. Set to `0` to disable.<br>
+  Defaults to 1 minute.
+* `permit-without-stream=<bool>` *#STANDALONE*<br>
+  When true, the client sends keep-alive pings even when no RPC stream is active on the connection.
+  This is needed to detect a dead endpoint while the backend is idle (e.g. between watch events on a low-traffic deployment).<br>
+  Defaults to `true`.
 * `pdns-version=3|4|5`<br>
   The (major) PowerDNS version. Version 3 and 4 have incompatible protocols with the backend, so one must use the proper one.
   Version 5 is accepted, but works currently the same as 4 (no relevant API changes yet).<br>

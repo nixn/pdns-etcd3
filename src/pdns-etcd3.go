@@ -33,14 +33,21 @@ import (
 )
 
 type programArgs struct {
-	ConfigFile  *string
-	Endpoints   *string
-	DialTimeout *time.Duration
-	Prefix      *string
+	ConfigFile           *string
+	Endpoints            *string
+	DialTimeout          *time.Duration
+	DialKeepAliveTime    *time.Duration
+	DialKeepAliveTimeout *time.Duration
+	AutoSyncInterval     *time.Duration
+	PermitWithoutStream  *bool
+	Prefix               *string
 }
 
 func (pa programArgs) String() string {
-	return fmt.Sprintf("ConfigFile=%s, Endpoints=%s, DialTimeout=%s, Prefix=%s", val2str(pa.ConfigFile), val2str(pa.Endpoints), val2str(pa.DialTimeout), val2str(pa.Prefix))
+	return fmt.Sprintf("ConfigFile=%s, Endpoints=%s, DialTimeout=%s, DialKeepAliveTime=%s, DialKeepAliveTimeout=%s, AutoSyncInterval=%s, PermitWithoutStream=%s, Prefix=%s",
+		val2str(pa.ConfigFile), val2str(pa.Endpoints), val2str(pa.DialTimeout),
+		val2str(pa.DialKeepAliveTime), val2str(pa.DialKeepAliveTimeout), val2str(pa.AutoSyncInterval),
+		val2str(pa.PermitWithoutStream), val2str(pa.Prefix))
 }
 
 type statusType struct {
@@ -124,6 +131,14 @@ func readParameters(params objectType[string], client *pdnsClient) error {
 		case !standalone && k == dialTimeoutParam:
 			mdt := minimumDialTimeout
 			err = setDurationParameterFunc(args.DialTimeout, &mdt)(v)
+		case !standalone && k == dialKeepAliveTimeParam:
+			err = setDurationParameterFunc(args.DialKeepAliveTime, nil)(v)
+		case !standalone && k == dialKeepAliveTimeoutParam:
+			err = setDurationParameterFunc(args.DialKeepAliveTimeout, nil)(v)
+		case !standalone && k == autoSyncIntervalParam:
+			err = setDurationParameterFunc(args.AutoSyncInterval, nil)(v)
+		case !standalone && k == permitWithoutStreamParam:
+			err = setBooleanParameterFunc(args.PermitWithoutStream)(v)
 		case !standalone && k == prefixParam:
 			*args.Prefix = v
 		case k == pdnsVersionParam:
@@ -300,13 +315,17 @@ func Main(programVersion VersionType, gitVersion string) {
 }
 
 var (
-	standaloneArg  = flag.String("standalone", "", `Use a standalone mode determined by the given URL (unix:///path/to/socket[?relative=<bool>] or http://<listen-address>:<listen-port>)`)
-	configFileArg  = flag.String(configFileParam, "", "Use the given configuration file for the ETCD connection (overrides -endpoints)")
-	endpointsArg   = flag.String(endpointsParam, defaultEndpointIPv6+"|"+defaultEndpointIPv4, "Use the endpoints configuration for ETCD connection")
-	dialTimeoutArg = flag.Duration(dialTimeoutParam, defaultDialTimeout, "ETCD dial timeout")
-	prefixArg      = flag.String(prefixParam, "", "Global key prefix")
-	pdnsVersionArg = flag.String(pdnsVersionParam, "", "default PDNS version")
-	loggingArgs    = func() map[logrus.Level]*string {
+	standaloneArg           = flag.String("standalone", "", `Use a standalone mode determined by the given URL (unix:///path/to/socket[?relative=<bool>] or http://<listen-address>:<listen-port>)`)
+	configFileArg           = flag.String(configFileParam, "", "Use the given configuration file for the ETCD connection (overrides -endpoints)")
+	endpointsArg            = flag.String(endpointsParam, defaultEndpointIPv6+"|"+defaultEndpointIPv4, "Use the endpoints configuration for ETCD connection")
+	dialTimeoutArg          = flag.Duration(dialTimeoutParam, defaultDialTimeout, "ETCD dial timeout")
+	dialKeepAliveTimeArg    = flag.Duration(dialKeepAliveTimeParam, defaultDialKeepAliveTime, "ETCD dial keep-alive ping interval (0 to disable)")
+	dialKeepAliveTimeoutArg = flag.Duration(dialKeepAliveTimeoutParam, defaultDialKeepAliveTimeout, "ETCD dial keep-alive ping timeout")
+	autoSyncIntervalArg     = flag.Duration(autoSyncIntervalParam, defaultAutoSyncInterval, "ETCD member list auto-sync interval (0 to disable)")
+	permitWithoutStreamArg  = flag.Bool(permitWithoutStreamParam, defaultPermitWithoutStream, "send ETCD client keep-alive pings even with no active RPC stream")
+	prefixArg               = flag.String(prefixParam, "", "Global key prefix")
+	pdnsVersionArg          = flag.String(pdnsVersionParam, "", "default PDNS version")
+	loggingArgs             = func() map[logrus.Level]*string {
 		args := map[logrus.Level]*string{}
 		for _, level := range logrus.AllLevels {
 			args[level] = flag.String(logParamPrefix+level.String(), "", fmt.Sprintf("Set logging level %s to the given components (separated by +)", level))
@@ -327,10 +346,14 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 	log.main().Printf("pdns-etcd3 %s, Copyright © 2016-2026 nix <https://keybase.io/nixn>", releaseVersion)
 	// handle arguments // TODO handle more arguments, f.e. 'show-defaults' standalone command
 	args = programArgs{
-		ConfigFile:  configFileArg,
-		Endpoints:   endpointsArg,
-		DialTimeout: dialTimeoutArg,
-		Prefix:      prefixArg,
+		ConfigFile:           configFileArg,
+		Endpoints:            endpointsArg,
+		DialTimeout:          dialTimeoutArg,
+		DialKeepAliveTime:    dialKeepAliveTimeArg,
+		DialKeepAliveTimeout: dialKeepAliveTimeoutArg,
+		AutoSyncInterval:     autoSyncIntervalArg,
+		PermitWithoutStream:  permitWithoutStreamArg,
+		Prefix:               prefixArg,
 	}
 	if err := flag.CommandLine.Parse(cmdLineArgs); err != nil { // same as flag.Parse(), but we can pass the arguments instead of being fixed to os.Args[1:] (needed for integration testing)
 		log.main().Panicf("failed to parse command line arguments: %s", err)

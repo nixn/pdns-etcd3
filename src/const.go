@@ -25,19 +25,27 @@ var (
 )
 
 const (
-	defaultEndpointIPv4 = "127.0.0.1:2379"
-	defaultEndpointIPv6 = "[::1]:2379"
-	defaultDialTimeout  = 2 * time.Second
-	minimumDialTimeout  = 10 * time.Millisecond
+	defaultEndpointIPv4         = "127.0.0.1:2379"
+	defaultEndpointIPv6         = "[::1]:2379"
+	defaultDialTimeout          = 2 * time.Second
+	minimumDialTimeout          = 10 * time.Millisecond
+	defaultDialKeepAliveTime    = 10 * time.Second
+	defaultDialKeepAliveTimeout = 5 * time.Second
+	defaultAutoSyncInterval     = 60 * time.Second
+	defaultPermitWithoutStream  = true
 )
 
 const (
-	pdnsVersionParam = "pdns-version"
-	prefixParam      = "prefix"
-	logParamPrefix   = "log-"
-	configFileParam  = "config-file"
-	endpointsParam   = "endpoints"
-	dialTimeoutParam = "timeout"
+	pdnsVersionParam          = "pdns-version"
+	prefixParam               = "prefix"
+	logParamPrefix            = "log-"
+	configFileParam           = "config-file"
+	endpointsParam            = "endpoints"
+	dialTimeoutParam          = "timeout"
+	dialKeepAliveTimeParam    = "dial-keep-alive-time"
+	dialKeepAliveTimeoutParam = "dial-keep-alive-timeout"
+	autoSyncIntervalParam     = "auto-sync-interval"
+	permitWithoutStreamParam  = "permit-without-stream"
 )
 
 const (
