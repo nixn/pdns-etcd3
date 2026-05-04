@@ -37,6 +37,7 @@ the third development release, considered alpha quality. Any testing is apprecia
     * e.g. in an `SRV` entry: `20 5 _ server1`, the port will be searched for in default values, the name `server1` will be appended with the zone name
     * same entry in JSON5 syntax: `{priority: 20, weight: 5, target: "server1"}` (this is longer but clearer)
 * [`ALIAS`](https://doc.powerdns.com/authoritative/guides/alias.html) support
+* Pre-signed [DNSSEC](https://doc.powerdns.com/authoritative/dnssec/intro.html) zones — store the output of an external signer (`ldns-signzone`, `dnssec-signzone`, OpenDNSSEC, ...) in ETCD; the backend serves `DNSKEY`, `RRSIG`, `NSEC`, `NSEC3`, `NSEC3PARAM`, `DS`, `CDS` and `CDNSKEY` records verbatim and reports `PRESIGNED=1` to PowerDNS automatically when a zone has a `DNSKEY` RRset at its apex (see [Pre-signed DNSSEC](#pre-signed-dnssec) below)
 * [Multi-level defaults and options](doc/ETCD-structure.md#defaults-and-options), overridable
 * [Upgrade data structure](doc/ETCD-structure.md#upgrading) (if needed for new program version) without interrupting service
 * Run [standalone](#standalone-modes) for usage as a [Unix or HTTP connector][pdns-remote-usage]
@@ -57,7 +58,7 @@ the third development release, considered alpha quality. Any testing is apprecia
 * "Labels" for selectively applying defaults and/or options to record entries
   * sth. like `com/example/-options-ptr` → `{"auto-ptr": true}` and `com/example/www/-options-collect` → `{"collect": …}` for `com/example/www-1/A+ptr+collect` without global options
   * precedence betweeen QTYPE and id (id > label > QTYPE)
-* DNSSEC support ([PowerDNS DNSSEC-specific calls][pdns-dnssec])
+* DNSSEC online signing ([PowerDNS DNSSEC-specific calls][pdns-dnssec]) — pre-signed zones are already supported (see [Features](#features))
 
 [pdns-dnssec]: https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dnssec-support
 [pdns-remote-usage]: https://doc.powerdns.com/authoritative/backends/remote.html#usage
@@ -236,6 +237,43 @@ One can see all available command-line (standalone) parameters with a short desc
 ### ETCD structure
 
 See [ETCD structure](doc/ETCD-structure.md). The structure lies beneath the `prefix` parameter (see above).
+
+### Pre-signed DNSSEC
+
+Online (live) signing is not implemented — keys are not stored in ETCD and PowerDNS is not asked to sign anything.
+Instead, the backend supports the *pre-signed* model: the zone is signed by an external tool that pushes the resulting
+`DNSKEY`, `RRSIG`, `NSEC` / `NSEC3` (and optionally `DS`, `CDS`, `CDNSKEY`) records into ETCD using the same naming
+convention as ordinary records. The backend serves them verbatim and reports `PRESIGNED=1` for the affected zones, so
+PowerDNS treats the responses as authoritative DNSSEC answers without trying to re-sign anything.
+
+Detection is automatic: any zone whose apex node holds at least one `DNSKEY` record is treated as pre-signed. There is
+no configuration switch.
+
+A minimal pre-signed apex looks like:
+```
+<prefix>/<reversed-zone>/SOA           = "primary mail _ refresh retry expire neg-ttl"
+<prefix>/<reversed-zone>/NS#1          = "ns1"
+<prefix>/<reversed-zone>/DNSKEY#ksk    = "257 3 13 mdsswUyr3DPW132mOi8V9xESWE8jTo0dxCjjnopKl+GqJxpVXckHAeF+KkxLbxILfDLUT0rAK9iUzy1L53eKGQ=="
+<prefix>/<reversed-zone>/DNSKEY#zsk    = "256 3 13 8AAAA8z+rL0c9SGT2hYEMcmFt2LzI+Z3WCHFQbQrKHJgcPKcg7XNm/Ndff8B5UFgVbkxRwKZIeKf9wNz3hF8FA=="
+<prefix>/<reversed-zone>/RRSIG#soa     = "SOA 13 2 60 20260601000000 20260501000000 12345 example.com. <signature-base64>"
+<prefix>/<reversed-zone>/NSEC          = "alpha.example.com. A NS SOA MX RRSIG NSEC DNSKEY"
+```
+
+The DNSSEC record types are stored as plain strings in standard DNS presentation format (the same form an external signer
+emits in a zonefile); the backend hands the textual content to PowerDNS unchanged and PowerDNS converts it to wire format.
+
+Operational notes:
+* Re-sign before `RRSIG` records expire (typical signers default to 30 days of validity); push the new `RRSIG`s into ETCD
+  to replace the old entries.
+* Bump the zone serial via the `SOA` entry on every re-sign so caches downstream see the change.
+* For `NSEC` / `NSEC3` chain consistency, push the chain atomically (all records in a single ETCD transaction) so PowerDNS
+  never observes a partial chain. Single-key updates are picked up by the watcher within a few milliseconds.
+* The ETCD-derived automatic SOA serial (cluster revision) is unaffected by pre-signing; if needed, override it with an
+  explicit serial in the `SOA` entry to keep it in sync with the value used by the signer.
+
+What is *not* covered by this mode (and would require online signing): dynamic NXDOMAIN/NODATA proofs for names not present
+in the zone (`getBeforeAndAfterNamesAbsolute`), online key rollover, automatic CDS/CDNSKEY publication. With NSEC3 opt-out
+and pre-computed denial-of-existence chains stored in ETCD, this is usually fine for static zones.
 
 ## Compatibility
 
