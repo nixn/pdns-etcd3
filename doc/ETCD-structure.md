@@ -140,6 +140,33 @@ an error message is logged and the record entry is ignored.
 [JSON5]: https://json5.org/
 [YAML]: https://yaml.org/
 
+### DNSSEC (pre-signed)
+
+The DNSSEC record types `DNSKEY`, `RRSIG`, `NSEC`, `NSEC3`, `NSEC3PARAM`, `DS`, `CDS` and `CDNSKEY` are stored as plain
+strings in standard DNS presentation format — the same form an external signer such as `ldns-signzone`,
+`dnssec-signzone` or OpenDNSSEC emits in a zonefile. Their content is opaque to the backend: the textual value is handed
+to PowerDNS unchanged, which converts it to wire format itself.
+
+```
+com/example/DNSKEY#ksk = "257 3 13 mdsswUyr3DPW132mOi8V9xESWE8jTo0dxCjjnopKl+GqJxpVXckHAeF+KkxLbxILfDLUT0rAK9iUzy1L53eKGQ=="
+com/example/RRSIG#soa  = "SOA 13 2 60 20260601000000 20260501000000 12345 example.com. <signature-base64>"
+com/example/NSEC       = "alpha.example.com. A NS SOA MX RRSIG NSEC DNSKEY"
+```
+
+Multiple DNSKEYs (KSK + ZSK), multiple RRSIGs (one per signed RRset), and the NSEC/NSEC3 chain are each stored as
+separate entries with distinct ids (`#ksk`, `#zsk`, `#soa`, `#a`, ...).
+
+A zone is treated as pre-signed automatically when its apex node holds at least one `DNSKEY` record. In that case the
+backend reports `PRESIGNED=1` to PowerDNS via `getDomainMetadata` / `getAllDomainMetadata`, and returns an empty list
+for `getDomainKeys` (no online keys). PowerDNS then serves the records, including their RRSIGs and the chain, exactly
+as stored.
+
+There is no configuration switch — adding or removing `DNSKEY` records flips the zone between presigned and unsigned
+modes within milliseconds (the change is propagated by the regular ETCD watcher).
+
+Online (live) signing is not supported by this backend; keys are not stored in ETCD and PowerDNS is not asked to sign
+anything.
+
 ### Version (versioned entries)
 
 Versioned entries are used when upgrading to a higher data version

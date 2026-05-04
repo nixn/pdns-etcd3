@@ -75,6 +75,17 @@ var rrFuncs = map[string]rrFunc{
 	"SOA":   soa,
 	"SRV":   srv,
 	"TXT":   txt,
+	// DNSSEC record types — served verbatim from etcd (presentation format).
+	// Used in pre-signed zones where signatures and chain are produced by an
+	// external signer (ldns-signzone, dnssec-signzone, OpenDNSSEC, ...).
+	"DNSKEY":     passthrough("content"),
+	"RRSIG":      passthrough("content"),
+	"NSEC":       passthrough("content"),
+	"NSEC3":      passthrough("content"),
+	"NSEC3PARAM": passthrough("content"),
+	"DS":         passthrough("content"),
+	"CDS":        passthrough("content"),
+	"CDNSKEY":    passthrough("content"),
 }
 
 func singleValueRE(key string) *regexp.Regexp {
@@ -98,6 +109,19 @@ var parses = map[string]*parseType{
 	"PTR":   {re: singleValueRE("hostname")},
 	"SOA":   {re: regexp.MustCompile(`^\s*(?P<primary>\S+)\s+(?P<mail>\S+)\s+_\s+(?P<refresh>\d+|_)\s+(?P<retry>\d+|_)\s+(?P<expire>\d+|_)\s+(?P<neg_ttl>\d+|_)\s*$`), uints: map[string]int{"refresh": 32, "retry": 32, "expire": 32, "neg-ttl": 32}},
 	"SRV":   {re: regexp.MustCompile(`^\s*(?P<priority>\d+|_)\s+(?P<weight>\d+|_)\s+(?P<port>\d+|_)\s+(?P<target>\S+)\s*$`), hasPriority: true, uints: map[string]int{"priority": 16, "weight": 16, "port": 16}},
+	// DNSSEC types: capture the entire presentation-format content as-is.
+	"DNSKEY":     dnssecPassthroughRE(),
+	"RRSIG":      dnssecPassthroughRE(),
+	"NSEC":       dnssecPassthroughRE(),
+	"NSEC3":      dnssecPassthroughRE(),
+	"NSEC3PARAM": dnssecPassthroughRE(),
+	"DS":         dnssecPassthroughRE(),
+	"CDS":        dnssecPassthroughRE(),
+	"CDNSKEY":    dnssecPassthroughRE(),
+}
+
+func dnssecPassthroughRE() *parseType {
+	return &parseType{re: regexp.MustCompile(`^\s*(?P<content>.+?)\s*$`)}
 }
 
 func parseContent(parse *parseType, content string) (objectValueType, error) {
@@ -268,6 +292,21 @@ func domainName(key string) rrFunc {
 			return
 		}
 		params.SetContent(name, nil)
+	}
+}
+
+// passthrough returns an rrFunc that emits the value of the given key verbatim,
+// preserving the DNS presentation format string as-is. Intended for record types
+// whose content is opaque to the backend (e.g. DNSSEC: DNSKEY, RRSIG, NSEC*, DS).
+// PowerDNS receives the textual form unchanged and converts it to wire format itself.
+func passthrough(key string) rrFunc {
+	return func(params *rrParams) {
+		content, vPath, err := getValue[string](key, params)
+		if vPath == nil || err != nil {
+			params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get %s.%s: %v", params.Target(), key, err)
+			return
+		}
+		params.SetContent(strings.TrimSpace(content), nil)
 	}
 }
 

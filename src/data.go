@@ -135,6 +135,37 @@ func (dn *dataNode) hasSOA() bool {
 	return ok
 }
 
+// hasDNSKEY reports whether the node has at least one DNSKEY record. Used to
+// detect pre-signed zones for the DNSSEC metadata path (PRESIGNED=1).
+func (dn *dataNode) hasDNSKEY() bool {
+	return len(dn.records["DNSKEY"]) > 0
+}
+
+// hasDNSKEYForZone walks down to the node matching zoneName (a DNS name with
+// optional trailing dot, case-insensitive) and reports whether that node holds
+// any DNSKEY record at its apex. Returns false if the zone is not present.
+// The receiver is expected to be the data root.
+func (dn *dataNode) hasDNSKEYForZone(zoneName string) bool {
+	if zoneName == "" {
+		return false
+	}
+	name := strings.ToLower(strings.TrimSuffix(zoneName, "."))
+	if name == "" {
+		return false
+	}
+	parts := strings.Split(name, ".")
+	qparts := make(nameType, 0, len(parts))
+	for i := len(parts) - 1; i >= 0; i-- {
+		qparts = append(qparts, namePart{parts[i], "."})
+	}
+	data, found := dn.getChild(qparts, false)
+	defer data.rUnlockUpwards(nil, false)
+	if !found {
+		return false
+	}
+	return data.hasDNSKEY()
+}
+
 func (dn *dataNode) findUpwards(pred func(*dataNode) bool) *dataNode {
 	for dn := dn; dn != nil; dn = dn.parent {
 		if pred(dn) {

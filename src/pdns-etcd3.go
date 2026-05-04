@@ -206,6 +206,20 @@ func startReadRequests(ctx context.Context, wg *WaitGroup, client *pdnsClient) <
 	return ch
 }
 
+// collectMetadata returns the DNSSEC metadata that should be reported to
+// PowerDNS for the given zone. Currently it auto-detects pre-signed zones by
+// the presence of a DNSKEY RRset at the apex; if found, the zone is reported
+// as PRESIGNED=1 so that PowerDNS serves the records (RRSIG/NSEC*/DNSKEY)
+// verbatim instead of trying to sign online (this backend does not implement
+// online signing — keys live with the external signer pipeline).
+func collectMetadata(zoneName string) map[string][]string {
+	md := map[string][]string{}
+	if dataRoot.hasDNSKEYForZone(zoneName) {
+		md["PRESIGNED"] = []string{"1"}
+	}
+	return md
+}
+
 func handleRequest(request *pdnsRequest, client *pdnsClient) {
 	client.log.main(request).Trace("handling request")
 	since := time.Now()
@@ -215,9 +229,23 @@ func handleRequest(request *pdnsRequest, client *pdnsClient) {
 	case "lookup":
 		result, err = lookup(request.Parameters, client)
 	case "getalldomainmetadata":
-		result = map[string]any{}
+		name, _ := request.Parameters["name"].(string)
+		result = collectMetadata(name)
 	case "getdomainmetadata":
-		result = []string{}
+		name, _ := request.Parameters["name"].(string)
+		kind, _ := request.Parameters["kind"].(string)
+		md := collectMetadata(name)
+		if v, ok := md[kind]; ok {
+			result = v
+		} else {
+			result = []string{}
+		}
+	case "getdomainkeys":
+		// Pre-signed mode: keys live with the external signer, never in etcd.
+		// PowerDNS only checks for keys; an empty list signals "no online keys"
+		// which, combined with PRESIGNED=1 metadata, makes pdns serve the zone
+		// records (including DNSKEY/RRSIG) verbatim.
+		result = []any{}
 	case "getalldomains":
 		result = dataRoot.allDomains([]domainInfo{}) // must not be nil, for empty answers it would not be marshalled into `[]`
 	default:
