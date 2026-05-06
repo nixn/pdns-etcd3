@@ -105,7 +105,7 @@ func (dn *dataNode) getValuesFor(entryType entryType) map[string]map[string]valu
 
 func (dn *dataNode) getQname() string {
 	qname := dn.lname + "."
-	for dn := dn.parent; dn != nil && len(dn.lname) > 0; dn = dn.parent {
+	for dn := dn.parent; dn != nil && dn.lname != ""; dn = dn.parent {
 		qname += dn.lname + "."
 	}
 	return qname
@@ -154,17 +154,16 @@ func (dn *dataNode) log(fields ...any) *logrus.Entry {
 	return log.data(append([]any{"dn", dn.getQname()}, fields...)...)
 }
 
-func (dn *dataNode) getName() *nameType {
+func (dn *dataNode) getName() Name {
 	var parts []namePart
 	for dn := dn; dn.lname != ""; dn = dn.parent {
 		parts = append(parts, namePart{dn.lname, dn.keyPrefix})
 	}
-	name := nameType(reversed(parts))
-	return &name
+	return Reversed(parts)
 }
 
 // this method is only called from reload(), which itself is called under writer lock, so no locking needed here
-func (dn *dataNode) getChildCreate(name nameType) *dataNode {
+func (dn *dataNode) getChildCreate(name Name) *dataNode {
 	if name.len() == 0 {
 		return dn
 	}
@@ -177,7 +176,7 @@ func (dn *dataNode) getChildCreate(name nameType) *dataNode {
 	return lChild.getChildCreate(name.fromDepth(2))
 }
 
-func (dn *dataNode) getChild(name nameType, countReader bool) (*dataNode, bool) {
+func (dn *dataNode) getChild(name Name, countReader bool) (*dataNode, bool) {
 	dn.mutex.RLock()
 	if dn.readers != nil && countReader {
 		cur := dn.readers.cur.Add(1)
@@ -288,7 +287,7 @@ func cutParts(parts []string, predicate func(string) bool) ([]string, string) {
 	return parts, ""
 }
 
-func parseEntryKey(key string) (name nameType, entryType entryType, qtype, id string, version *VersionType, err error) {
+func parseEntryKey(key string) (name Name, entryType entryType, qtype, id string, version *VersionType, err error) {
 	key = strings.TrimPrefix(key, *args.Prefix)
 	// note: qtype is also used as temp variable until it is set itself
 	// version
@@ -336,7 +335,7 @@ func parseEntryKey(key string) (name nameType, entryType entryType, qtype, id st
 			nameParts = append(nameParts, namePart{subParts[i], keyPrefix})
 		}
 	}
-	name = nameType(nameParts)
+	name = nameParts
 	// validation
 	if entryType == normalEntry && qtype == "" {
 		err = fmt.Errorf("empty qtype (name: %s)", name)
@@ -409,7 +408,7 @@ ITEMS:
 	for item := range dataChan {
 		name, entryType, qtype, id, itemVersion, err := parseEntryKey(item.Key)
 		if name == nil {
-			name = nameType{}
+			name = Name{}
 		}
 		//goland:noinspection GoDfaErrorMayBeNotNil
 		dn.log().Tracef("parsed %q into name %q type %q qtype %q id %q version %q err %q", item.Key, name.normal(), entryType, qtype, id, itemVersion, err2str(err))

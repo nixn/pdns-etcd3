@@ -20,7 +20,7 @@ import (
 )
 
 type queryType struct {
-	name  nameType // normalized (lowercased)
+	name  Name // normalized (lowercased)
 	qtype string
 }
 
@@ -47,9 +47,11 @@ var (
 
 func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 	// RFC 1035 2.3.3: remember original qname and use it later in the result
-	qname := nameType(Map(reversed(splitDomainName(params["qname"].(string), ".")), func(name string, _ int) namePart { return namePart{name, ""} }))
+	qname := ParseDomainName(params["qname"].(string))
 	query := queryType{
-		name:  nameType(Map(qname, func(qnamePart namePart, _ int) namePart { return namePart{strings.ToLower(qnamePart.name), "."} })),
+		name: Name(Map(qname, func(qnamePart namePart, _ int) namePart {
+			return namePart{strings.ToLower(qnamePart.name), qnamePart.keyPrefix}
+		})),
 		qtype: params["qtype"].(string),
 	}
 	//goland:noinspection GoPreferNilSlice
@@ -82,7 +84,7 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 	return result, nil
 }
 
-func makeResultItem(qname nameType, qtype string, data *dataNode, record *recordType, client *pdnsClient) objectType[any] {
+func makeResultItem(qname Name, qtype string, data *dataNode, record *recordType, client *pdnsClient) objectType[any] {
 	zoneNode := data.findZone()
 	result := objectType[any]{
 		"qname":   qname.normal(),

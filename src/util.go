@@ -29,7 +29,7 @@ import (
 
 type objectType[T any] map[string]T
 
-func reversed[T any](a []T) []T {
+func Reversed[T any](a []T) []T {
 	n := len(a)
 	r := make([]T, n)
 	for i := 0; i < n; i++ {
@@ -58,7 +58,7 @@ func Keys[K comparable, V any](m map[K]V) (ks []K) {
 func splitDomainName(name string, separator string) []string {
 	name = strings.TrimSuffix(name, separator)
 	if name == "" {
-		return []string(nil)
+		return []string{}
 	}
 	return strings.Split(name, separator)
 }

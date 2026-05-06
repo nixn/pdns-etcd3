@@ -25,7 +25,7 @@ import (
 )
 
 type parsedKey struct {
-	name      nameType
+	name      Name
 	entryType entryType
 	qtype, id string
 	version   *VersionType

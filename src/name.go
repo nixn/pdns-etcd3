@@ -19,43 +19,43 @@ type namePart struct {
 	keyPrefix string
 }
 
-type nameType []namePart // in reversed form (storage form)
+type Name []namePart // in reversed form (storage form)
 
-func (name nameType) String() string {
+func (name Name) String() string {
 	return name.normal()
 }
 
-func (name nameType) len() int {
+func (name Name) len() int {
 	return len(name)
 }
 
-func (name nameType) lname(depth int) string {
+func (name Name) lname(depth int) string {
 	if depth == 0 {
 		return ""
 	}
 	return name[depth-1].name
 }
 
-func (name nameType) keyPrefix(depth int) string {
+func (name Name) keyPrefix(depth int) string {
 	if depth == 0 {
 		return ""
 	}
 	return name[depth-1].keyPrefix
 }
 
-func (name nameType) fromDepth(depth int) nameType {
+func (name Name) fromDepth(depth int) Name {
 	if depth == 0 {
 		return name
 	}
-	var parts []namePart
+	parts := make([]namePart, 0, name.len())
 	for ; depth <= name.len(); depth++ {
 		parts = append(parts, name[depth-1])
 	}
-	return nameType(parts)
+	return parts
 }
 
 // get the domain in normal form (with trailing dot)
-func (name nameType) normal() string {
+func (name Name) normal() string {
 	if name.len() == 0 {
 		return "."
 	}
@@ -67,7 +67,7 @@ func (name nameType) normal() string {
 }
 
 // get the domain in storage form
-func (name nameType) asKey(withTrailingKeySeparator bool) string {
+func (name Name) asKey(withTrailingKeySeparator bool) string {
 	if name.len() == 0 {
 		return ""
 	}
@@ -79,4 +79,13 @@ func (name nameType) asKey(withTrailingKeySeparator bool) string {
 		key += keySeparator
 	}
 	return key
+}
+
+func ParseDomainName(name string) Name {
+	return Map(Reversed(splitDomainName(name, ".")), func(lname string, i int) namePart {
+		if i == 0 {
+			return namePart{lname, ""}
+		}
+		return namePart{lname, "."}
+	})
 }
