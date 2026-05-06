@@ -168,7 +168,7 @@ func readParameters(params objectType[string], client *pdnsClient) error {
 
 func startReadRequests(ctx context.Context, wg *WaitGroup, client *pdnsClient) <-chan pdnsRequest {
 	ch := make(chan pdnsRequest)
-	wg.Go(fmt.Sprintf("readRequests [%s]", client.ID), func(_ any) {
+	wg.Go(fmt.Sprintf("readRequests [%s]", client.ID), func(...any) {
 		defer recoverPanics(func(v any) bool {
 			recoverFunc(v, "readRequests()", false)
 			return false
@@ -176,7 +176,7 @@ func startReadRequests(ctx context.Context, wg *WaitGroup, client *pdnsClient) <
 		defer close(ch)
 		done := make(chan struct{})
 		defer close(done)
-		wg.Go(fmt.Sprintf("readRequests [%s] done", client.ID), func(_ any) {
+		wg.Go(fmt.Sprintf("readRequests [%s] done", client.ID), func(...any) {
 			select {
 			case <-ctx.Done():
 				client.log.pdns().Tracef("{readRequests done} context canceled, closing input")
@@ -184,7 +184,7 @@ func startReadRequests(ctx context.Context, wg *WaitGroup, client *pdnsClient) <
 			case <-done:
 				client.log.pdns().Trace("{readRequests done} done")
 			}
-		}, nil)
+		})
 		for {
 			client.log.pdns().Trace("{readRequests} waiting for next request")
 			if request, err := client.Comm.read(); err != nil {
@@ -202,7 +202,7 @@ func startReadRequests(ctx context.Context, wg *WaitGroup, client *pdnsClient) <
 				ch <- *request
 			}
 		}
-	}, nil)
+	})
 	return ch
 }
 
@@ -457,14 +457,14 @@ func populateData(ctx context.Context, wg *WaitGroup, trackReaders bool) error {
 	}()
 	status.populated = true
 	log.main().Debug("starting data watcher")
-	wg.Go("watchData", func(_ any) {
+	wg.Go("watchData", func(...any) {
 		defer recoverPanics(func(v any) bool {
 			recoverFunc(v, "watchData()", false)
 			return false
 		})
 		cli.WatchData(ctx, *args.Prefix)
 		log.main().Trace("watchData() returned normally")
-	}, nil)
+	})
 	return nil
 }
 

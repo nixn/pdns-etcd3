@@ -208,7 +208,7 @@ func (wg *WaitGroup) Init() *WaitGroup {
 	return wg
 }
 
-func (wg *WaitGroup) add(name string, f *func(any), p any) {
+func (wg *WaitGroup) add(name string, f *func(...any), args ...any) {
 	wg.routines.Compute(name, func(_ string, count *uint64) *uint64 {
 		var n uint64
 		if count == nil {
@@ -218,17 +218,17 @@ func (wg *WaitGroup) add(name string, f *func(any), p any) {
 		}
 		wg.WaitGroup.Add(1) //nolint:staticcheck // I want this clear reference here
 		if f != nil {
-			go func(p any) {
+			go func(args ...any) {
 				defer wg.Done(name)
-				(*f)(p)
-			}(p)
+				(*f)(args...)
+			}(args...)
 		}
 		return &n
 	})
 }
 
-func (wg *WaitGroup) Go(name string, f func(any), p any) {
-	wg.add(name, &f, p)
+func (wg *WaitGroup) Go(name string, f func(...any), args ...any) {
+	wg.add(name, &f, args...)
 }
 
 func (wg *WaitGroup) Register(name string) {

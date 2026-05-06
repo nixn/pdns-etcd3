@@ -67,13 +67,13 @@ func unixListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 	defer closeNoError(socket)
 	done := make(chan struct{})
 	defer close(done)
-	wg.Go("unixListener done", func(_ any) {
+	wg.Go("unixListener done", func(...any) {
 		select {
 		case <-ctx.Done():
 		case <-done:
 		}
 		closeNoError(socket)
-	}, nil)
+	})
 	if err = os.Chmod(path, 0777); err != nil {
 		log.main().Errorf("unix: failed to chmod socket to 0777: %s", err)
 	}
@@ -96,7 +96,7 @@ func unixListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 		}
 		log.main().Debugf("unix: new connection [%d]: %+v", nextClientID, conn)
 		id := unixClientID{nextClientID, conn.RemoteAddr()}
-		wg.Go(fmt.Sprintf("serve[%s]", id), func(_ any) {
+		wg.Go(fmt.Sprintf("serve[%s]", id), func(...any) {
 			defer recoverPanics(func(v any) bool {
 				recoverFunc(v, fmt.Sprintf("unix: serve[%s]", id), false)
 				return false
@@ -104,7 +104,7 @@ func unixListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 			defer closeNoError(conn)
 			serve(ctx, wg, newPdnsClient(ctx, id, conn, conn), &initialzed, nil)
 			log.main().Tracef("unix: serve[%s] returned normally", id)
-		}, nil)
+		})
 		nextClientID++
 	}
 	status.serving = false
@@ -192,7 +192,7 @@ func httpListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 		IdleTimeout:       10 * time.Second,
 	}
 	done := make(chan struct{})
-	wg.Go("shutdown http", func(_ any) {
+	wg.Go("shutdown http", func(...any) {
 		defer close(done)
 		<-ctx.Done()
 		log.main().Debug("{shutdown http} shutting down")
@@ -208,7 +208,7 @@ func httpListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 		} else {
 			log.main().Trace("{shutdown http} Shutdown() succeeded")
 		}
-	}, nil)
+	})
 	log.main(socket.Addr()).Debugf("http: starting server (%s)", socket.Addr())
 	status.serving = true
 	err = server.Serve(socket)

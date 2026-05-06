@@ -887,8 +887,8 @@ func TestParallelRequests(t *testing.T) {
 			n            int
 			pdnsEndpoint string
 		}
-		wg.Go(fmt.Sprintf("PDNS#%d queries", i+1), func(p_ any) {
-			p := p_.(pdnsP)
+		wg.Go(fmt.Sprintf("PDNS#%d queries", i+1), func(args ...any) {
+			p := args[0].(pdnsP)
 			for i := 0; i < runs; i++ {
 				since := time.Now()
 				for j, qs := range []querySpecT{
