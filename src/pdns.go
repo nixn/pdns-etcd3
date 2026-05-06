@@ -29,8 +29,12 @@ func (req *pdnsRequest) String() string {
 	return fmt.Sprintf("%s: %+v", req.Method, req.Parameters)
 }
 
+type pdnsClientID interface {
+	String() string
+}
+
 type pdnsClient struct {
-	ID          string
+	ID          pdnsClientID
 	PdnsVersion uint
 	Comm        *commType[pdnsRequest]
 	log         logType
@@ -38,12 +42,13 @@ type pdnsClient struct {
 	out         io.WriteCloser
 }
 
-func newPdnsClient(ctx context.Context, id string, in io.ReadCloser, out io.WriteCloser) *pdnsClient {
+func newPdnsClient(ctx context.Context, id pdnsClientID, in io.ReadCloser, out io.WriteCloser) *pdnsClient {
+	idStr := id.String()
 	client := &pdnsClient{
 		ID:          id,
 		PdnsVersion: defaultPdnsVersion,
 		Comm:        newComm[pdnsRequest](ctx, in, out),
-		log:         newLog(&id, "main", "pdns", "data"), // TODO timings
+		log:         newLog(&idStr, "main", "pdns", "data"), // TODO timings
 		in:          in,
 		out:         out,
 	}

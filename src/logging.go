@@ -40,7 +40,7 @@ var logLevelChars = map[logrus.Level]string{
 func (f *logFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	var arg1 string
 	if standalone {
-		arg1 = fmt.Sprintf("[%s]", time.Now().Format(time.StampMilli))
+		arg1 = fmt.Sprintf("[%s]", time.Now().Format(time.StampMicro))
 	} else {
 		arg1 = fmt.Sprintf("pdns-etcd3[%d]", pid)
 	}

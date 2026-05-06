@@ -468,6 +468,12 @@ func populateData(ctx context.Context, wg *WaitGroup, trackReaders bool) error {
 	return nil
 }
 
+type pipeClientID struct{}
+
+func (id pipeClientID) String() string {
+	return "*"
+}
+
 func pipe(ctx context.Context, wg *WaitGroup, in io.ReadCloser, out io.WriteCloser, trackReaders bool) {
 	initialized := func(client *pdnsClient) []string {
 		clientMessages, err := cli.Setup(&args)
@@ -481,7 +487,7 @@ func pipe(ctx context.Context, wg *WaitGroup, in io.ReadCloser, out io.WriteClos
 		return clientMessages
 	}
 	defer cli.Close()
-	serve(ctx, wg, newPdnsClient(ctx, "*", in, out), &initialized, &status.serving)
+	serve(ctx, wg, newPdnsClient(ctx, pipeClientID{}, in, out), &initialized, &status.serving)
 }
 
 func serve(ctx context.Context, wg *WaitGroup, client *pdnsClient, initialized *func(*pdnsClient) []string, serving *bool) {

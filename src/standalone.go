@@ -38,6 +38,15 @@ var (
 	}
 )
 
+type unixClientID struct {
+	id         uint64
+	addr       net.Addr
+}
+
+func (id unixClientID) String() string {
+	return fmt.Sprintf("%d,%s", id.id, id.addr)
+}
+
 func unixListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 	if u.Path == "" {
 		log.main().Panicf("unix: the socket path cannot be empty")
@@ -86,16 +95,16 @@ func unixListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 			continue
 		}
 		log.main().Debugf("unix: new connection [%d]: %+v", nextClientID, conn)
-		wg.Go(fmt.Sprintf("serve[%d]", nextClientID), func(clientID_ any) {
-			clientID := clientID_.(uint64)
+		id := unixClientID{nextClientID, conn.RemoteAddr()}
+		wg.Go(fmt.Sprintf("serve[%s]", id), func(_ any) {
 			defer recoverPanics(func(v any) bool {
-				recoverFunc(v, fmt.Sprintf("unix: serve[%d]", clientID), false)
+				recoverFunc(v, fmt.Sprintf("unix: serve[%s]", id), false)
 				return false
 			})
 			defer closeNoError(conn)
-			serve(ctx, wg, newPdnsClient(ctx, fmt.Sprintf("%d,%s", clientID, conn.RemoteAddr()), conn, conn), &initialzed, nil)
-			log.main().Tracef("unix: serve[%d] returned normally", clientID)
-		}, nextClientID)
+			serve(ctx, wg, newPdnsClient(ctx, id, conn, conn), &initialzed, nil)
+			log.main().Tracef("unix: serve[%s] returned normally", id)
+		}, nil)
 		nextClientID++
 	}
 	status.serving = false
@@ -114,6 +123,15 @@ var (
 		cur, max atomic.Int32
 	}
 )
+
+type httpClientID struct {
+	clientAddr string
+	requestID  uint16
+}
+
+func (id httpClientID) String() string {
+	return fmt.Sprintf("%s #%04x", id.clientAddr, id.requestID)
+}
 
 func httpListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 	if u.Hostname() == "" {
@@ -141,10 +159,11 @@ func httpListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 		return mediatype == mt
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := fmt.Sprintf("%s #%04x", r.RemoteAddr, rand.Uint32())
-		wg.Register(id)
-		defer wg.Done(id)
-		log.main("client", r.RemoteAddr, "method", r.Method, "header", r.Header, "url", r.URL.String()).Trace("http: new request")
+		id := httpClientID{r.RemoteAddr, uint16(rand.Uint32())}
+		idStr := id.String()
+		wg.Register(idStr)
+		defer wg.Done(idStr)
+		log.main("client", idStr, "method", r.Method, "header", r.Header, "url", r.URL.String()).Trace("http: new request")
 		if r.Method != http.MethodPost {
 			log.main(r.Method).Debug("http: non-POST method")
 			http.Error(w, "only POST allowed", http.StatusMethodNotAllowed)
