@@ -834,6 +834,7 @@ func TestWithPDNS(t *testing.T) {
 		}, putSOA[:1], &rev1), &rev1)
 		waitForRevision(t, rev1, "ALIAS data removed")
 	})
+	// TODO add tests for metadata after adding support for `pdnsutil metadata` command
 }
 
 func TestUnixListener(t *testing.T) {

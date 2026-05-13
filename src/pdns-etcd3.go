@@ -215,9 +215,9 @@ func handleRequest(request *pdnsRequest, client *pdnsClient) {
 	case "lookup":
 		result, err = lookup(request.Parameters, client)
 	case "getalldomainmetadata":
-		result = map[string]any{}
+		result, err = getAllDomainMetadata(request.Parameters, client)
 	case "getdomainmetadata":
-		result = []string{}
+		result, err = getDomainMetadata(request.Parameters, client)
 	case "getalldomains":
 		result = dataRoot.allDomains([]domainInfo{}) // must not be nil, for empty answers it would not be marshalled into `[]`
 	default:

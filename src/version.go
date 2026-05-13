@@ -26,7 +26,7 @@ const (
 )
 
 var (
-	versionRegex = regexp.MustCompile(`^([0-9]+)(?:\.([0-9]+))?$`)
+	entryVersionRegex = regexp.MustCompile(`^([0-9]+)(?:\.([0-9]+))?$`)
 )
 
 // VersionType is the type for program and data version, resp.
@@ -60,12 +60,12 @@ func (v VersionType) IsCompatibleTo(otherVersion VersionType, checkPatch bool) b
 }
 
 func parseEntryVersion(string string) (*VersionType, error) {
-	version := VersionType{}
+	version := &VersionType{}
 	if strings.HasPrefix(string, developmentPrefix) {
 		version.IsDevelopment = true
 		string = string[len(developmentPrefix):]
 	}
-	if parts := versionRegex.FindStringSubmatch(string); parts != nil {
+	if parts := entryVersionRegex.FindStringSubmatch(string); parts != nil {
 		var err error
 		version.Major, err = strconv.ParseUint(parts[1], 10, 64)
 		if err != nil {
@@ -77,7 +77,7 @@ func parseEntryVersion(string string) (*VersionType, error) {
 				return nil, fmt.Errorf("failed to parse minor: %s", err)
 			}
 		}
-		return &version, nil
+		return version, nil
 	}
 	return nil, fmt.Errorf("invalid version string")
 }

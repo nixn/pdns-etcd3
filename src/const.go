@@ -51,6 +51,7 @@ const (
 const (
 	defaultsKey      = "-defaults-"
 	optionsKey       = "-options-"
+	metadataKey      = "-metadata-"
 	keySeparator     = "/"
 	labelPrefix      = "+"
 	idSeparator      = "#"
@@ -65,7 +66,10 @@ type ipMetaT map[int]struct {
 
 var (
 	pid        = os.Getpid()
-	qtypeRegex = regexp.MustCompile("^[A-Z][A-Z0-9]*$")
+	nameRegex  = regexp.MustCompile(`^([a-z_0-9]|[a-z_0-9][a-z_0-9-]*[a-z_0-9]|\*)([./])`)
+	entryRegex = regexp.MustCompile(`^(-[a-z]+-)(?:$|/|#)`)
+	valsRegex  = regexp.MustCompile(`^([A-Z][A-Z0-9]*)?(?:#([^@#]*))?$`)
+	metaRegex  = regexp.MustCompile(`^([A-Z][A-Z0-9-]*)#([^@#]*)$`)
 	ipMeta     = ipMetaT{
 		4: {4, 1, `.`},
 		6: {16, 2, `:`},

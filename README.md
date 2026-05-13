@@ -38,6 +38,7 @@ the third development release, considered alpha quality. Any testing is apprecia
     * same entry in JSON5 syntax: `{priority: 20, weight: 5, target: "server1"}` (this is longer but clearer)
 * [`ALIAS`](https://doc.powerdns.com/authoritative/guides/alias.html) support
 * [Multi-level defaults and options](doc/ETCD-structure.md#defaults-and-options), overridable
+* [Domain metadata](https://doc.powerdns.com/authoritative/domainmetadata.html)
 * [Upgrade data structure](doc/ETCD-structure.md#upgrading) (if needed for new program version) without interrupting service
 * Run [standalone](#standalone-modes) for usage as a [Unix or HTTP connector][pdns-remote-usage]
   * This could be needed for big data sets, because the initialization from PowerDNS is done lazily (at least as of v4) on first request (which possibly could time out on "big data"…) :-(
@@ -58,6 +59,7 @@ the third development release, considered alpha quality. Any testing is apprecia
   * sth. like `com/example/-options-ptr` → `{"auto-ptr": true}` and `com/example/www/-options-collect` → `{"collect": …}` for `com/example/www-1/A+ptr+collect` without global options
   * precedence betweeen QTYPE and id (id > label > QTYPE)
 * DNSSEC support ([PowerDNS DNSSEC-specific calls][pdns-dnssec])
+* Support for `pdnsutil metadata ...` (get and set)
 
 [pdns-dnssec]: https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dnssec-support
 [pdns-remote-usage]: https://doc.powerdns.com/authoritative/backends/remote.html#usage

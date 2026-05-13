@@ -50,14 +50,17 @@ func TestParseEntryKey(t *testing.T) {
 		{"-defaults-@0", ve[pk]{v: pk{nil, "defaults", "", "", &VersionType{false, 0, 0, 0}}}},
 		{"-options-", ve[pk]{v: pk{nil, "options", "", "", nil}}},
 		{"ABC", ve[pk]{v: pk{nil, "normal", "ABC", "", nil}}},
-		{"./ABC", ve[pk]{v: pk{nil, "normal", "ABC", "", nil}}},
+		{"./ABC", ve[pk]{e: "invalid key"}},
 		{"ABC@-1", ve[pk]{e: "invalid version"}},
-		{"ABC##hb", ve[pk]{e: "empty qtype"}},
+		{"ABC##hb", ve[pk]{e: "invalid key"}},
 		{"ABC#@at", ve[pk]{e: "invalid version"}},
 		{"ABC#/sl@1.2", ve[pk]{v: pk{nil, "normal", "ABC", "/sl", &VersionType{false, 1, 2, 0}}}},
 		{"com.example/dept.fin/NS#1@2.3", ve[pk]{v: pk{[]namePart{{"com", ""}, {"example", "."}, {"dept", "/"}, {"fin", "."}}, "normal", "NS", "1", &VersionType{false, 2, 3, 0}}}},
 		{"com.example/dept.fin/-defaults-/NS#1@2.3", ve[pk]{v: pk{[]namePart{{"com", ""}, {"example", "."}, {"dept", "/"}, {"fin", "."}}, "defaults", "NS", "1", &VersionType{false, 2, 3, 0}}}},
 		{"SOA#id", ve[pk]{e: "SOA entry cannot have an id"}},
+		{"miXed-CaSe", ve[pk]{e: "invalid key"}},
+		{"-keys-/123", ve[pk]{v: pk{nil, "keys", "", "123", nil}}},
+		// TODO add way more tests (e.g. names with underscores, wildcard, more entry types, ...)
 	} {
 		checkRun(t, fmt.Sprintf("(%d)%q", i+1, spec.input), tf, spec.input, spec.expected, false)
 	}

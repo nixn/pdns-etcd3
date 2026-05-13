@@ -36,12 +36,14 @@ const (
 	normalEntry   entryType = "normal"
 	defaultsEntry entryType = "defaults"
 	optionsEntry  entryType = "options"
+	metadataEntry entryType = "metadata"
 )
 
 var (
 	key2entryType = map[string]entryType{
 		defaultsKey: defaultsEntry,
 		optionsKey:  optionsEntry,
+		metadataKey: metadataEntry,
 	}
 )
 

@@ -50,6 +50,7 @@ type valueType struct {
 	version *VersionType
 }
 
+// TODO store defaults, options and values only while reloading a zone, for answering PDNS we only need records and metadata
 type dataNode struct {
 	mutex   sync.RWMutex
 	readers *struct {
@@ -62,8 +63,9 @@ type dataNode struct {
 	options   map[string]map[string]valueType  // <QTYPE> or "" → (<id> → value)
 	values    map[string]map[string]valueType  // <QTYPE> or "" → (<id> → value)
 	records   map[string]map[string]recordType // <QTYPE> → (<id> → record) // processed
-	children  map[string]*dataNode             // key = <lname of subdomain>
-	maxRev    int64                            // the maximum of Rev of all ETCD items
+	metadata  map[string][]string
+	children  map[string]*dataNode // key = <lname of subdomain>
+	maxRev    int64                // the maximum of Rev of all ETCD items
 }
 
 func newDataNode(parent *dataNode, lname, keyPrefix string, trackReaders bool) *dataNode {
@@ -76,6 +78,7 @@ func newDataNode(parent *dataNode, lname, keyPrefix string, trackReaders bool) *
 		options:   map[string]map[string]valueType{},
 		values:    map[string]map[string]valueType{},
 		records:   map[string]map[string]recordType{},
+		metadata:  map[string][]string{},
 		children:  map[string]*dataNode{},
 		maxRev:    0,
 	}
@@ -276,75 +279,78 @@ func cutKey(key, separator string) (string, string) {
 	return key[:idx], key[idx+len(separator):]
 }
 
-func cutParts(parts []string, predicate func(string) bool) ([]string, string) {
-	idx := len(parts) - 1
-	if idx < 0 {
-		return parts, ""
-	}
-	if predicate(parts[idx]) {
-		return parts[:idx], parts[idx]
-	}
-	return parts, ""
-}
-
 func parseEntryKey(key string) (name Name, entryType entryType, qtype, id string, version *VersionType, err error) {
 	key = strings.TrimPrefix(key, *args.Prefix)
-	// note: qtype is also used as temp variable until it is set itself
+	var temp string
 	// version
-	key, qtype = cutKey(key, versionSeparator)
-	if qtype != "" {
-		version, err = parseEntryVersion(qtype)
+	key, temp = cutKey(key, versionSeparator)
+	if temp != "" {
+		version, err = parseEntryVersion(temp) // TODO do not allow a patch version
 		if err != nil {
 			err = fmt.Errorf("failed to parse version: %s", err)
 			return
 		}
 	}
-	// id
-	key, id = cutKey(key, idSeparator)
-	// name+entryType+qtype
-	parts := splitDomainName(key, keySeparator)
-	// qtype
-	parts, qtype = cutParts(parts, qtypeRegex.MatchString)
-	// entryType
-	{
-		idx := len(parts) - 1
-		if idx >= 0 {
-			if entryT, ok := key2entryType[parts[idx]]; ok {
-				entryType = entryT
-				parts = parts[:idx]
-			} else {
-				entryType = normalEntry
-			}
-		} else {
-			entryType = normalEntry
-		}
-	}
 	// name
-	var nameParts []namePart
-	for _, part := range parts {
-		subParts := splitDomainName(part, ".")
-		for i := 0; i < len(subParts); i++ {
-			var keyPrefix string
-			if len(nameParts) == 0 { // first part has no prefix
-				keyPrefix = ""
-			} else if i == 0 { // otherwise first sub-part was separated by keySeparator (splitted earlier)
-				keyPrefix = keySeparator
-			} else { // other sub-parts were separated by a dot
-				keyPrefix = "."
-			}
-			nameParts = append(nameParts, namePart{subParts[i], keyPrefix})
+	temp = ""
+	for m := nameRegex.FindStringSubmatch(key); m != nil; m = nameRegex.FindStringSubmatch(key) {
+		name = append(name, namePart{m[1], temp})
+		temp = m[2]
+		key = key[len(m[0]):]
+	}
+	if len(name) > 0 && temp != keySeparator {
+		err = fmt.Errorf("a non-empty name must end with the key separator %q", keySeparator)
+		return
+	}
+	if m := entryRegex.FindStringSubmatch(key); m != nil {
+		if et, ok := key2entryType[m[1]]; !ok {
+			err = fmt.Errorf("invalid entry type keyword %q", m[1])
+			return
+		} else {
+			entryType = et
 		}
+		key = key[len(m[0]):]
+	} else {
+		entryType = normalEntry
 	}
-	name = nameParts
-	// validation
-	if entryType == normalEntry && qtype == "" {
-		err = fmt.Errorf("empty qtype (name: %s)", name)
+	// TODO use own types for each entry type
+	switch entryType {
+	case normalEntry, defaultsEntry, optionsEntry:
+		if m := valsRegex.FindStringSubmatch(key); m != nil {
+			qtype = m[1]
+			id = m[2]
+			if entryType == normalEntry {
+				if qtype == "" {
+					err = fmt.Errorf("empty qtype (name: %s)", name)
+					return
+				}
+				if qtype == "SOA" && id != "" {
+					err = fmt.Errorf("SOA entry cannot have an id (%q)", id)
+					return
+				}
+				switch qtype {
+				case "A", "AAAA", "ALIAS", "CNAME", "DNAME", "MX", "NS", "PTR", "SOA": // TODO add others, even not-supported ones?
+					for _, lname := range name {
+						if strings.IndexRune(lname.name, '_') >= 0 {
+							err = fmt.Errorf("records for hostnames may not have underscores: %q", lname.name)
+							return
+						}
+					}
+				}
+			}
+			return
+		}
+	case metadataEntry:
+		if m := metaRegex.FindStringSubmatch(key); m != nil {
+			qtype = m[1]
+			id = m[2]
+			return
+		}
+	default:
+		err = fmt.Errorf("unhandled entry type: %q", entryType)
 		return
 	}
-	if entryType == normalEntry && qtype == "SOA" && id != "" {
-		err = fmt.Errorf("SOA entry cannot have an id (%q)", id)
-		return
-	}
+	err = fmt.Errorf("(%s) invalid key: %q", entryType, key)
 	return
 }
 
@@ -401,11 +407,13 @@ func (dn *dataNode) reload(dataChan <-chan etcdItem) {
 	clearMap(dn.options)
 	clearMap(dn.values)
 	clearMap(dn.records)
+	clearMap(dn.metadata)
 	clearMap(dn.children)
 	dn.log().Debug("processing entry items from ETCD")
 	depth := dn.depth()
 ITEMS:
 	for item := range dataChan {
+		dn.log(item.Key).Trace("processing entry")
 		name, entryType, qtype, id, itemVersion, err := parseEntryKey(item.Key)
 		if name == nil {
 			name = Name{}
@@ -431,32 +439,42 @@ ITEMS:
 			}
 		}
 		itemData := dn.getChildCreate(name.fromDepth(depth + 1))
-		vals := itemData.getValuesFor(entryType)
-		// check version against a possibly already stored value, overwrite value only if it's a "better" version. compatibility is already cleared (above).
-		if curr, ok := vals[qtype][id]; ok {
-			if itemVersion == nil {
-				dn.log("current", curr.key).Tracef("ignoring (new) entry %q, because it is unversioned and cannot replace the current entry", item.Key)
+		switch entryType {
+		case normalEntry, defaultsEntry, optionsEntry:
+			vals := itemData.getValuesFor(entryType)
+			// check version against a possibly already stored value, overwrite value only if it's a "better" version. compatibility is already cleared (above).
+			if curr, ok := vals[qtype][id]; ok {
+				if itemVersion == nil {
+					dn.log("current", curr.key).Tracef("ignoring (new) entry %q, because it is unversioned and cannot replace the current entry", item.Key)
+					continue ITEMS
+				}
+				if curr.version != nil && itemVersion.Minor <= curr.version.Minor {
+					dn.log("current", curr.key).Tracef("ignoring (new) entry %q, because its' version's minor is not greater than the current entry's version's minor", item.Key)
+					continue ITEMS
+				}
+				target := targetString(itemData.getQname(), qtype, id)
+				dn.log("target", target, "new-entry", item.Key, "current-version", *curr.version, "new-version", *itemVersion).Trace("overriding existing entry due to version constraints")
+			}
+			// handle content
+			content, err := parseEntryContent(item.Value, entryType)
+			if err != nil {
+				dn.log().WithError(err).Errorf("failed to parse content of %q", item.Key)
 				continue ITEMS
 			}
-			if curr.version != nil && itemVersion.Minor <= curr.version.Minor {
-				dn.log("current", curr.key).Tracef("ignoring (new) entry %q, because its' version's minor is not greater than the current entry's version's minor", item.Key)
-				continue ITEMS
+			if _, ok := vals[qtype]; !ok {
+				vals[qtype] = map[string]valueType{}
 			}
-			target := targetString(itemData.getQname(), qtype, id)
-			dn.log("target", target, "new-entry", item.Key, "current-version", *curr.version, "new-version", *itemVersion).Trace("overriding existing entry due to version constraints")
-		}
-		// handle content
-		content, err := parseEntryContent(item.Value, entryType)
-		if err != nil {
-			dn.log().WithError(err).Errorf("failed to parse content of %q", item.Key)
+			vals[qtype][id] = valueType{item.Key, content, itemVersion}
+			dn.log(content).Tracef("stored %s for %s", string(entryType), targetString(itemData.getQname(), qtype, id))
+		case metadataEntry:
+			value := string(item.Value)
+			dn.metadata[qtype] = append(dn.metadata[qtype], value)
+			dn.log(value).Tracef("stored %v for %s", entryType, targetString(itemData.getQname(), qtype, id))
+		default:
+			dn.log(entryType).Errorf("unhandled entry type")
 			continue ITEMS
 		}
-		if _, ok := vals[qtype]; !ok {
-			vals[qtype] = map[string]valueType{}
-		}
-		vals[qtype][id] = valueType{item.Key, content, itemVersion}
-		itemData.maxRev = max(itemData.maxRev, item.Rev)
-		dn.log().Tracef("stored %s for %s: %v", string(entryType), targetString(itemData.getQname(), qtype, id), content)
+		itemData.maxRev = max(itemData.maxRev, item.Rev())
 	}
 	dn.processValues()
 	dur := time.Since(since)

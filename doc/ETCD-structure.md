@@ -282,6 +282,23 @@ An example: the `ip` field from `A` is not compatible to the `ip` field from `AA
 
 Field names of defaults and options objects are case-sensitive.
 
+## Metadata
+
+Every domain can have [metadata](https://doc.powerdns.com/authoritative/domainmetadata.html)
+(PDNS only expects it at zones, but it does not hurt to have the possibility to add metadata to any domain,
+especially when using the `X-` prefix).
+
+A metadata entry key looks like this: `<domain>/-metadata-/<KEY>#<id>`, with the id field being optional.
+The id field is only for enabling multiple values (because PDNS works this way), but there is no ordering,
+any order could be reported to PDNS, could even be different when requesting twice without changing anything in between.
+
+The `<KEY>` consists only of uppercase letters, digits (0-9) and `-` (simple dash/minus, but not at start);
+this is especially important when using user-defined keys, beginning with `X-`.
+
+The values of metadata entries are always read as strings and not modified in any way, just passed as-is to PDNS.
+
+Currently, the command `pdnsutil metadata ...` is not supported (but is a planned feature).
+
 ## Supported records
 
 For each of the supported record types the entry values may be objects.
@@ -545,6 +562,7 @@ One can use it to check their data - whether an adjustment is needed for a new p
 * added `` !` `` marker
 * enabled parsing of plain string entries for supported records, so the underline character `_` gains an effect
 * added `ALIAS`
+* added domain metadata
 
 ### 0.1.2
 * added numbers and arrays to `TXT:text`
@@ -615,6 +633,9 @@ DNS/net.example/www/AAAA → '20'
 DNS/net.example/ALIAS → 'www'
 DNS/net.example/TYPE123 → '\# 0'
 DNS/net.example/TYPE237 → '\# 1 2a'
+DNS/net.example/-metadata-/PRESIGNED → '0'
+DNS/net.example/www/-metadata-/X-MY-COMMENT#1 → 'one comment'
+DNS/net.example/www/-metadata-/X-MY-COMMENT#b → 'another comment (under the same key)'
 ```
 
 Reverse zone for `192.0.2.0/24`:

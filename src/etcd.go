@@ -78,9 +78,13 @@ func (cli *etcdClient) Close() {
 }
 
 type etcdItem struct {
-	Key   string
-	Value []byte
-	Rev   int64
+	Key        string
+	Value      []byte
+	CRev, MRev int64
+}
+
+func (ei etcdItem) Rev() int64 {
+	return max(ei.CRev, ei.MRev)
 }
 
 type getResponseType struct {
@@ -92,7 +96,7 @@ func getResponse(response *clientv3.GetResponse) *getResponseType {
 	ch := make(chan etcdItem)
 	go func() {
 		for _, item := range response.Kvs {
-			ch <- etcdItem{string(item.Key), item.Value, max(item.CreateRevision, item.ModRevision)}
+			ch <- etcdItem{string(item.Key), item.Value, item.CreateRevision, item.ModRevision}
 		}
 		close(ch)
 	}()
