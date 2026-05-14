@@ -49,25 +49,25 @@ var (
 	}
 )
 
-func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
+func lookup(cr *pdnsClientRequest) (interface{}, error) {
 	// RFC 1035 2.3.3: remember original qname and use it later in the result
-	qname := ParseDomainName(params["qname"].(string))
+	qname := ParseDomainName(cr.Request.Parameters["qname"].(string))
 	query := queryType{
 		name: Name(Map(qname, func(qnamePart namePart, _ int) namePart {
 			return namePart{strings.ToLower(qnamePart.name), qnamePart.keyPrefix}
 		})),
-		qtype: params["qtype"].(string),
+		qtype: cr.Request.Parameters["qtype"].(string),
 	}
 	//goland:noinspection GoPreferNilSlice
 	result := []objectType[any]{}
-	client.log.main().Tracef("lookup: RLocking up to %q", query.name.asKey(true))
+	cr.Client.log.main().Tracef("lookup: RLocking up to %q", query.name.asKey(true))
 	data, found := dataRoot.getChild(query.name, true)
-	client.log.main(data.LockCounts()).Tracef("lookup: RLocked %q", data.prefixKey())
+	cr.Client.log.main(data.LockCounts()).Tracef("lookup: RLocked %q", data.prefixKey())
 	defer data.rUnlockUpwards(nil, true)
-	defer client.log.main(data.LockCounts()).Tracef("lookup: RUnlocking: %q", data.prefixKey())
+	defer cr.Client.log.main(data.LockCounts()).Tracef("lookup: RUnlocking: %q", data.prefixKey())
 	if !found {
-		client.log.data(query.name).Tracef("search returned %q", data.getQname())
-		client.log.data(query.name).Debug("no such domain")
+		cr.Client.log.data(query.name).Tracef("search returned %q", data.getQname())
+		cr.Client.log.data(query.name).Debug("no such domain")
 		return result, nil
 	}
 	records := map[string]map[string]recordType{}
@@ -82,16 +82,16 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 	}
 	for qtype, records := range records {
 		for _, record := range records {
-			item := makeResultItem(qname, qtype, data, &record, client)
-			client.log.pdns(item).Trace("adding result item")
+			item := makeResultItem(qname, qtype, data, &record, cr.Client.PdnsVersion)
+			cr.Client.log.pdns(item).Trace("adding result item")
 			result = append(result, item)
 		}
 	}
-	client.log.pdns(result).Debugf("request result (%d)", len(result))
+	cr.Client.log.pdns(result).Debugf("request result (%d)", len(result))
 	return result, nil
 }
 
-func makeResultItem(qname Name, qtype string, data *dataNode, record *recordType, client *pdnsClient) objectType[any] {
+func makeResultItem(qname Name, qtype string, data *dataNode, record *recordType, pdnsVersion uint) objectType[any] {
 	zoneNode := data.findZone()
 	result := objectType[any]{
 		"qname":   qname.normal(),
@@ -102,12 +102,12 @@ func makeResultItem(qname Name, qtype string, data *dataNode, record *recordType
 	}
 	if record.priority != nil {
 		result["content"] = priorityRE.ReplaceAllStringFunc(result["content"].(string), func(placeholder string) string {
-			if client.PdnsVersion == 3 {
+			if pdnsVersion == 3 {
 				return ""
 			}
 			return fmt.Sprintf(priorityRE.FindStringSubmatch(placeholder)[1], *record.priority)
 		})
-		if client.PdnsVersion == 3 {
+		if pdnsVersion == 3 {
 			result["priority"] = *record.priority
 		}
 	}

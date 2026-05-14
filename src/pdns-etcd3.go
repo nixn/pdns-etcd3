@@ -206,34 +206,34 @@ func startReadRequests(ctx context.Context, wg *WaitGroup, client *pdnsClient) <
 	return ch
 }
 
-func handleRequest(ctx context.Context, request *pdnsRequest, client *pdnsClient) {
-	client.log.main(request).Trace("handling request")
+func handleRequest(ctx context.Context, cr *pdnsClientRequest) {
+	cr.Client.log.main(cr.Request).Trace("handling request")
 	since := time.Now()
 	var result any
 	var err error
-	switch strings.ToLower(request.Method) {
+	switch strings.ToLower(cr.Request.Method) {
 	case "lookup":
-		result, err = lookup(request.Parameters, client)
+		result, err = lookup(cr)
 	case "getalldomainmetadata":
-		result, err = getAllDomainMetadata(request.Parameters, client)
+		result, err = getAllDomainMetadata(cr.Request.Parameters, cr.Client)
 	case "getdomainmetadata":
-		result, err = getDomainMetadata(request.Parameters, client)
+		result, err = getDomainMetadata(cr.Request.Parameters, cr.Client)
 	case "setdomainmetadata":
-		result, err = setDomainMetadata(ctx, request.Parameters, client)
+		result, err = setDomainMetadata(ctx, cr.Request.Parameters, cr.Client)
 	case "getalldomains":
-		result = dataRoot.allDomains([]domainInfo{}) // must not be nil, for empty answers it would not be marshalled into `[]`
+		result = dataRoot.allDomains([]domainInfo{}) // must not be nil, for empty answers it would not be marshaled into `[]`
 	case "getdomaininfo":
-		result, err = getDomainInfo(request.Parameters, client)
+		result, err = getDomainInfo(cr.Request.Parameters, cr.Client)
 	default:
-		result, err = false, fmt.Errorf("unknown/unimplemented request: %s", val2str(request))
+		result, err = false, fmt.Errorf("unknown/unimplemented request: %s", val2str(cr.Request))
 	}
 	if err == nil {
-		client.Respond(makeResponse(result))
+		cr.Client.Respond(makeResponse(result))
 	} else {
-		client.Respond(makeResponse(result, err.Error()))
+		cr.Client.Respond(makeResponse(result, err.Error()))
 	}
 	dur := time.Since(since)
-	client.log.main("dur", dur, "err", err, "request", request, "result", result).Debug("request and result")
+	cr.Client.log.main("dur", dur, "err", err, "request", cr.Request, "result", result).Debug("request and result")
 }
 
 func handleEvents(revision int64, events []*clientv3.Event) {
@@ -571,14 +571,14 @@ func serve(ctx context.Context, wg *WaitGroup, client *pdnsClient, initialized *
 	if serving != nil {
 		*serving = true
 	}
-	for {
+	for nextRequestID := uint64(1); ; nextRequestID++ {
 		client.log.pdns().Trace("waiting for next request")
 		request, ok := <-reqChan
 		if !ok {
 			client.log.pdns().Trace("requests channel closed")
 			break
 		}
-		handleRequest(ctx, &request, client)
+		handleRequest(ctx, &pdnsClientRequest{client, nextRequestID, &request})
 	}
 	if serving != nil {
 		*serving = false

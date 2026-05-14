@@ -72,3 +72,9 @@ func (client *pdnsClient) Fatal(msg any) {
 	client.Respond(makeResponse(false, s))
 	client.log.main().Panicf("fatal error: %s", s)
 }
+
+type pdnsClientRequest struct {
+	Client    *pdnsClient
+	RequestID uint64
+	Request   *pdnsRequest
+}
