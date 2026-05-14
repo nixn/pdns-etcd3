@@ -17,7 +17,6 @@ package src
 import (
 	"fmt"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -52,7 +51,7 @@ type valueType struct {
 
 // TODO store defaults, options and values only while reloading a zone, for answering PDNS we only need records and metadata
 type dataNode struct {
-	mutex   sync.RWMutex
+	mutex   RWMutexCounted
 	readers *struct {
 		cur, max atomic.Int32
 	}
@@ -70,7 +69,7 @@ type dataNode struct {
 
 func newDataNode(parent *dataNode, lname, keyPrefix string, trackReaders bool) *dataNode {
 	dn := &dataNode{
-		mutex:     sync.RWMutex{},
+		mutex:     RWMutexCounted{},
 		parent:    parent,
 		lname:     lname,
 		keyPrefix: keyPrefix,
@@ -179,12 +178,23 @@ func (dn *dataNode) getChildCreate(name Name) *dataNode {
 	return lChild.getChildCreate(name.fromDepth(2))
 }
 
-func (dn *dataNode) getChild(name Name, countReader bool) (*dataNode, bool) {
+func (dn *dataNode) RLock(countReader bool) {
 	dn.mutex.RLock()
 	if dn.readers != nil && countReader {
 		cur := dn.readers.cur.Add(1)
 		dn.readers.max.CompareAndSwap(cur-1, cur)
 	}
+}
+
+func (dn *dataNode) RUnlock(countReader bool) {
+	if dn.readers != nil && countReader {
+		dn.readers.cur.Add(-1)
+	}
+	dn.mutex.RUnlock()
+}
+
+func (dn *dataNode) getChild(name Name, countReader bool) (*dataNode, bool) {
+	dn.RLock(countReader)
 	if name.len() == 0 {
 		return dn, true
 	}
@@ -208,16 +218,18 @@ func (dn *dataNode) subdomainDepth(ancestor *dataNode) int {
 
 func (dn *dataNode) rUnlockUpwards(stopAt *dataNode, countReader bool) {
 	for dn := dn; dn != stopAt; dn = dn.parent {
-		if dn.readers != nil && countReader {
-			dn.readers.cur.Add(-1)
-		}
-		dn.mutex.RUnlock()
+		dn.RUnlock(countReader)
 	}
 }
 
+func (dn *dataNode) LockCounts() []int32 {
+	if dn.parent == nil {
+		return []int32{dn.mutex.Count()}
+	}
+	return append(dn.parent.LockCounts(), dn.mutex.Count())
+}
+
 func (dn *dataNode) zoneRev() int64 {
-	// TODO use an automatically updated key for latest seen revision, because on deletion of keys the default zoneRev may jump backwards
-	// or update the SOA record entry after a deletion to fix the revision
 	// TODO for +auto-ptr and potentially +collect: maintain a list of dependent zones (up- and downwards) and take the highest revision as result (for all of them)
 	rev := dn.maxRev
 	for _, dn := range dn.children {
@@ -346,6 +358,9 @@ func parseEntryKey(key string) (name Name, entryType entryType, qtype, id string
 			id = m[2]
 			return
 		}
+	case lockEntry:
+		id = key
+		return
 	default:
 		err = fmt.Errorf("unhandled entry type: %q", entryType)
 		return
@@ -427,6 +442,10 @@ ITEMS:
 		}
 		if err != nil {
 			dn.log().WithError(err).Warnf("failed to parse entry key %q", item.Key)
+			continue ITEMS
+		}
+		if entryType == lockEntry {
+			dn.log(item.Key).Trace("ignoring lock entries")
 			continue ITEMS
 		}
 		// check if the entry belongs to this domain

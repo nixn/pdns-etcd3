@@ -297,8 +297,6 @@ this is especially important when using user-defined keys, beginning with `X-`.
 
 The values of metadata entries are always read as strings and not modified in any way, just passed as-is to PDNS.
 
-Currently, the command `pdnsutil metadata ...` is not supported (but is a planned feature).
-
 ## Supported records
 
 For each of the supported record types the entry values may be objects.

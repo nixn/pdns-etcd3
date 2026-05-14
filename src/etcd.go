@@ -16,10 +16,12 @@ package src
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/concurrency"
 	clientv3yaml "go.etcd.io/etcd/client/v3/yaml"
 	"golang.org/x/net/context"
 )
@@ -130,8 +132,22 @@ func (cli *etcdClient) Put(key string, value string, timeout time.Duration) (*cl
 	return cli.Client.Put(ctx, key, value)
 }
 
-func delOp(key string) clientv3.Op {
-	return clientv3.OpDelete(key)
+func (cli *etcdClient) Del(key string, multi bool, timeout time.Duration) (*clientv3.DeleteResponse, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if multi {
+		return cli.Client.Delete(ctx, key, clientv3.WithPrefix())
+	} else {
+		return cli.Client.Delete(ctx, key)
+	}
+}
+
+func delOp(key string, multi bool) clientv3.Op {
+	if multi {
+		return clientv3.OpDelete(key, clientv3.WithPrefix())
+	} else {
+		return clientv3.OpDelete(key)
+	}
 }
 
 func putOp(key, value string) clientv3.Op {
@@ -188,12 +204,140 @@ WATCH:
 			}
 		}
 		log.etcd().Debugf("retrying watch in %s", watchRetryInterval)
-		interruptibleSleep(ctx, watchRetryInterval)
+		_ = Sleep(ctx, watchRetryInterval)
 	}
 }
 
-func interruptibleSleep(ctx context.Context, dur time.Duration) {
-	sleepCtx, cancel := context.WithTimeout(ctx, dur)
+type Transaction struct {
+	LockKey string
+	Prefix  string
+	session *concurrency.Session
+	mutex   *concurrency.Mutex
+	items   map[string]etcdItem
+	maxRev  int64
+	puts    map[string]string
+	dels    map[string]struct{}
+}
+
+func NewTransaction(lockKey, prefix string) *Transaction {
+	return &Transaction{
+		LockKey: lockKey,
+		Prefix:  prefix,
+		items:   map[string]etcdItem{},
+		puts:    map[string]string{},
+		dels:    map[string]struct{}{},
+	}
+}
+
+func (tx *Transaction) Start(timeout time.Duration) (id clientv3.LeaseID, err error) {
+	if tx.session, err = concurrency.NewSession(cli.Client, concurrency.WithTTL(int(timeout/time.Second))); err != nil {
+		return 0, fmt.Errorf("failed to create session: %s", err)
+	}
+	tx.mutex = concurrency.NewMutex(tx.session, tx.LockKey)
+	{
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		if err = tx.mutex.Lock(ctx); err != nil {
+			_ = tx.session.Close()
+			return 0, fmt.Errorf("failed to acquire lock: %s", err)
+		}
+	}
+	response, err := cli.Get(tx.Prefix, true, nil, timeout)
+	if err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		_ = tx.mutex.Unlock(ctx)
+		_ = tx.session.Close()
+		return 0, fmt.Errorf("failed to get values: %s", err)
+	}
+	// FIXME don't process items in sub-zones
+	for item := range response.DataChan {
+		tx.items[strings.TrimPrefix(item.Key, tx.Prefix)] = item
+		if !strings.HasPrefix(item.Key, tx.LockKey) {
+			tx.maxRev = max(tx.maxRev, item.Rev())
+		}
+	}
+	return tx.session.Lease(), nil
+}
+
+func (tx *Transaction) Put(key, value string) {
+	delete(tx.dels, key)
+	if item, ok := tx.items[key]; ok && slices.Equal(item.Value, []byte(value)) {
+		delete(tx.puts, key)
+	} else {
+		tx.puts[key] = value
+	}
+}
+
+func (tx *Transaction) PutsCount() int {
+	return len(tx.puts)
+}
+
+func (tx *Transaction) Del(key string, multi bool) {
+	if multi {
+		for _, k := range Keys(tx.items) {
+			if strings.HasPrefix(k, key) {
+				tx.Del(k, false)
+			}
+		}
+		for _, k := range Keys(tx.puts) {
+			if strings.HasPrefix(k, key) {
+				tx.Del(k, false)
+			}
+		}
+	} else {
+		delete(tx.puts, key)
+		if _, ok := tx.items[key]; ok {
+			tx.dels[key] = struct{}{}
+		} else {
+			delete(tx.dels, key)
+		}
+	}
+}
+
+func (tx *Transaction) DelsCount() int {
+	return len(tx.dels)
+}
+
+func (tx *Transaction) OpsCount() int {
+	return tx.PutsCount() + tx.DelsCount()
+}
+
+func (tx *Transaction) Commit(timeout time.Duration) (int64, error) {
+	cmps := make([]clientv3.Cmp, 0, len(tx.items))
+	for _, item := range tx.items {
+		cmps = append(cmps, clientv3.Compare(clientv3.CreateRevision(item.Key), "=", item.CRev), clientv3.Compare(clientv3.ModRevision(item.Key), "=", item.MRev))
+	}
+	ops := make([]clientv3.Op, 0, len(tx.puts)+len(tx.dels))
+	for k, v := range tx.puts {
+		ops = append(ops, clientv3.OpPut(tx.Prefix+k, v))
+	}
+	for k := range tx.dels {
+		ops = append(ops, clientv3.OpDelete(tx.Prefix+k))
+	}
+	rev, err := func() (int64, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		defer func() {
+			_ = tx.mutex.Unlock(ctx)
+			_ = tx.session.Close()
+		}()
+		if response, err := cli.Client.Txn(ctx).If(cmps...).Then(ops...).Commit(); err != nil {
+			return 0, fmt.Errorf("commit failed: %s", err)
+		} else if !response.Succeeded {
+			return 0, fmt.Errorf("commit not succeeded")
+		} else {
+			// unfortunately we can't get the revision of the tx.mutex.Unlock() delete op, which would be the better one
+			return response.Header.Revision, nil
+		}
+	}()
+	<-tx.session.Done()
+	return rev, err
+}
+
+func (tx *Transaction) Abort(timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	<-sleepCtx.Done()
+	_ = tx.mutex.Unlock(ctx)
+	_ = tx.session.Close()
 }

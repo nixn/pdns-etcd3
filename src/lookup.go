@@ -37,6 +37,7 @@ const (
 	defaultsEntry entryType = "defaults"
 	optionsEntry  entryType = "options"
 	metadataEntry entryType = "metadata"
+	lockEntry     entryType = "lock"
 )
 
 var (
@@ -44,6 +45,7 @@ var (
 		defaultsKey: defaultsEntry,
 		optionsKey:  optionsEntry,
 		metadataKey: metadataEntry,
+		lockKey:     lockEntry,
 	}
 )
 
@@ -58,8 +60,11 @@ func lookup(params objectType[any], client *pdnsClient) (interface{}, error) {
 	}
 	//goland:noinspection GoPreferNilSlice
 	result := []objectType[any]{}
+	client.log.main().Tracef("lookup: RLocking up to %q", query.name.asKey(true))
 	data, found := dataRoot.getChild(query.name, true)
+	client.log.main(data.LockCounts()).Tracef("lookup: RLocked %q", data.prefixKey())
 	defer data.rUnlockUpwards(nil, true)
+	defer client.log.main(data.LockCounts()).Tracef("lookup: RUnlocking: %q", data.prefixKey())
 	if !found {
 		client.log.data(query.name).Tracef("search returned %q", data.getQname())
 		client.log.data(query.name).Debug("no such domain")

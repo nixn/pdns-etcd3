@@ -52,10 +52,16 @@ const (
 	defaultsKey      = "-defaults-"
 	optionsKey       = "-options-"
 	metadataKey      = "-metadata-"
+	lockKey          = "-lock-"
 	keySeparator     = "/"
 	labelPrefix      = "+"
 	idSeparator      = "#"
 	versionSeparator = "@"
+	// if you ever change these, mind to change the regexes below too!
+)
+
+const (
+	MetaMinimumSerial = "X-PE3-MINIMUM-SERIAL"
 )
 
 type ipMetaT map[int]struct {

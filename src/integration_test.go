@@ -19,6 +19,7 @@ package src
 import (
 	"context"
 	"fmt"
+	"io"
 	"maps"
 	"math/rand"
 	"net"
@@ -267,6 +268,8 @@ func startPE3(t *testing.T, etcdEndpoint, prefix string, moreArgs ...string) pe3
 	httpAddress, _ := url.Parse("http://0.0.0.0:8053") // the port is fixed, it is set in pdns.conf too
 	doneCtx, done := context.WithCancel(context.Background())
 	osSignals := make(chan os.Signal, 1)
+	cli = new(etcdClient)
+	status = new(statusType)
 	go func() {
 		defer done()
 		args := []string{"-standalone=" + httpAddress.String(), "-timeout=5s", "-endpoints=" + etcdEndpoint, "-prefix=" + prefix}
@@ -497,8 +500,6 @@ func TestWithPDNS(t *testing.T) {
 	Logf(t, "ETCD endpoint (2379): %s", etcd.Endpoint)
 	// PDNS-ETCD3
 	sleepT(t, 1*time.Second)
-	cli = new(etcdClient)
-	status = new(statusType)
 	pe3 := startPE3(t, etcd.Endpoint, "", "-log-trace=main+etcd+pdns+data", "-pdns-version="+getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1])
 	defer pe3.Terminate()
 	Logf(t, "PDNS-ETCD3 endpoint: %s", pe3.HttpAddress)
@@ -510,7 +511,7 @@ func TestWithPDNS(t *testing.T) {
 		return putOp(pe3.Prefix+key, value)
 	}
 	del := func(key string) clientv3.Op {
-		return delOp(pe3.Prefix + key)
+		return delOp(pe3.Prefix+key, false)
 	}
 	withCleanup := func(t *testing.T, puts map[string]string, action func(), postOps []clientv3.Op, rs ...*int64) int64 {
 		var ps, ds []clientv3.Op
@@ -947,4 +948,109 @@ func TestParallelRequests(t *testing.T) {
 	if dataRoot.readers.max.Load() < int32(nCPU)/2 {
 		t.Errorf("too less parallel requests (CPUs: %d, max parallel requests: %d", nCPU, dataRoot.readers.max.Load())
 	}
+}
+func selectByVersion[T any](version string, options map[string]T) T {
+	var selectedVersion string
+	for ver := range options {
+		if version >= ver && ver > selectedVersion {
+			selectedVersion = ver
+		}
+	}
+	if selectedVersion == "" {
+		var t T
+		return t
+	}
+	return options[selectedVersion]
+}
+
+func execCommand(t *testing.T, ct testcontainers.Container, cmd []string) int {
+	Logf(t, "executing command: %v", cmd)
+	code, reader, err := ct.Exec(context.Background(), cmd)
+	fatalOnErr(t, "exec failed", err)
+	buf := new(strings.Builder)
+	_, err = io.Copy(buf, reader)
+	fatalOnErr(t, "copy command output", err)
+	if buf.Len() == 0 {
+		Logf(t, "command %v exited with code %d, no output", cmd, code)
+	} else {
+		Logf(t, "command %v exited with code %d, output:\n%s", cmd, code, buf.String())
+	}
+	return code
+}
+
+func TestMetadata(t *testing.T) {
+	defer recoverPanicsT(t)
+	// ETCD
+	etcd, err := startETCD(t)
+	fatalOnErr(t, "start ETCD container", err)
+	defer etcd.Terminate()
+	Logf(t, "ETCD endpoint (2379): %s", etcd.Endpoint)
+	// PDNS-ETCD3
+	pe3 := startPE3(t, etcd.Endpoint, "DNS/", "-pdns-version="+getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1], "-log-trace=main+pdns+etcd", "-log-debug=data", "-log-level=10,data=3")
+	defer pe3.Terminate()
+	Logf(t, "PDNS-ETCD3 endpoint: %s", pe3.HttpAddress)
+	err = waitFor(t, "PE3 ready", func() bool { return status.serving }, 10*time.Millisecond, 30*time.Second)
+	fatalOnErr(t, "wait for PE3 ready", err)
+	rev, _ := basicDataTxn(t, pe3.Prefix)
+	waitForRevision(t, rev, "basic data loaded")
+	// PDNS
+	pdns, err := startPDNS(t, nil)
+	fatalOnErr(t, "start PDNS container", err)
+	defer pdns.Terminate()
+	Logf(t, "PDNS endpoint: %s", pdns.Endpoint)
+	if !checkRun(t, "set", func(t *testing.T, _ struct{}) (any, error) {
+		domain, tld, key := "example", "net", "X-PE3-TEST"
+		fqdn := fmt.Sprintf("%s.%s", domain, tld)
+		if code := execCommand(t, pdns.Container, selectByVersion(pdns.Version, map[string][]string{
+			"34": {"pdnssec", "set-meta", fqdn, key, "a", "b"},
+			"40": {"pdnsutil", "set-meta", fqdn, key, "a", "b"},
+			"50": {"pdnsutil", "metadata", "set", fqdn, key, "a", "b"},
+		})); code != 0 {
+			return nil, fmt.Errorf("command returned code %d", code)
+		}
+		return dataRoot.children[tld].children[domain].metadata[key], nil
+	}, struct{}{}, ve[any]{v: SliceContains{Ordered: false, All: true, Only: true, Elements: []any{"a", "b"}}}, false) {
+		Fatalf(t, "set failed")
+	}
+	checkRun(t, "add", func(t *testing.T, _ struct{}) (any, error) {
+		if pdns.Version < "41" {
+			t.Skip("skipping add, present only as of PDNS 4.1")
+		}
+		domain, tld, key := "example", "net", "X-PE3-TEST"
+		fqdn := fmt.Sprintf("%s.%s", domain, tld)
+		if code := execCommand(t, pdns.Container, selectByVersion(pdns.Version, map[string][]string{
+			"34": {"pdnssec", "add-meta", fqdn, key, "c", "d"},
+			"40": {"pdnsutil", "add-meta", fqdn, key, "c", "d"},
+			"50": {"pdnsutil", "metadata", "add", fqdn, key, "c", "d"},
+		})); code != 0 {
+			return nil, fmt.Errorf("command returned code %d", code)
+		}
+		return dataRoot.children[tld].children[domain].metadata[key], nil
+	}, struct{}{}, ve[any]{v: SliceContains{Ordered: false, All: true, Only: true, Elements: []any{"a", "b", "c", "d"}}}, false)
+	if !checkRun(t, "replace", func(t *testing.T, _ struct{}) (any, error) {
+		domain, tld, key := "example", "net", "X-PE3-TEST"
+		fqdn := fmt.Sprintf("%s.%s", domain, tld)
+		if code := execCommand(t, pdns.Container, selectByVersion(pdns.Version, map[string][]string{
+			"34": {"pdnssec", "set-meta", fqdn, key, "x", "y"},
+			"40": {"pdnsutil", "set-meta", fqdn, key, "x", "y"},
+			"50": {"pdnsutil", "metadata", "set", fqdn, key, "x", "y"},
+		})); code != 0 {
+			return nil, fmt.Errorf("command returned code %d", code)
+		}
+		return dataRoot.children[tld].children[domain].metadata[key], nil
+	}, struct{}{}, ve[any]{v: SliceContains{Ordered: false, All: true, Only: true, Elements: []any{"x", "y"}}}, false) {
+		Fatalf(t, "replace failed")
+	}
+	checkRun(t, "get", func(t *testing.T, _ struct{}) (any, error) {
+		domain, tld, key := "example", "net", "X-PE3-TEST"
+		fqdn := fmt.Sprintf("%s.%s", domain, tld)
+		if code := execCommand(t, pdns.Container, selectByVersion(pdns.Version, map[string][]string{
+			"34": {"pdnssec", "get-meta", fqdn, key},
+			"40": {"pdnsutil", "get-meta", fqdn, key},
+			"50": {"pdnsutil", "metadata", "get", fqdn, key},
+		})); code != 0 {
+			return nil, fmt.Errorf("command returned code %d", code)
+		}
+		return dataRoot.children[tld].children[domain].metadata[key], nil
+	}, struct{}{}, ve[any]{v: SliceContains{Ordered: false, All: true, Only: true, Elements: []any{"x", "y"}}}, true)
 }

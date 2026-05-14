@@ -192,7 +192,12 @@ type SliceContains struct {
 
 func (sc SliceContains) Test(t *testing.T, conditions map[string]Condition, path string, have reflect.Value, a ...reflect.Value) *DeepError {
 	t.Helper()
-	if have.Kind() != reflect.Slice {
+	switch have.Kind() {
+	case reflect.Invalid:
+		return DeepErrorf("not a slice")
+	case reflect.Slice:
+		break
+	default:
 		return DeepErrorf("not a slice (%s)", have.Type().String())
 	}
 	var need reflect.Value // reflecting the elements slice

@@ -70,14 +70,14 @@ integration-tests-matrix-etcd:
 	-@set -u; \
 	for etcd_version in $(ETCD_VERSIONS); do \
 	  echo ETCD_VERSION=$$etcd_version ; \
-	  $(MAKE) --no-print-directory integration-tests ETCD_VERSION=$$etcd_version ONLY=PipeRequests ; \
+	  $(MAKE) --no-print-directory integration-tests ETCD_VERSION=$$etcd_version ; \
 	done
 
 integration-tests-matrix-pdns:
 	-@set -u; \
 	for pdns_version in $(PDNS_VERSIONS); do \
 	  echo PDNS_VERSION=$$pdns_version ; \
-	  $(MAKE) --no-print-directory integration-tests PDNS_VERSION=$$pdns_version ONLY=PDNS ; \
+	  $(MAKE) --no-print-directory integration-tests PDNS_VERSION=$$pdns_version ; \
 	done
 
 integration-tests-matrix: integration-tests-matrix-etcd integration-tests-matrix-pdns

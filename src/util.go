@@ -416,3 +416,19 @@ func (m *MapSyncAccess[K, V]) Compute(k K, compute func(k K, v *V) *V) *V {
 	}
 	return nv
 }
+
+func Sleep(ctx context.Context, dur time.Duration) error {
+	sleepCtx, cancel := context.WithTimeout(ctx, dur)
+	defer cancel()
+	<-sleepCtx.Done()
+	return ctx.Err()
+}
+
+func Some[T any](ts ...*T) *T {
+	for _, t := range ts {
+		if t != nil {
+			return t
+		}
+	}
+	return nil
+}

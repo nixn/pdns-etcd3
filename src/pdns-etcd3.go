@@ -206,7 +206,7 @@ func startReadRequests(ctx context.Context, wg *WaitGroup, client *pdnsClient) <
 	return ch
 }
 
-func handleRequest(request *pdnsRequest, client *pdnsClient) {
+func handleRequest(ctx context.Context, request *pdnsRequest, client *pdnsClient) {
 	client.log.main(request).Trace("handling request")
 	since := time.Now()
 	var result any
@@ -218,10 +218,14 @@ func handleRequest(request *pdnsRequest, client *pdnsClient) {
 		result, err = getAllDomainMetadata(request.Parameters, client)
 	case "getdomainmetadata":
 		result, err = getDomainMetadata(request.Parameters, client)
+	case "setdomainmetadata":
+		result, err = setDomainMetadata(ctx, request.Parameters, client)
 	case "getalldomains":
 		result = dataRoot.allDomains([]domainInfo{}) // must not be nil, for empty answers it would not be marshalled into `[]`
+	case "getdomaininfo":
+		result, err = getDomainInfo(request.Parameters, client)
 	default:
-		result, err = false, fmt.Errorf("unknown/unimplemented request: %s", request)
+		result, err = false, fmt.Errorf("unknown/unimplemented request: %s", val2str(request))
 	}
 	if err == nil {
 		client.Respond(makeResponse(result))
@@ -236,6 +240,7 @@ func handleEvents(revision int64, events []*clientv3.Event) {
 	log.etcd("rev", revision).Debugf("handling events (%d)", len(events))
 	since := time.Now()
 	reloadZones := map[string]*dataNode{}
+	lockedZones := map[string]bool{}
 EVENTS:
 	for i, event := range events {
 		entryKey := string(event.Kv.Key)
@@ -250,27 +255,58 @@ EVENTS:
 			log.data(err.Error()).Errorf("failed to parse entry key %q, ignoring event", entryKey)
 			continue
 		}
+		if entryType == lockEntry && event.Type != clientv3.EventTypeDelete {
+			log.main(event.Type.String(), entryKey).Trace("ignoring non-DELETE events for lock entries")
+			continue
+		}
+		log.main().Tracef("handleEvents: RLocking up to %q", name.asKey(true))
 		itemData, _ := dataRoot.getChild(name, false)
+		log.main(itemData.LockCounts()).Tracef("handleEvents: RLocked %q", itemData.prefixKey())
 		zoneData := itemData.findZone()
 		if event.Type == clientv3.EventTypeDelete && qtype == "SOA" && id == "" && entryType == normalEntry && zoneData != nil && zoneData.parent != nil {
-			// deleting the SOA record deletes the zone, so the parent zone must be reloaded instead. this results in a full data reload for top-level zones.
+			// deleting the SOA record deletes the zone, so the parent zone must be reloaded instead. this results in a full data reload for top-level zones. // TODO restrict to the (new) zone if only a new zone was added
 			zoneData = zoneData.parent.findZone()
 		}
 		if zoneData == nil {
 			zoneData = dataRoot
 		}
+		log.main("item", itemData.LockCounts(), "zone", zoneData.LockCounts()).Tracef("handleEvents: RUnlocking %q up to %q", itemData.prefixKey(), zoneData.prefixKey())
 		itemData.rUnlockUpwards(zoneData, false)
 		qname := zoneData.getQname()
+		if _, ok := lockedZones[qname]; !ok {
+			lockResponse, err := cli.Get(*args.Prefix+zoneData.prefixKey()+lockKey, true, &revision, *args.DialTimeout)
+			if err != nil {
+				log.data().Warnf("failed to get lock data for zone %q: %s", qname, err)
+				log.main(zoneData.LockCounts()).Tracef("handleEvents: RUnlocking %q", zoneData.prefixKey())
+				zoneData.rUnlockUpwards(nil, false)
+				continue EVENTS
+			}
+			if _, ok := <-lockResponse.DataChan; ok {
+				log.main(qname).Trace("marking zone as locked")
+				lockedZones[qname] = true
+			} else {
+				log.main(qname).Trace("marking zone as not locked")
+				lockedZones[qname] = false
+			}
+		}
+		if lockedZones[qname] {
+			log.main(qname).Trace("event zone locked, ignoring")
+			log.main(zoneData.LockCounts()).Tracef("handleEvents: RUnlocking %q", zoneData.prefixKey())
+			zoneData.rUnlockUpwards(nil, false)
+			continue EVENTS
+		}
 		subdomains := make([]string, 0, len(reloadZones))
 		for dnKey, dn := range reloadZones {
 			if zoneData.subdomainDepth(dn) >= 0 {
+				log.main("event", qname, "scheduled", dn.getQname()).Trace("event zone already scheduled for reload (possibly ancestor)")
+				log.main(zoneData.LockCounts()).Tracef("handleEvents: RUnlocking %q", zoneData.prefixKey())
 				zoneData.rUnlockUpwards(nil, false)
-				log.data("event", qname, "scheduled", dn.getQname()).Trace("event zone already scheduled for reload (possibly ancestor)")
 				continue EVENTS
 			}
 			if dn.subdomainDepth(zoneData) > 0 {
+				log.main(dn.LockCounts()).Tracef("handleEvents: RUnlocking %q", dn.prefixKey())
 				dn.rUnlockUpwards(nil, false)
-				log.data("event", qname, "scheduled", dn.getQname()).Trace("scheduled zone is a subdomain of event zone, marking for replace")
+				log.main("event", qname, "scheduled", dn.getQname()).Trace("scheduled zone is a subdomain of event zone, marking for replace")
 				subdomains = append(subdomains, dnKey)
 			}
 		}
@@ -287,22 +323,38 @@ EVENTS:
 		since := time.Now()
 		getResponse, err := cli.Get(*args.Prefix+dn.prefixKey(), true, &revision, *args.DialTimeout)
 		if err != nil {
+			log.main(dn.LockCounts()).Tracef("handleEvents: RUnlocking %q", dn.prefixKey())
 			dn.rUnlockUpwards(nil, false)
 			log.data().Warnf("failed to get data for zone %q (not reloading): %s", qname, err)
 			continue
 		}
 		log.data().Debugf("reloading zone %q", qname)
 		func() {
+			log.main(dn.LockCounts()).Tracef("handleEvents: RUnlocking %q directly", dn.prefixKey())
 			dn.mutex.RUnlock()
 			if dn.parent != nil {
 				defer dn.parent.rUnlockUpwards(nil, false)
+				defer log.main(dn.parent.LockCounts()).Tracef("handeEvents: RUnlocking %q", dn.parent.prefixKey())
 			}
+			log.main().Tracef("handleEvents: WLocking %q directly", dn.prefixKey())
 			dn.mutex.Lock()
+			log.main(dn.LockCounts()).Tracef("handleEvents: WLocked %q directly", dn.prefixKey())
 			defer dn.mutex.Unlock()
+			defer log.main(dn.LockCounts()).Tracef("handleEvents: WUnlocking %q directly", dn.prefixKey())
+			oldZoneRev := dn.zoneRev()
 			dn.reload(getResponse.DataChan)
+			if newZoneRev := dn.zoneRev(); newZoneRev < oldZoneRev {
+				// TODO add test for this
+				dn.log("old", oldZoneRev, "new", newZoneRev).Debug("zone revision jumped backwards, fixing it")
+				dn.maxRev = oldZoneRev + 1
+				key := *args.Prefix + dn.prefixKey() + metadataKey + keySeparator + MetaMinimumSerial
+				if _, err = cli.Put(key, fmt.Sprintf("%d", dn.zoneRev()), *args.DialTimeout); err != nil {
+					dn.log(key).Errorf("failed to put to ETCD: %s", err)
+				}
+			}
 		}()
 		dur := time.Since(since)
-		log.data("#records", dn.recordsCount(), "#zones", dn.zonesCount(), "duration", dur).Debugf("reloaded zone %q", qname)
+		log.data("#records", dn.recordsCount(), "#zones", dn.zonesCount(), "duration", dur, "zoneRev", dn.zoneRev()).Debugf("reloaded zone %q", qname)
 	}
 	dur := time.Since(since)
 	log.data("duration", dur).Debug("reloaded zones")
@@ -526,7 +578,7 @@ func serve(ctx context.Context, wg *WaitGroup, client *pdnsClient, initialized *
 			client.log.pdns().Trace("requests channel closed")
 			break
 		}
-		handleRequest(&request, client)
+		handleRequest(ctx, &request, client)
 	}
 	if serving != nil {
 		*serving = false
