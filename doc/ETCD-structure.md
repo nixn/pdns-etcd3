@@ -68,7 +68,7 @@ the DNS class (`IN`) or the record type (`A`, `MX`, …); these are given in the
 The content can be one of the following:
 
 * A plain string (that is without quotation marks),
-  if it begins with a letter, digit or `_` or if it does not begin with any marker of the other types of content (see below).<br>
+  if it begins with a letter, digit or `_` (underscore) or if it does not begin with any marker of the other types of content (see below).<br>
   Plain strings give the content of the record directly.<br>
   They
   * can be used for not supported (or custom) resource records
@@ -296,6 +296,11 @@ The `<KEY>` consists only of uppercase letters, digits (0-9) and `-` (simple das
 this is especially important when using user-defined keys, beginning with `X-`.
 
 The values of metadata entries are always read as strings and not modified in any way, just passed as-is to PDNS.
+
+## Locks
+
+Every zone can be locked for transactions. These entries have a prefix of `<domain>/-lock-` and are handled automatically,
+there is no need to create or delete them manually. They are not part of the automatic SOA serial determination.
 
 ## Supported records
 

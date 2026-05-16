@@ -76,6 +76,7 @@ the third development release, considered alpha quality. Any testing is apprecia
 * [DNS update support](https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dns-update-support)
 * [Prometheus exporter](https://prometheus.io/docs/guides/go-application/)
 * ZeroMQ connector
+* Redirecting (or duplicating) log output to something else than stderr
 
 ## Installation
 
@@ -109,7 +110,7 @@ enough to connect to ETCD, read all data, and reply to this first request. This 
 Example PowerDNS configuration file:
 ```
 launch=remote
-remote-connection-string=pipe:command=/path/to/pdns-etcd3[,pdns-version=3|4|5][,<config>][,prefix=<string>][,timeout=<integer>][,dial-keep-alive-time=<duration>][,dial-keep-alive-timeout=<duration>][,auto-sync-interval=<duration>][,permit-without-stream=<bool>][,log-<level>=<components>]
+remote-connection-string=pipe:command=/path/to/pdns-etcd3[,pdns-version=3|4|5][,<config>][,prefix=<string>][,timeout=<integer>][,dial-keep-alive-time=<duration>][,dial-keep-alive-timeout=<duration>][,auto-sync-interval=<duration>][,permit-without-stream=<bool>][,log-level=[<component>[.<subcomponent>]...=]<level>[;...]]
 # since in pipe mode every instance connects to ETCD and loads the data for itself (uses memory), possibly do this:
 distributor-threads=1
 ```
@@ -148,7 +149,7 @@ The unix mode takes an 'initialize' call, so one can pass parameters to it, whic
 Example PowerDNS configuration file:
 ```text
 launch=remote
-remote-connection-string=unix:path=/path/to/pdns-etcd3-socket[,pdns-version=3|4|5][,log-<level>=<components>]
+remote-connection-string=unix:path=/path/to/pdns-etcd3-socket[,pdns-version=3|4|5]
 distributor-threads=3
 ```
 
@@ -180,8 +181,8 @@ Thus, when one has to change the assumed version, they can use the `-pdns-versio
 All parameter keys must be given exactly as denoted here (no case modifications). The ETCD related parameters in standalone mode
 are given as command line "options", starting with a `-`: e.g. `-config-file=...`.
 
-The parameters in detail (the ETCD related parameters, which have to be passed as command line argument in standalone mode,
-are tagged by *#STANDALONE*):
+The parameters in detail (the parameters, which have to be passed as command line argument in standalone mode,
+are tagged by *#STANDALONE*; *pipe mode* means the PDNS setting `remote-connection-string=pipe:...`):
 
 * `config-file=/path/to/etcd.conf` *#STANDALONE*<br>
   The path to an ETCD (client) configuration file, as accepted by the official client
@@ -198,7 +199,7 @@ are tagged by *#STANDALONE*):
   Tip: Let the prefix start and end with `/`, so you can use [etcdkeeper][] for easier web-based data management.<br>
   There is no default (= empty).
 * `timeout=<duration>` *#STANDALONE* or<br>
-  `timeout=<integer>` *config file* (in milliseconds, e.g. `1500` for 1.5 seconds)<br>
+  `timeout=<integer>` *pipe mode* (in milliseconds, e.g. `1500` for 1.5 seconds)<br>
   An optional parameter which sets the dial timeout to ETCD. Must be a positive value (>= 1ms).<br>
   Defaults to 2 seconds.
 * `dial-keep-alive-time=<duration>` *#STANDALONE*<br>
@@ -224,12 +225,14 @@ are tagged by *#STANDALONE*):
   The (major) PowerDNS version. Version 3 and 4 have incompatible protocols with the backend, so one must use the proper one.
   Version 5 is accepted, but works currently the same as 4 (no relevant API changes yet).<br>
   Defaults to `4`.
-* `log-<level>=<components>` *#STANDALONE* and *config file*<br>
-  Sets the logging level of `<components>` to `<level>` (see below for values). `<components>` is one or more of the
-  component names, separated by `+`. This parameter can be "repeated" for different logging levels.
-  In standalone mode, the levels are set separately for the program and the clients (PowerDNS connections).<br>
-  Example: `log-debug=main+pdns,log-trace=etcd+data`<br>
-  Defaults to `info` for all components.
+* `log-level=[<component>[.<subcomponent>]...=]<level>[;...]` *#STANDALONE* and *pipe mode*<br>
+  Sets the logging level(s) for the given (sub-)component `<component>[.<subcomponent>]...` to `<level>` (see below for values).
+  Leaving out the component names means to set the root level. Can be repeated for other (sub-)components by using the `;` separator.
+  The order is not important for different (sub-)components: `-log-level=4;data.values=2` results in the same effect as `-log-level=data.values=2;4`
+  (root level 4 = currently all messages, but omit messages of levels 3+ in `data.values`).<br>
+  Currently only numbers are allowed for the `<level>` (names should be supported in a future version).<br>
+  Example: `log-level=-1;conn=4;data.values=3`<br>
+  Defaults to `0` (info) for the root with no overrides (= all components).
 
 One can see all available command-line (standalone) parameters with a short description, when running `pdns-etcd3 -help`.
 
@@ -250,30 +253,46 @@ so one can be sure to have a working combination for deploying, when using those
 
 ## Testing / Debugging
 
-There is much logging in the program for being able to test and debug it properly.
-It is structured and leveled, utilizing [logrus][]. The structure consists of different components,
-namely `main`, `pdns`, `etcd` and `data`; the (seven) logging levels are [taken from logrus][logrus-levels].
-For each component an own logging level can be set, so that one can debug only the component(s) of interest.
-In the standalone modes the components are "doubled"; there is the program side with its components (main, etcd, data) and
-the (PDNS) client side (main, pdns), which can be configured separately. In pipe mode there is only one of each component.
+There is much logging in the program for being able to test and debug it properly. It is structured and leveled.
 
-The components in detail:
+The structure consists of different components, namely `main`, `etcd`, `pdns`, `conn` and `data`;
+all components (can) have subcomponents, every (sub-)component can have its own level, which makes it easier to debug only things of interest.
+The components and subcomponents in detail:
 * `main` - The main thread / loop of the program, e.g. setting up logging, creating data objects, processing signals and events, etc.
-* `pdns` - The communication with PowerDNS, e.g. incoming requests and sending results.
+  * `init` - Setting up things (reading configuration, creating main objects, ...).
+  * `done` - Program shutdown (waiting for coroutines, ...).
+  * `{signal}` - Coroutine for handling OS signals.
 * `etcd` - The communication with ETCD, e.g. real queries against it, connection issues, watcher, etc.
+  * `watch` - The watcher stuff (events and (re-)connects).
+* `pdns` - The communication with PowerDNS, e.g. incoming requests and sending results.
+  * `init` - Mostly the `initialize` method handling.
+* `conn` - The standalone mode connector(s), setting them up, shutting them down, etc.
+  * `unix`, `http` - The connector internal work (sockets, ...).
 * `data` - Everything concerning the values (records, ...), parsing data from ETCD, searching records for requests etc.
+  * `values` - Messages concerning the concrete values.
+  * `locking` - Messages for concurrency control (level 4).
 
-The levels in detail:
-* `panic` - Something like the world's end. Actually not used.
-* `fatal` - Errors which prevent the program to continue service. After a fatal error the program exits. (Mostly in `main` component.)
-* `error` - Errors which don't prevent the program to continue service. Different meanings for different components.
-* `warning` (or `warn`) - Not errors, but situations where it could be done better. An admin should take care of those.
-* `info` - Useful information on the program, something like "initialized, ready for service". This is the default level for each component.
-* `debug` - "Big steps", like "sending request to ETCD", "Handling event" or "default value not found for X"
-* `trace` - Small steps and all values, e.g. "found default value for X in Y" or "record: www.example.com./A#some-id = 192.0.2.12"
+*TODO list and describe all components*
+
+The levels are as follows:
+* `FTL` (fatal, `-4`) - Errors which prevent the program to continue service. After a fatal error the program exits. (Mostly in `main` component.)
+* `ERR` (error, `-3`) - Errors which don't prevent the program to continue service. Different meanings for different components.
+* `WRN` (warning, `-2`) - Not errors, but situations where it could be done better. An admin should take care of those.
+* `IMP` (important, `-1`) - Important information on the program, something like "initialized / ready for service".
+* `INF` (info, `0`) - Useful information on the program, something like "initializing / connecting / starting". This is the default level for each component.
+* `D+1` (debug 1, `1`) - "Coarse debug" ("big steps"), like "Reloading zones", "Handling watch events"
+* `D+2` (debug 2, `2`) - "Fine debug", like "reloading zone X", "handling event 1 - PUT ..."
+* `D+3` (debug 3, `3`) - "Coarse trace", like "parsing entry key Y"
+* `D+4` (debug 4, `4`) - "Fine trace", like "value for X found in Y", coroutine tracing (begin, end, status)
+
+There is no logical limit in the debug levels (and not a real technical limit, being an int), but currently only the four described levels are used.
+Fatal errors cannot be suppressed; (simple) errors can, but that is not recommended in non-data components.
+The level for the root log can be set, which takes effect in every component, unless overridden.
+
+For output, the [logrus][] library is used, with its output handling.
+Later (optional feature) it could be used to send (selected) output into a file or even a log server.
 
 [logrus]: https://github.com/Sirupsen/logrus
-[logrus-levels]: https://github.com/sirupsen/logrus#level-logging
 
 ## License
 

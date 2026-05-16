@@ -49,12 +49,12 @@ func (id unixClientID) String() string {
 
 func unixListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 	if u.Path == "" {
-		log.main().Panicf("unix: the socket path cannot be empty")
+		RootLog.Fatalf("conn", "unix", "conf")(nil, "the socket path cannot be empty")()
 	}
 	path := u.Path
 	if rel := u.Query().Get("relative"); rel != "" {
 		if rel, err := parseBoolean(rel); err != nil {
-			log.main().Panicf("unix: failed to parse the 'relative' argument as bool: %s", err)
+			RootLog.Fatalf("conn", "unix", "conf")(nil, "failed to parse the argument 'relative' as bool: %s", err)()
 		} else if rel {
 			path = filepath.Join(".", path)
 		}
@@ -62,39 +62,40 @@ func unixListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 	listenConfig := new(net.ListenConfig)
 	socket, err := listenConfig.Listen(ctx, "unix", path)
 	if err != nil {
-		log.main().Panicf("unix: failed to create a socket at %s: %s", path, err)
+		RootLog.Fatalf("conn", "unix", "init")(nil, "failed to create the socket: %s", err)(path)
 	}
 	defer closeNoError(socket)
 	done := make(chan struct{})
 	defer close(done)
 	wg.Go("unixListener done", func(...any) {
+		RootLog.Logf(4, "conn", "unix", "{done}")(nil, "waiting for done")()
 		select {
 		case <-ctx.Done():
 		case <-done:
 		}
 		closeNoError(socket)
+		RootLog.Logf(4, "conn", "unix", "{done}")(nil, "done")()
 	})
 	if err = os.Chmod(path, 0777); err != nil {
-		log.main().Errorf("unix: failed to chmod socket to 0777: %s", err)
+		RootLog.Errorf("conn", "unix")(nil, "failed to chmod socket to 0777: %s", err)(path)
 	}
-	log.main().Info("unix: waiting for connections")
+	RootLog.Infof("conn", "unix")(nil, "waiting for connections")()
 	initialzed := func(client *pdnsClient) []string {
-		client.log.pdns().Trace("initialzed")
+		client.Logf(3, "conn", "unix", "init")("initialized")()
 		return nil
 	}
 	status.serving = true
-	var nextClientID uint64 = 1
-	for {
+	for nextClientID := uint64(1); ; nextClientID++ {
 		conn, err := socket.Accept()
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
-				log.main().Debug("unix: socket was closed")
+				RootLog.Logf(1, "conn", "unix")(nil, "socket was closed")("ncid", nextClientID)
 				break
 			}
-			log.main().Errorf("unix: failed to accept new connection: %s", err)
+			RootLog.Errorf("conn", "unix")(nil, "failed to accept new connection [%d]: %s", nextClientID, err)()
 			continue
 		}
-		log.main().Debugf("unix: new connection [%d]: %+v", nextClientID, conn)
+		RootLog.Logf(1, "conn", "unix")(nil, "new connection [%d]: %+v", nextClientID, conn)()
 		id := unixClientID{nextClientID, conn.RemoteAddr()}
 		wg.Go(fmt.Sprintf("serve[%s]", id), func(...any) {
 			defer recoverPanics(func(v any) bool {
@@ -102,10 +103,10 @@ func unixListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 				return false
 			})
 			defer closeNoError(conn)
-			serve(ctx, wg, newPdnsClient(ctx, id, conn, conn), &initialzed, nil)
-			log.main().Tracef("unix: serve[%s] returned normally", id)
+			client := newPdnsClient(ctx, id, conn, conn)
+			serve(ctx, wg, client, &initialzed, nil)
+			client.Logf(4, "conn", "unix")("serve returned normally")()
 		})
-		nextClientID++
 	}
 	status.serving = false
 }
@@ -135,25 +136,25 @@ func (id httpClientID) String() string {
 
 func httpListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 	if u.Hostname() == "" {
-		log.main().Panic("http: <listen-address> may not be empty")
+		RootLog.Fatalf("conn", "http", "conf")(nil, "<listen-address> may not be empty")()
 	}
 	if u.Port() == "" {
-		log.main().Panic("http: <listen-port> may not be empty")
+		RootLog.Fatalf("conn", "http", "conf")(nil, "<listen-port> may not be empty")()
 	}
-	log.main().Tracef("http: creating server (%s)", u.Host)
+	RootLog.Logf(1, "conn", "http", "init")(nil, "creating server")(u.Host)
 	socket, err := net.Listen("tcp", u.Host)
 	if err != nil {
-		log.main("error", err, "addr", u.Host).Panicf("http: failed to create the TCP listening socket: %s", err)
+		RootLog.Fatalf("conn", "http")(nil, "failed to create TCP listening socket: %s", err)(u.Host)
 	}
 	defer closeNoError(socket)
-	headerIsMT := func(r *http.Request, header string, mt string) bool {
-		h := r.Header.Get(header)
-		if h == "" {
+	headerIsMT := func(client *pdnsClient, r *http.Request, header string, mt string) bool {
+		mth := r.Header.Get(header)
+		if mth == "" {
 			return false
 		}
-		mediatype, _, err := mime.ParseMediaType(h)
+		mediatype, _, err := mime.ParseMediaType(mth)
 		if err != nil {
-			log.main(h).Tracef("failed to parse media type: %s", err)
+			client.Logf(3, "conn", "http")("failed to parse media type: %s", err)(mth)
 			return false
 		}
 		return mediatype == mt
@@ -163,28 +164,30 @@ func httpListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 		idStr := id.String()
 		wg.Register(idStr)
 		defer wg.Done(idStr)
-		log.main("client", idStr, "method", r.Method, "header", r.Header, "url", r.URL.String()).Trace("http: new request")
+		client := newPdnsClient(ctx, id, r.Body, &httpWriter{w})
+		client.Logf(2, "conn", "http")("new request")("method", r.Method, "url", r.URL.String, "header", r.Header) // lesser debug level due to no real request information here (determined later from body)
 		if r.Method != http.MethodPost {
-			log.main(r.Method).Debug("http: non-POST method")
+			client.Logf(1, "conn", "http")("non-POST method")(r.Method)
 			http.Error(w, "only POST allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if !headerIsMT(r, "Content-Type", "text/javascript") {
-			log.main(r.Header.Get("Content-Type")).Debug("http: non-TJS content-type (header)")
+		if !headerIsMT(client, r, "Content-Type", "text/javascript") {
+			client.Logf(1, "conn", "http")("non-TJS content-type (header)")(Supplier1(r.Header.Get, "Content-Type"))
 			http.Error(w, "Content-Type must be text/javascript", http.StatusUnsupportedMediaType)
 			return
 		}
-		if !headerIsMT(r, "Accept", "application/json") {
-			log.main(r.Header.Get("Accept")).Debug("http: non-JSON accept header")
+		if !headerIsMT(client, r, "Accept", "application/json") {
+			client.Logf(1, "conn", "http")("non-JSON accept header")(Supplier1(r.Header.Get, "Accept"))
 			http.Error(w, "Accept must be application/json", http.StatusUnsupportedMediaType)
 			return
 		}
 		cur := requestsCount.cur.Add(1)
+		defer requestsCount.cur.Add(-1)
 		requestsCount.max.CompareAndSwap(cur-1, cur)
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		serve(ctx, wg, newPdnsClient(ctx, id, r.Body, &httpWriter{w}), nil, nil)
-		requestsCount.cur.Add(-1)
+		serve(ctx, wg, client, nil, nil)
+		client.Logf(4, "conn", "http")("serve returned normally")()
 	})
 	server := &http.Server{
 		Handler:           handler,
@@ -194,28 +197,31 @@ func httpListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 	done := make(chan struct{})
 	wg.Go("shutdown http", func(...any) {
 		defer close(done)
+		RootLog.Logf(3, "conn", "http", "{shutdown}")(nil, "waiting for shutdown signal")()
 		<-ctx.Done()
-		log.main().Debug("{shutdown http} shutting down")
-		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 7*time.Second)
+		timeout := 7 * time.Second
+		RootLog.Logf(2, "conn", "http", "{shutdown}")(nil, "shutting down (timeout: %s)", timeout)()
+		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, timeout)
 		defer shutdownCancel()
 		if err = server.Shutdown(shutdownCtx); err != nil {
-			log.main(err).Errorf("{shutdown http} Shutdown() failed: %s; using Close()", err)
+			RootLog.Errorf("conn", "http", "{shutdown}")(nil, "Shutdown() failed: %s; using Close()", err)()
 			if err = server.Close(); err != nil {
-				log.main(err).Errorf("{shutdown http} Close() failed: %s", err)
+				RootLog.Errorf("conn", "http", "{shutdown}")(nil, "Close() failed: %s", err)()
 			} else {
-				log.main().Debugf("{shutdown http} Close() succeeded")
+				RootLog.Logf(2, "conn", "http", "{shutdown}")(nil, "Close() succeeded")()
 			}
 		} else {
-			log.main().Trace("{shutdown http} Shutdown() succeeded")
+			RootLog.Logf(2, "conn", "http", "{shutdown}")(nil, "Shutdown() succeeded")()
 		}
 	})
-	log.main(socket.Addr()).Debugf("http: starting server (%s)", socket.Addr())
+	RootLog.Infof("conn", "http")(nil, "starting server")(socket.Addr)
 	status.serving = true
 	err = server.Serve(socket)
 	status.serving = false
 	if !errors.Is(err, http.ErrServerClosed) {
-		log.main(err).Panicf("http: Serve() failed: %v", err)
+		RootLog.Fatalf("conn", "http")(nil, "Serve() failed: %v", err)(err)
 	}
-	log.main().Trace("http: waiting for server to complete shutdown")
+	RootLog.Logf(2, "conn", "http")(nil, "waiting for server to complete shutdown")()
 	<-done
+	RootLog.Logf(4, "conn", "http")(nil, "server shutdown complete")()
 }

@@ -21,8 +21,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
 type rrParams struct {
@@ -44,21 +42,19 @@ func (p *rrParams) SetContent(content string, priority *uint16) {
 	if _, ok := p.data.records[p.qtype]; !ok {
 		p.data.records[p.qtype] = map[string]recordType{}
 	}
-	p.data.records[p.qtype][p.id] = recordType{content, priority, p.ttl}
-	str := fmt.Sprintf("stored record content: %q", content)
-	if priority != nil {
-		str += fmt.Sprintf(" !%d", *priority)
+	record := recordType{content, priority, p.ttl}
+	p.data.records[p.qtype][p.id] = record
+	p.Logf(3)("stored record")(record)
+}
+
+func (p *rrParams) Logf(level int, component ...string) func(string, ...any) func(...any) {
+	component = PrependT(component, "values", "records")
+	return func(format string, args ...any) func(...any) {
+		return func(fields ...any) {
+			fields = Prepend(fields, "target", p.Target, "lfv", p.lastFieldValue, "ttl", p.ttl)
+			p.data.Logf(level, component...)(format, args...)(fields...)
+		}
 	}
-	str += fmt.Sprintf(" (%s)", p.ttl)
-	p.log().Trace(str)
-}
-
-func (p *rrParams) log(args ...any) *logrus.Entry {
-	return p.data.log(append([]any{"target", p.Target(), "ttl", p.ttl}, args...)...)
-}
-
-func (p *rrParams) exlog(args ...any) *logrus.Entry {
-	return p.log(args...).WithField("lastFieldValue?", p.lastFieldValue != nil)
 }
 
 type rrFunc func(params *rrParams)
@@ -166,7 +162,7 @@ func getValue[T any](key string, params *rrParams) (T, *valuePath, error) {
 		if params.lastFieldValue != nil {
 			if lastFieldValue, ok := (*params.lastFieldValue).(T); ok {
 				params.values[key] = lastFieldValue
-				log.data("value", lastFieldValue).Tracef("using last-field-value for %s:%s", params.Target(), key)
+				params.Logf(3)("using last-field-value for %q", key)()
 				params.lastFieldValue = nil
 				return lastFieldValue, &qPath, nil
 			}
@@ -264,7 +260,7 @@ func domainName(key string) rrFunc {
 	return func(params *rrParams) {
 		name, vPath, err := getHostname(key, params)
 		if vPath == nil || err != nil {
-			params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get %s.%s: %v", params.Target(), key, err)
+			params.Logf(ErrorLevel)("failed to get .%s: %v", key, err)("vp", Supplier1(ptr2strS, vPath))
 			return
 		}
 		params.SetContent(name, nil)
@@ -275,18 +271,18 @@ func soa(params *rrParams) {
 	// primary
 	primary, vPath, err := getValue[string]("primary", params)
 	if vPath == nil || err != nil {
-		params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get value for 'primary': %v", err)
+		params.Logf(ErrorLevel)("failed to get value for 'primary': %v", err)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
 	primary = strings.TrimSpace(primary)
 	primary, err = fqdn(primary, params)
 	if err != nil {
-		params.exlog("vp", vPath.String()).Errorf("failed to append zone domain to 'primary': %v", err)
+		params.Logf(ErrorLevel)("failed to append zone domain to 'primary': %v", err)("vp", Supplier1(ptr2strS, vPath))
 	}
 	// mail
 	mail, vPath, err := getValue[string]("mail", params)
 	if vPath == nil || err != nil {
-		params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get value for 'mail': %v", err)
+		params.Logf(ErrorLevel)("failed to get value for 'mail': %v", err)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
 	mail = strings.TrimSpace(mail)
@@ -304,32 +300,33 @@ func soa(params *rrParams) {
 	}
 	mail, err = fqdn(mail, params)
 	if err != nil {
-		params.exlog("vp", vPath.String()).Errorf("failed to append zone domain to 'mail': %v", err)
+		params.Logf(ErrorLevel)("failed to append zone domain to 'mail': %v", err)("vp", Supplier1(ptr2strS, vPath))
+		return
 	}
 	// serial
 	serial := params.data.zoneRev() // no need for findZone(), because SOA defines the zone
 	// refresh
 	refresh, vPath, err := getDuration("refresh", params)
 	if vPath == nil || err != nil {
-		params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get value for 'refresh': %v", err)
+		params.Logf(ErrorLevel)("failed to get value for 'refresh': %v", err)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
 	// retry
 	retry, vPath, err := getDuration("retry", params)
 	if vPath == nil || err != nil {
-		params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get value for 'retry': %v", err)
+		params.Logf(ErrorLevel)("failed to get value for 'retry': %v", err)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
 	// expire
 	expire, vPath, err := getDuration("expire", params)
 	if vPath == nil || err != nil {
-		params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get value for 'expire': %v", err)
+		params.Logf(ErrorLevel)("failed to get value for 'expire': %v", err)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
 	// negative ttl
 	negativeTTL, vPath, err := getDuration("neg-ttl", params)
 	if vPath == nil || err != nil {
-		params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get value for 'neg-ttl': %v", err)
+		params.Logf(ErrorLevel)("failed to get value for 'neg-ttl': %v", err)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
 	// TODO handle option 'not-authoritative' (alias 'not-aa'?)
@@ -508,35 +505,35 @@ func parseOctets(value any, ipVer int, asPrefix bool) ([]byte, error) {
 func ipRR(params *rrParams, ipVer int) {
 	value, vPath, err := getValue[any]("ip", params)
 	if vPath == nil || err != nil {
-		params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get value for 'ip': %v", err)
+		params.Logf(ErrorLevel)("failed to get value for 'ip': %v", err)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
 	var prefix []byte
 	prefixAny, oPath, err := findValue[any](ipPrefixOption, params.qtype, params.id, params.data, optionsEntry, false)
 	if err != nil {
-		params.exlog("vp", vPath.String()).Errorf("failed to get option %q: %v", ipPrefixOption, err)
+		params.Logf(ErrorLevel)("failed to get option %q: %v", ipPrefixOption, err)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
 	if oPath != nil {
 		octets, err := parseOctets(prefixAny, ipVer, true)
 		if err != nil {
-			params.log("field", "ip", "option", ipPrefixOption).Errorf("failed to parse octets: %s", err)
+			params.Logf(ErrorLevel)("failed to parse octets for option %q (IPv%d): %s", ipPrefixOption, ipVer, err)(prefixAny)
 			return
 		}
 		prefix = octets
-		params.log("field", "ip", "option", ipPrefixOption, "value", prefix).Trace("option value")
+		params.Logf(3)("value for option %q", ipPrefixOption)("value", prefix)
 	} else {
-		params.log("field", "ip").Tracef("option %q not found", ipPrefixOption)
+		params.Logf(3)("option %q not found", ipPrefixOption)()
 	}
 	octets, err := parseOctets(value, ipVer, false)
 	if err != nil {
-		params.exlog("field", "ip", "value", value).Errorf("failed to parse value to octets: %s", err)
+		params.Logf(ErrorLevel)("failed to parse octets for 'ip' (IPv%d): %s", ipVer, err)(value)
 		return
 	}
 	vLen := len(octets)
 	pLen := len(prefix)
 	if pLen == 0 && vLen < ipMeta[ipVer].totalOctets {
-		params.exlog("field", "ip", "value", octets).Errorf("too few octets")
+		params.Logf(ErrorLevel)("too few octets (IPv%d)", ipVer)(octets)
 		return
 	}
 	ip := net.IP(prefix)
@@ -563,22 +560,22 @@ func aaaa(params *rrParams) {
 func srv(params *rrParams) {
 	priority, vPath, err := getUint16("priority", params)
 	if vPath == nil || err != nil {
-		params.log("vp", ptr2strS(vPath)).Errorf("failed to get value for 'priority': %v", err)
+		params.Logf(ErrorLevel)("failed to get value for 'priority': %v", err)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
 	weight, vPath, err := getUint16("weight", params)
 	if vPath == nil || err != nil {
-		params.log("vp", ptr2strS(vPath)).Errorf("failed to get value for 'weight': %v", err)
+		params.Logf(ErrorLevel)("failed to get value for 'weight': %v", err)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
 	port, vPath, err := getUint16("port", params)
 	if vPath == nil || err != nil {
-		params.log("vp", ptr2strS(vPath)).Errorf("failed to get value for 'port': %v", err)
+		params.Logf(ErrorLevel)("failed to get value for 'port': %v", err)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
 	target, vPath, err := getHostname("target", params)
 	if vPath == nil || err != nil {
-		params.log("vp", ptr2strS(vPath)).Errorf("failed to get value for 'target': %v", err)
+		params.Logf(ErrorLevel)("failed to get value for 'target': %v", err)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
 	content := fmt.Sprintf("{priority:%%d }%d %d %s", weight, port, target)
@@ -588,12 +585,12 @@ func srv(params *rrParams) {
 func mx(params *rrParams) {
 	priority, vPath, err := getUint16("priority", params)
 	if vPath == nil || err != nil {
-		params.exlog("vp", ptr2strS(vPath)).Errorf("failed to get value for 'priority': %v", err)
+		params.Logf(ErrorLevel)("failed to get value for 'priority': %v", err)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
 	target, vPath, err := getHostname("target", params)
 	if vPath == nil || err != nil {
-		params.log("vp", ptr2strS(vPath)).Errorf("failed to get value for 'target': %v", err)
+		params.Logf(ErrorLevel)("failed to get value for 'target': %v", err)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
 	content := fmt.Sprintf("{priority:%%d }%s", target)
@@ -603,7 +600,7 @@ func mx(params *rrParams) {
 func txt(params *rrParams) {
 	text, vPath, err := getValue[any]("text", params)
 	if vPath == nil || err != nil {
-		params.log("vp", ptr2strS(vPath)).Errorf("failed to get value for 'text': %v", err)
+		params.Logf(ErrorLevel)("failed to get value for 'text': %v", err)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
 	var ts []any
@@ -613,11 +610,11 @@ func txt(params *rrParams) {
 	case []any:
 		ts = t
 	default:
-		params.log("vp", vPath.String(), "type", fmt.Sprintf("%T", text)).Error("invalid type for 'text' (expected a string or number or an array thereof)")
+		params.Logf(ErrorLevel)("invalid type for 'text': %T", text)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
 	if len(ts) == 0 {
-		params.log("vp", vPath.String()).Error("empty array for 'text'")
+		params.Logf(ErrorLevel)("empty array for 'text'")("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
 	content := ""
@@ -635,7 +632,7 @@ func txt(params *rrParams) {
 		case float64:
 			content += fmt.Sprintf("%q", float2decimal(t))
 		default:
-			params.log("vp", vPath.String(), "type", fmt.Sprintf("%T", t)).Errorf("invalid type for 'text' element at index %d (expected a string or number)", i)
+			params.Logf(ErrorLevel)("invalid type for 'text' element at index %d: %T", i, t)("vp", vPath.String)
 			return
 		}
 	}

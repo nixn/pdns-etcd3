@@ -125,7 +125,7 @@ func TestPipeRequests(t *testing.T) {
 	}
 	{
 		testPrefix := "/DNS/"
-		request := pdnsRequest{"initialize", objectType[any]{"pdns-version": "3", "prefix": testPrefix, "log-trace": "main+pdns+etcd+data"}}
+		request := pdnsRequest{"initialize", objectType[any]{"pdns-version": "3", "prefix": testPrefix, "log-level": "10,data.values=2"}}
 		expectedResponse := map[string]any{"result": true, "log": Ignore{}}
 		if !checkRun(t, "initialize", action, request, ve[any]{v: expectedResponse}, false) {
 			Fatalf(t, "failed to initialize")
@@ -500,7 +500,7 @@ func TestWithPDNS(t *testing.T) {
 	Logf(t, "ETCD endpoint (2379): %s", etcd.Endpoint)
 	// PDNS-ETCD3
 	sleepT(t, 1*time.Second)
-	pe3 := startPE3(t, etcd.Endpoint, "", "-log-trace=main+etcd+pdns+data", "-pdns-version="+getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1])
+	pe3 := startPE3(t, etcd.Endpoint, "", "-log-level=10,data.values=2", "-pdns-version="+getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1])
 	defer pe3.Terminate()
 	Logf(t, "PDNS-ETCD3 endpoint: %s", pe3.HttpAddress)
 	err = waitFor(t, "PE3 ready", func() bool { return status.serving }, 10*time.Millisecond, 30*time.Second)
@@ -949,6 +949,7 @@ func TestParallelRequests(t *testing.T) {
 		t.Errorf("too less parallel requests (CPUs: %d, max parallel requests: %d", nCPU, dataRoot.readers.max.Load())
 	}
 }
+
 func selectByVersion[T any](version string, options map[string]T) T {
 	var selectedVersion string
 	for ver := range options {
@@ -986,7 +987,7 @@ func TestMetadata(t *testing.T) {
 	defer etcd.Terminate()
 	Logf(t, "ETCD endpoint (2379): %s", etcd.Endpoint)
 	// PDNS-ETCD3
-	pe3 := startPE3(t, etcd.Endpoint, "DNS/", "-pdns-version="+getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1], "-log-trace=main+pdns+etcd", "-log-debug=data", "-log-level=10,data=3")
+	pe3 := startPE3(t, etcd.Endpoint, "DNS/", "-pdns-version="+getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1], "-log-level=10,data.values=2")
 	defer pe3.Terminate()
 	Logf(t, "PDNS-ETCD3 endpoint: %s", pe3.HttpAddress)
 	err = waitFor(t, "PE3 ready", func() bool { return status.serving }, 10*time.Millisecond, 30*time.Second)

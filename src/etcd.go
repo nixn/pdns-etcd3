@@ -106,7 +106,8 @@ func getResponse(response *clientv3.GetResponse) *getResponseType {
 }
 
 func (cli *etcdClient) Get(key string, multi bool, revision *int64, timeout time.Duration) (*getResponseType, error) {
-	log.etcd("multi", multi, "rev", revision).Tracef("get %q", key)
+	debug2 := RootLog.Logf(2, "etcd")
+	debug2(nil, "get %q", key)("multi", multi, "rev", revision)
 	opts := []clientv3.OpOption(nil)
 	if multi {
 		opts = append(opts, clientv3.WithPrefix())
@@ -122,7 +123,7 @@ func (cli *etcdClient) Get(key string, multi bool, revision *int64, timeout time
 	if err != nil {
 		return nil, fmt.Errorf("[dur %s] %s", dur, err)
 	}
-	log.etcd("multi", multi, "dur", dur, "rev", revision, "#", response.Count, "more", response.More).Tracef("got %q", key)
+	debug2(nil, "got %q", key)("multi", multi, "dur", dur, "rev", revision, "#", response.Count, "more", response.More)
 	return getResponse(response), nil
 }
 
@@ -174,15 +175,16 @@ WATCH:
 			break WATCH
 		default:
 		}
-		log.etcd("currRev", cli.CurrentRevision).Tracef("creating watch")
+		// don't cache the calls to RootLog, it could be changed at runtime (later)
+		RootLog.Logf(1, "etcd", "watch")(nil, "creating watch")("currRev", cli.CurrentRevision)
 		watchCtx := clientv3.WithRequireLeader(ctx)
 		watchChan := watcher.Watch(watchCtx, prefix, clientv3.WithPrefix(), clientv3.WithRev(cli.CurrentRevision+1))
 	EVENTS:
 		for {
-			log.etcd("currRev", cli.CurrentRevision).Trace("waiting for next event")
+			RootLog.Logf(2, "etcd", "watch")(nil, "waiting for next event")("currRev", cli.CurrentRevision)
 			watchResponse, ok := <-watchChan
 			if !ok {
-				log.etcd().Trace("watch channel closed")
+				RootLog.Logf(2, "etcd", "watch")(nil, "watch channel closed")()
 				select {
 				case <-ctx.Done():
 					break WATCH
@@ -191,19 +193,19 @@ WATCH:
 				}
 			}
 			if err := watchResponse.Err(); err != nil {
-				log.etcd(watchResponse).Errorf("watch failed: %s", err)
+				RootLog.Errorf("etcd", "watch")(nil, "watch failed: %s", err)(watchResponse)
 			} else {
 				n := len(watchResponse.Events)
-				log.etcd("compact-rev", watchResponse.CompactRevision, "#events", n, "rev", watchResponse.Header.Revision).Debug("watch event")
+				RootLog.Logf(1, "etcd", "watch")(nil, "watch event")("rev", watchResponse.Header.Revision, "compact-rev", watchResponse.CompactRevision, "#events", n)
 				if n == 0 {
-					log.etcd("currRev", cli.CurrentRevision).Tracef("stopping watch")
+					RootLog.Logf(1, "etcd", "watch")(nil, "stopping watch")("currRev", cli.CurrentRevision)
 					break WATCH
 				}
 				handleEvents(watchResponse.Header.Revision, watchResponse.Events)
 				cli.CurrentRevision = watchResponse.Header.Revision
 			}
 		}
-		log.etcd().Debugf("retrying watch in %s", watchRetryInterval)
+		RootLog.Logf(1, "etcd", "watch")(nil, "retrying watch in %s", watchRetryInterval)()
 		_ = Sleep(ctx, watchRetryInterval)
 	}
 }

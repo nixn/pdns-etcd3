@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"testing"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
 type parsedKey struct {
@@ -33,7 +31,7 @@ type parsedKey struct {
 type pk = parsedKey
 
 func (pk parsedKey) String() string {
-	return fmt.Sprintf("name: %v, entry type: %q, qtype: %q, id: %q, version: %s", pk.name, pk.entryType, pk.qtype, pk.id, ptr2str(pk.version, "s"))
+	return fmt.Sprintf("name: %v, entry type: %q, qtype: %q, id: %q, version: %s", pk.name, pk.entryType, pk.qtype, pk.id, ptr2str(pk.version, "&%s"))
 }
 
 func TestParseEntryKey(t *testing.T) {
@@ -143,7 +141,7 @@ func mapMapOf[K1 comparable, K2 comparable, V any](values ...mapMapOfValue[K1, K
 }
 
 func TestProcessValues(t *testing.T) {
-	log.logger("data").SetLevel(logrus.TraceLevel)
+	RootLog.ChildLog("data").SetLevel(10)
 	checkRecordsFn := func(data *dataNode) func(*testing.T, map[string]map[string]any) (any, error) {
 		return func(t *testing.T, values map[string]map[string]any) (any, error) {
 			clearMap(data.records)

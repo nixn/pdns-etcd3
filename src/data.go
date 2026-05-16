@@ -20,7 +20,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/titanous/json5"
 	"go.yaml.in/yaml/v4"
 )
@@ -100,7 +99,7 @@ func (dn *dataNode) getValuesFor(entryType entryType) map[string]map[string]valu
 	case optionsEntry:
 		return dn.options
 	default:
-		log.main().Panicf("requested values for unknown entrytype %q", entryType)
+		dn.Fatalf("values")("requested values for unknown entrytype")(entryType)
 		return nil
 	}
 }
@@ -152,8 +151,22 @@ func (dn *dataNode) findZone() *dataNode {
 	})
 }
 
-func (dn *dataNode) log(fields ...any) *logrus.Entry {
-	return log.data(append([]any{"dn", dn.getQname()}, fields...)...)
+func (dn *dataNode) Logf(level int, component ...string) func(string, ...any) func(...any) {
+	component = PrependT(component, "data")
+	return func(format string, args ...any) func(...any) {
+		return func(fields ...any) {
+			fields = Prepend(fields, "dn", dn.getQname)
+			RootLog.Logf(level, component...)(nil, format, args...)(fields...)
+		}
+	}
+}
+
+func (dn *dataNode) Fatalf(component ...string) func(string, ...any) func(...any) {
+	return dn.Logf(FatalLevel, component...)
+}
+
+func (dn *dataNode) Errorf(component ...string) func(string, ...any) func(...any) {
+	return dn.Logf(ErrorLevel, component...)
 }
 
 func (dn *dataNode) getName() Name {
@@ -270,7 +283,7 @@ type domainInfo struct {
 func (dn *dataNode) allDomains(result []domainInfo) []domainInfo {
 	if _, ok := dn.records["SOA"][""]; ok {
 		zone, serial := dn.getQname(), dn.zoneRev()
-		dn.log("zone", zone, "serial", serial).Trace("allDomains: found zone")
+		dn.Logf(3)("allDomains: found zone %q", zone)("serial", serial)
 		result = append(result, domainInfo{zone, serial})
 	}
 	for _, child := range dn.children {
@@ -424,28 +437,30 @@ func (dn *dataNode) reload(dataChan <-chan etcdItem) {
 	clearMap(dn.records)
 	clearMap(dn.metadata)
 	clearMap(dn.children)
-	dn.log().Debug("processing entry items from ETCD")
+	dn.Logf(1, "reload")("processing entry items from ETCD")()
+	debug2 := dn.Logf(2, "reload", "collect")
+	debug3 := dn.Logf(3, "reload", "collect")
+	debug3values := dn.Logf(3, "values")
 	depth := dn.depth()
 ITEMS:
 	for item := range dataChan {
-		dn.log(item.Key).Trace("processing entry")
+		debug2("processing entry")(item.Key)
 		name, entryType, qtype, id, itemVersion, err := parseEntryKey(item.Key)
 		if name == nil {
 			name = Name{}
 		}
-		//goland:noinspection GoDfaErrorMayBeNotNil
-		dn.log().Tracef("parsed %q into name %q type %q qtype %q id %q version %q err %q", item.Key, name.normal(), entryType, qtype, id, itemVersion, err2str(err))
+		debug3values("parsed %q into name %q, type %q, qtype %q, id %q, version %q, err: %s", item.Key, name.normal, entryType, qtype, id, itemVersion, err2str(err))()
 		// check version first, because a higher version (than our current dataVersion) could change the key syntax (but not prefix and version suffix)
 		if itemVersion != nil && !dataVersion.IsCompatibleTo(*itemVersion, false) {
-			dn.log("my", dataVersion, "their", *itemVersion).Tracef("ignoring entry %q due to version incompatibility", item.Key)
+			debug2("ignoring entry %q due to version incompatibility", item.Key)("my", dataVersion, "their", *itemVersion)
 			continue ITEMS
 		}
 		if err != nil {
-			dn.log().WithError(err).Warnf("failed to parse entry key %q", item.Key)
+			dn.Errorf()("failed to parse entry key %q: %s", item.Key, err)()
 			continue ITEMS
 		}
 		if entryType == lockEntry {
-			dn.log(item.Key).Trace("ignoring lock entries")
+			debug3("ignoring lock entry")(item.Key)
 			continue ITEMS
 		}
 		// check if the entry belongs to this domain
@@ -458,57 +473,57 @@ ITEMS:
 			}
 		}
 		itemData := dn.getChildCreate(name.fromDepth(depth + 1))
+		target := func() string { return targetString(itemData.getQname(), qtype, id) }
 		switch entryType {
 		case normalEntry, defaultsEntry, optionsEntry:
 			vals := itemData.getValuesFor(entryType)
 			// check version against a possibly already stored value, overwrite value only if it's a "better" version. compatibility is already cleared (above).
 			if curr, ok := vals[qtype][id]; ok {
 				if itemVersion == nil {
-					dn.log("current", curr.key).Tracef("ignoring (new) entry %q, because it is unversioned and cannot replace the current entry", item.Key)
+					debug3("ignoring (new) entry %q, because it is unversioned and cannot replace the current entry", item.Key)("current", curr.key)
 					continue ITEMS
 				}
 				if curr.version != nil && itemVersion.Minor <= curr.version.Minor {
-					dn.log("current", curr.key).Tracef("ignoring (new) entry %q, because its' version's minor is not greater than the current entry's version's minor", item.Key)
+					debug3("ignoring (new) entry %q, because its' version's minor is not greater than the current entry's version's minor", item.Key)("current", curr.key)
 					continue ITEMS
 				}
-				target := targetString(itemData.getQname(), qtype, id)
-				dn.log("target", target, "new-entry", item.Key, "current-version", *curr.version, "new-version", *itemVersion).Trace("overriding existing entry due to version constraints")
+				debug3("overriding existing entry %q due to version constraints", target)("new-entry", item.Key, "current-version", curr.version, "new-version", itemVersion)
 			}
 			// handle content
 			content, err := parseEntryContent(item.Value, entryType)
 			if err != nil {
-				dn.log().WithError(err).Errorf("failed to parse content of %q", item.Key)
+				dn.Errorf()("failed to parse content of %q: %s", item.Key, err)()
 				continue ITEMS
 			}
 			if _, ok := vals[qtype]; !ok {
 				vals[qtype] = map[string]valueType{}
 			}
 			vals[qtype][id] = valueType{item.Key, content, itemVersion}
-			dn.log(content).Tracef("stored %s for %s", string(entryType), targetString(itemData.getQname(), qtype, id))
+			debug3values("stored %v for %s", entryType, target)(content)
 		case metadataEntry:
 			value := string(item.Value)
 			dn.metadata[qtype] = append(dn.metadata[qtype], value)
-			dn.log(value).Tracef("stored %v for %s", entryType, targetString(itemData.getQname(), qtype, id))
+			debug3values("stored %v for %s", entryType, target)(value)
 		default:
-			dn.log(entryType).Errorf("unhandled entry type")
+			dn.Errorf()("unhandled entry type")(entryType)
 			continue ITEMS
 		}
 		itemData.maxRev = max(itemData.maxRev, item.Rev())
 	}
 	dn.processValues()
 	dur := time.Since(since)
-	dn.log("duration", dur).Trace("reload() finished")
+	dn.Logf(2, "reload")("reload finished")("dur", dur)
 }
 
 func (dn *dataNode) processValues() {
-	dn.log().Trace("processing values to records")
+	dn.Logf(2, "reload", "process")("processing values to records")()
 	// process SOA first, to have proper zone appending for other entries
 	if values, ok := dn.values["SOA"]; ok {
 		valid := false
 	IDS:
 		for id, value := range values {
 			if id != "" {
-				dn.log("id", id).Errorf("Ignoring SOA entry %q: a SOA entry may not have a non-empty ID!", value.key)
+				dn.Errorf("reload", "process")("ignoring SOA entry %q: a SOA entry may not have a non-empty ID", value.key)("id", id)
 				continue
 			}
 			dn.processValuesEntry("SOA", "", &value)
@@ -517,7 +532,7 @@ func (dn *dataNode) processValues() {
 			}
 		}
 		if !valid {
-			dn.log().Error("No valid SOA entry found, IGNORING WHOLE ZONE!")
+			dn.Errorf("reload", "process")("no valid SOA entry found, IGNORING WHOLE ZONE!")()
 			return
 		}
 	}
@@ -539,23 +554,23 @@ func (dn *dataNode) processValuesEntry(qtype, id string, value *valueType) {
 		if parse := parses[qtype]; parse != nil {
 			values, err := parseContent(parse, content.s)
 			if err != nil {
-				dn.log("content", content.s, "regexp", parse.re.String()).Errorf("failed to parse plain string content for %s#%s (ignoring entry): %s", qtype, id, err)
+				dn.Errorf("values")("failed to parse plain string content for %s#%s, ignoring entry: %s", qtype, id, err)("content", content.s, "regexp", parse.re.String)
 				return
 			}
-			dn.log("content", content.s, "values", values).Tracef("parsed plain string content for %s#%s into values", qtype, id)
+			dn.Logf(3, "values")("parsed plain string content for %s#%s into values", qtype, id)("content", content, "values", values)
 			value.content = values
 		}
 	}
 	params := &rrParams{qtype: qtype, id: id, data: dn}
 	processEntryTTL(params, value)
 	if content, ok := value.content.(stringValueType); ok {
-		dn.log(content).Tracef("found plain string value for %s", params.Target())
+		dn.Logf(3, "values")("found plain string value for %s", params.Target)(Supplier3(CutString, content.s, 25, "..."))
 		params.SetContent(content.s, nil)
 		return
 	}
 	rrFunc := rrFuncs[qtype]
 	if rrFunc == nil {
-		dn.log("entry", value.key).Errorf("record type %q is not object-supported", qtype)
+		dn.Errorf("values")("record type %q is not object-supported", qtype)("entry", value.key)
 		return
 	}
 	switch content := value.content.(type) {
@@ -571,7 +586,7 @@ func (dn *dataNode) processValuesEntry(qtype, id string, value *valueType) {
 func processEntryTTL(rrParams *rrParams, value *valueType) {
 	ttl, vPath, err := getDuration("ttl", rrParams)
 	if vPath == nil || err != nil {
-		rrParams.data.log("vp", vPath, "error", err).Errorf("failed to get TTL for entry %q, ignoring", value.key)
+		rrParams.data.Errorf("values")("failed to get TTL for entry %q, ignoring", value.key)("vp", vPath, "error", err)
 	}
 	rrParams.ttl = ttl
 }

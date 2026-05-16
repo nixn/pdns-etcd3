@@ -24,11 +24,11 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -44,10 +44,7 @@ type programArgs struct {
 }
 
 func (pa programArgs) String() string {
-	return fmt.Sprintf("ConfigFile=%s, Endpoints=%s, DialTimeout=%s, DialKeepAliveTime=%s, DialKeepAliveTimeout=%s, AutoSyncInterval=%s, PermitWithoutStream=%s, Prefix=%s",
-		val2str(pa.ConfigFile), val2str(pa.Endpoints), val2str(pa.DialTimeout),
-		val2str(pa.DialKeepAliveTime), val2str(pa.DialKeepAliveTimeout), val2str(pa.AutoSyncInterval),
-		val2str(pa.PermitWithoutStream), val2str(pa.Prefix))
+	return val2str(pa)
 }
 
 type statusType struct {
@@ -56,7 +53,6 @@ type statusType struct {
 
 var (
 	// TODO encapsulate (most of?) global vars into a "main struct" (needed to do this with status and cli for integration tests already, perhaps better for the whole thing?)
-	log        = newLog(nil, "main", "pdns", "etcd", "data") // TODO timings
 	args       programArgs
 	standalone bool
 	dataRoot   *dataNode
@@ -119,10 +115,34 @@ func setDurationParameterFunc(param *time.Duration, minValue *time.Duration) set
 	}
 }
 
+func setLogLevels(value string) {
+	for _, v := range strings.Split(value, ",") {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		componentStr, levelStr, hasSeparator := strings.Cut(v, "=")
+		if !hasSeparator {
+			levelStr = componentStr
+			componentStr = ""
+		}
+		// TODO allow logrus names as values (fatal, error, warn(ing), info)
+		if level64, err := strconv.ParseInt(levelStr, 10, 8); err != nil {
+			RootLog.Warnf()(nil, "invalid log level %q: %s", levelStr, err)("component", componentStr)
+		} else {
+			component := strings.Split(componentStr, ".")
+			if len(component) == 1 && component[0] == "" {
+				component = nil
+			}
+			RootLog.Importantf()(nil, "setting log level")("component", component, "level", level64)
+			RootLog.ChildLog(component...).SetLevel(int(level64))
+		}
+	}
+}
+
 func readParameters(params objectType[string], client *pdnsClient) error {
 	for k, v := range params {
 		var err error
-	SWITCH:
 		switch {
 		case !standalone && k == configFileParam:
 			*args.ConfigFile = v
@@ -142,22 +162,14 @@ func readParameters(params objectType[string], client *pdnsClient) error {
 		case !standalone && k == prefixParam:
 			*args.Prefix = v
 		case k == pdnsVersionParam:
+			client.Logf(2, "pdns", "init")("setting pdns-version to %s", v)()
 			err = setPdnsVersionParameter(&client.PdnsVersion)(v)
-		case strings.HasPrefix(k, logParamPrefix):
-			for _, level := range logrus.AllLevels {
-				if k == logParamPrefix+level.String() {
-					if !standalone {
-						log.setLoggingLevel(v, level)
-					}
-					client.log.setLoggingLevel(v, level)
-					break SWITCH
-				}
-			}
-			err = fmt.Errorf("invalid log level parameter: %s", k)
-		case k == "path":
+		case !standalone && k == logLevelParam:
+			setLogLevels(v)
+		case k == "path": // TODO standalone?
 			// ignore
 		default:
-			client.log.main().Warnf("unknown parameter %q", k)
+			client.Warnf("main", "init")("unknown parameter %q", k)()
 		}
 		if err != nil {
 			return fmt.Errorf("failed to set parameter %q: %s", k, err)
@@ -179,26 +191,26 @@ func startReadRequests(ctx context.Context, wg *WaitGroup, client *pdnsClient) <
 		wg.Go(fmt.Sprintf("readRequests [%s] done", client.ID), func(...any) {
 			select {
 			case <-ctx.Done():
-				client.log.pdns().Tracef("{readRequests done} context canceled, closing input")
+				client.Logf(4, "pdns", "read", "{done}")("context canceled, closing input")()
 				closeNoError(client.in)
 			case <-done:
-				client.log.pdns().Trace("{readRequests done} done")
+				client.Logf(4, "pdns", "read", "{done}")("done")()
 			}
 		})
 		for {
-			client.log.pdns().Trace("{readRequests} waiting for next request")
+			client.Logf(2, "pdns", "read")("waiting for next request")()
 			if request, err := client.Comm.read(); err != nil {
 				if err == io.EOF {
-					client.log.pdns().Trace("{readRequests} EOF on input stream, terminating")
+					client.Logf(3, "pdns", "read")("EOF on input stream, terminating")()
 					return
 				}
 				if errors.Is(err, fs.ErrClosed) {
-					client.log.pdns().Trace("{readRequests} input stream closed, terminating")
+					client.Logf(3, "pdns", "read")("input stream closed, terminating")()
 					return
 				}
-				client.log.pdns(err).Panicf("{readRequests} failed to decode request: %s", err)
+				client.Fatalf("pdns", "read")("failed to decode request: %s", err)()
 			} else {
-				client.log.pdns(request).Debug("{readRequests} received new request")
+				client.Logf(1, "pdns", "read")("received new request")(request)
 				ch <- *request
 			}
 		}
@@ -207,7 +219,7 @@ func startReadRequests(ctx context.Context, wg *WaitGroup, client *pdnsClient) <
 }
 
 func handleRequest(ctx context.Context, cr *pdnsClientRequest) {
-	cr.Client.log.main(cr.Request).Trace("handling request")
+	cr.Client.Logf(2, "main")("handling request")(cr.Request)
 	since := time.Now()
 	var result any
 	var err error
@@ -233,35 +245,39 @@ func handleRequest(ctx context.Context, cr *pdnsClientRequest) {
 		cr.Client.Respond(makeResponse(result, err.Error()))
 	}
 	dur := time.Since(since)
-	cr.Client.log.main("dur", dur, "err", err, "request", cr.Request, "result", result).Debug("request and result")
+	cr.Client.Logf(1, "main")("request and result")("request", cr.Request, "result", result, "dur", dur, "err", err)
 }
 
 func handleEvents(revision int64, events []*clientv3.Event) {
-	log.etcd("rev", revision).Debugf("handling events (%d)", len(events))
+	debug1 := RootLog.Logf(1, "etcd", "events")
+	debug2 := RootLog.Logf(2, "etcd", "events")
+	debug3 := RootLog.Logf(3, "etcd", "events")
+	lockDebug := RootLog.Logf(4, "data", "locking")
+	debug1(nil, "handling events")("#", len(events), "rev", revision)
 	since := time.Now()
 	reloadZones := map[string]*dataNode{}
 	lockedZones := map[string]bool{}
 EVENTS:
 	for i, event := range events {
 		entryKey := string(event.Kv.Key)
-		log.etcd(event).Tracef("handling event %d: %s %q", i+1, event.Type, entryKey)
+		debug2(nil, "handling event %d: %s %q", i+1, event.Type, entryKey)(event)
 		name, entryType, qtype, id, version, err := parseEntryKey(entryKey)
 		// check version first, because a new version could change the key syntax (but not prefix and version suffix)
 		if version != nil && !dataVersion.IsCompatibleTo(*version, false) {
-			log.data().Tracef("ignoring event on version-incompatible entry %q", entryKey)
+			debug3(nil, "ignoring event on version-incompatible entry %q", entryKey)()
 			continue
 		}
 		if err != nil {
-			log.data(err.Error()).Errorf("failed to parse entry key %q, ignoring event", entryKey)
+			RootLog.Errorf("etcd", "events")(nil, "failed to parse entry key %q, ignoring event: %s", entryKey, err)()
 			continue
 		}
 		if entryType == lockEntry && event.Type != clientv3.EventTypeDelete {
-			log.main(event.Type.String(), entryKey).Trace("ignoring non-DELETE events for lock entries")
+			debug3(nil, "ignoring non-DELETE events for lock entries")(event.Type.String(), entryKey)
 			continue
 		}
-		log.main().Tracef("handleEvents: RLocking up to %q", name.asKey(true))
+		lockDebug(nil, "handleEvents: RLocking up to %q", Supplier1(name.asKey, true))()
 		itemData, _ := dataRoot.getChild(name, false)
-		log.main(itemData.LockCounts()).Tracef("handleEvents: RLocked %q", itemData.prefixKey())
+		lockDebug(nil, "handleEvents: RLocked %q", itemData.prefixKey)(itemData.LockCounts)
 		zoneData := itemData.findZone()
 		if event.Type == clientv3.EventTypeDelete && qtype == "SOA" && id == "" && entryType == normalEntry && zoneData != nil && zoneData.parent != nil {
 			// deleting the SOA record deletes the zone, so the parent zone must be reloaded instead. this results in a full data reload for top-level zones. // TODO restrict to the (new) zone if only a new zone was added
@@ -270,100 +286,100 @@ EVENTS:
 		if zoneData == nil {
 			zoneData = dataRoot
 		}
-		log.main("item", itemData.LockCounts(), "zone", zoneData.LockCounts()).Tracef("handleEvents: RUnlocking %q up to %q", itemData.prefixKey(), zoneData.prefixKey())
+		lockDebug(nil, "handleEvents: RUnlocking %q up to %q", itemData.prefixKey, zoneData.prefixKey)("item", itemData.LockCounts, "zone", zoneData.LockCounts)
 		itemData.rUnlockUpwards(zoneData, false)
 		qname := zoneData.getQname()
 		if _, ok := lockedZones[qname]; !ok {
+			debug3(nil, "getting lock data for zone %q", qname)()
 			lockResponse, err := cli.Get(*args.Prefix+zoneData.prefixKey()+lockKey, true, &revision, *args.DialTimeout)
 			if err != nil {
-				log.data().Warnf("failed to get lock data for zone %q: %s", qname, err)
-				log.main(zoneData.LockCounts()).Tracef("handleEvents: RUnlocking %q", zoneData.prefixKey())
+				RootLog.Warnf("etcd", "events")(nil, "failed to get lock data for zone %q: %s", qname, err)()
+				lockDebug(nil, "handleEvents: RUnlocking %q", zoneData.prefixKey)(zoneData.LockCounts)
 				zoneData.rUnlockUpwards(nil, false)
 				continue EVENTS
 			}
 			if _, ok := <-lockResponse.DataChan; ok {
-				log.main(qname).Trace("marking zone as locked")
+				debug2(nil, "marking zone as locked")(qname)
 				lockedZones[qname] = true
 			} else {
-				log.main(qname).Trace("marking zone as not locked")
+				debug2(nil, "marking zone as not locked")(qname)
 				lockedZones[qname] = false
 			}
 		}
 		if lockedZones[qname] {
-			log.main(qname).Trace("event zone locked, ignoring")
-			log.main(zoneData.LockCounts()).Tracef("handleEvents: RUnlocking %q", zoneData.prefixKey())
+			debug2(nil, "event zone locked, ignoring")(qname)
+			lockDebug(nil, "handleEvents: RUnlocking %q", zoneData.prefixKey)(zoneData.LockCounts)
 			zoneData.rUnlockUpwards(nil, false)
 			continue EVENTS
 		}
 		subdomains := make([]string, 0, len(reloadZones))
 		for dnKey, dn := range reloadZones {
 			if zoneData.subdomainDepth(dn) >= 0 {
-				log.main("event", qname, "scheduled", dn.getQname()).Trace("event zone already scheduled for reload (possibly ancestor)")
-				log.main(zoneData.LockCounts()).Tracef("handleEvents: RUnlocking %q", zoneData.prefixKey())
+				debug2(nil, "event zone already scheduled for reload (possibly ancestor)")("event", qname, "scheduled", dn.getQname)
+				lockDebug(nil, "handleEvents: RUnlocking %q", zoneData.prefixKey)(zoneData.LockCounts)
 				zoneData.rUnlockUpwards(nil, false)
 				continue EVENTS
 			}
 			if dn.subdomainDepth(zoneData) > 0 {
-				log.main(dn.LockCounts()).Tracef("handleEvents: RUnlocking %q", dn.prefixKey())
+				lockDebug(nil, "handleEvents: RUnlocking %q", dn.prefixKey)(dn.LockCounts)
 				dn.rUnlockUpwards(nil, false)
-				log.main("event", qname, "scheduled", dn.getQname()).Trace("scheduled zone is a subdomain of event zone, marking for replace")
+				debug2(nil, "scheduled zone is a subdomain of event zone, marking for replace")("event", qname, "scheduled", dn.getQname)
 				subdomains = append(subdomains, dnKey)
 			}
 		}
 		for _, k := range subdomains {
 			delete(reloadZones, k)
 		}
-		log.data("event", qname, "replacing", subdomains).Debug("scheduling event zone for reload")
+		debug1(nil, "scheduling event zone %q for reload", qname)("replacing", subdomains)
 		reloadZones[qname] = zoneData
 	}
-	log.data(Keys(reloadZones)).Debug("reloading zones")
+	debug1(nil, "reloading zones")(Supplier1(Keys, reloadZones))
 	for _, dn := range reloadZones {
 		qname := dn.getQname()
-		log.data().Tracef("reloading zone %q", qname)
+		debug2(nil, "reloading zone %q", qname)()
 		since := time.Now()
 		getResponse, err := cli.Get(*args.Prefix+dn.prefixKey(), true, &revision, *args.DialTimeout)
 		if err != nil {
-			log.main(dn.LockCounts()).Tracef("handleEvents: RUnlocking %q", dn.prefixKey())
+			lockDebug(nil, "handleEvents: RUnlocking %q", dn.prefixKey)(dn.LockCounts)
 			dn.rUnlockUpwards(nil, false)
-			log.data().Warnf("failed to get data for zone %q (not reloading): %s", qname, err)
+			RootLog.Warnf("etcd", "events")(nil, "failed to get data for zone %q, not reloading: %s", qname, err)()
 			continue
 		}
-		log.data().Debugf("reloading zone %q", qname)
 		func() {
-			log.main(dn.LockCounts()).Tracef("handleEvents: RUnlocking %q directly", dn.prefixKey())
+			lockDebug(nil, "handleEvents: RUnlocking %q directly", dn.prefixKey)(dn.LockCounts)
 			dn.mutex.RUnlock()
 			if dn.parent != nil {
 				defer dn.parent.rUnlockUpwards(nil, false)
-				defer log.main(dn.parent.LockCounts()).Tracef("handeEvents: RUnlocking %q", dn.parent.prefixKey())
+				defer lockDebug(nil, "handleEvents: RUnlocking %q", dn.parent.prefixKey)(dn.parent.LockCounts)
 			}
-			log.main().Tracef("handleEvents: WLocking %q directly", dn.prefixKey())
+			lockDebug(nil, "handleEvents: WLocking %q directly", dn.prefixKey)()
 			dn.mutex.Lock()
-			log.main(dn.LockCounts()).Tracef("handleEvents: WLocked %q directly", dn.prefixKey())
+			lockDebug(nil, "handleEvents: WLocked %q directly", dn.prefixKey)(dn.LockCounts)
 			defer dn.mutex.Unlock()
-			defer log.main(dn.LockCounts()).Tracef("handleEvents: WUnlocking %q directly", dn.prefixKey())
+			defer lockDebug(nil, "handleEvents: WUnlocking %q directly", dn.prefixKey)(dn.LockCounts)
 			oldZoneRev := dn.zoneRev()
 			dn.reload(getResponse.DataChan)
 			if newZoneRev := dn.zoneRev(); newZoneRev < oldZoneRev {
 				// TODO add test for this
-				dn.log("old", oldZoneRev, "new", newZoneRev).Debug("zone revision jumped backwards, fixing it")
+				debug1(nil, "zone revision jumped backwards, fixing it")("zone", qname, "old", oldZoneRev, "new", newZoneRev)
 				dn.maxRev = oldZoneRev + 1
 				key := *args.Prefix + dn.prefixKey() + metadataKey + keySeparator + MetaMinimumSerial
 				if _, err = cli.Put(key, fmt.Sprintf("%d", dn.zoneRev()), *args.DialTimeout); err != nil {
-					dn.log(key).Errorf("failed to put to ETCD: %s", err)
+					RootLog.Errorf("etcd", "events")(nil, "failed to put to ETCD: %s", err)(key)
 				}
 			}
 		}()
 		dur := time.Since(since)
-		log.data("#records", dn.recordsCount(), "#zones", dn.zonesCount(), "duration", dur, "zoneRev", dn.zoneRev()).Debugf("reloaded zone %q", qname)
+		debug2(nil, "reloaded zone %q", qname)("#records", dn.recordsCount, "#zones", dn.zonesCount, "dur", dur, "zoneRev", dn.zoneRev)
 	}
 	dur := time.Since(since)
-	log.data("duration", dur).Debug("reloaded zones")
+	debug1(nil, "reloaded zones")("dur", dur)
 }
 
 // Main is the "moved" program entrypoint, but with git version argument (which is set in real main package)
 func Main(programVersion VersionType, gitVersion string) {
 	main(programVersion, gitVersion, os.Args[1:], make(chan os.Signal, 1), false)
-	log.main().Trace("main() returned normally")
+	RootLog.Logf(3, "main")(nil, "main() returned normally")()
 }
 
 var (
@@ -377,13 +393,7 @@ var (
 	permitWithoutStreamArg  = flag.Bool(permitWithoutStreamParam, defaultPermitWithoutStream, "send ETCD client keep-alive pings even with no active RPC stream")
 	prefixArg               = flag.String(prefixParam, "", "Global key prefix")
 	pdnsVersionArg          = flag.String(pdnsVersionParam, "", "default PDNS version")
-	loggingArgs             = func() map[logrus.Level]*string {
-		args := map[logrus.Level]*string{}
-		for _, level := range logrus.AllLevels {
-			args[level] = flag.String(logParamPrefix+level.String(), "", fmt.Sprintf("Set logging level %s to the given components (separated by +)", level))
-		}
-		return args
-	}()
+	logLevelArg             = flag.String(logLevelParam, "", "Set logging level(s) ([<component>[.<component>]...=]<level>[,...])")
 )
 
 func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, osSignals chan os.Signal, trackReaders bool) {
@@ -395,7 +405,7 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 	if "v"+releaseVersion != gitVersion {
 		releaseVersion += fmt.Sprintf("[%s]", gitVersion)
 	}
-	log.main().Printf("pdns-etcd3 %s, Copyright © 2016-2026 nix <https://keybase.io/nixn>", releaseVersion)
+	RootLog.Infof()(nil, "pdns-etcd3 %s, Copyright © 2016-2026 nix <https://keybase.io/nixn>", releaseVersion)()
 	// handle arguments // TODO handle more arguments, f.e. 'show-defaults' standalone command
 	args = programArgs{
 		ConfigFile:           configFileArg,
@@ -408,26 +418,24 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 		Prefix:               prefixArg,
 	}
 	if err := flag.CommandLine.Parse(cmdLineArgs); err != nil { // same as flag.Parse(), but we can pass the arguments instead of being fixed to os.Args[1:] (needed for integration testing)
-		log.main().Panicf("failed to parse command line arguments: %s", err)
+		RootLog.Fatalf("main", "init")(nil, "failed to parse command line arguments: %s", err)()
 	}
-	for level, components := range loggingArgs {
-		if len(*components) > 0 {
-			log.setLoggingLevel(*components, level)
-		}
+	if *logLevelArg != "" {
+		setLogLevels(*logLevelArg)
 	}
 	if *pdnsVersionArg != "" {
-		log.main().Debugf("setting default PDNS version to %s", *pdnsVersionArg)
+		RootLog.Logf(1, "main", "init")(nil, "setting default PDNS version")(*pdnsVersionArg)
 		if err := setPdnsVersionParameter(&defaultPdnsVersion)(*pdnsVersionArg); err != nil {
-			log.main("arg", *pdnsVersionArg).Panicf("failed to set default PDNS version: %s", err)
+			RootLog.Fatalf("main", "init")(nil, "failed to set default PDNS version: %s", err)("arg", *pdnsVersionArg)
 		}
 	}
 	signal.Notify(osSignals, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
-		log.main().Trace("{signal} waiting for OS signals (HUP, INT, TERM, QUIT)")
+		RootLog.Logf(3, "main", "{signal}")(nil, "waiting for OS signals (HUP, INT, TERM, QUIT)")()
 		sig := <-osSignals
-		log.main().Debugf("{signal} caught signal %s, shutting down", sig)
+		RootLog.Logf(1, "main", "{signal}")(nil, "caught signal %s, shutting down", sig)()
 		cancel()
 	}()
 	wg := new(WaitGroup).Init()
@@ -435,26 +443,26 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 	if standalone {
 		u, err := url.Parse(*standaloneArg)
 		if err != nil {
-			log.main().Panicf("failed to parse standalone URL: %s", err)
+			RootLog.Fatalf("main", "init")(nil, "failed to parse standalone URL: %s", err)()
 		}
 		standalone, ok := standalones[u.Scheme]
 		if !ok {
-			log.main("scheme", u.Scheme).Panic("unknown scheme in standalone URL")
+			RootLog.Fatalf("main", "init")(nil, "unknown scheme in standalone URL")(u.Scheme)
 		}
 		if messages, err := cli.Setup(&args); err != nil {
-			log.main().Panicf("setupClient() failed: %s", err)
+			RootLog.Fatalf("main", "init")(nil, "client setup failed: %s", err)()
 		} else {
-			log.main(messages).Debug("setupClient messages")
+			RootLog.Logf(1, "main", "init")(nil, "client setup messages")(messages)
 		}
 		defer cli.Close()
 		if err = populateData(ctx, wg, trackReaders); err != nil {
-			log.main().Panicf("populateData() failed: %s", err)
+			RootLog.Fatalf("main", "init")(nil, "populating data failed: %s", err)()
 		}
 		standalone(ctx, wg, u)
 	} else {
 		r, w, err := os.Pipe()
 		if err != nil {
-			log.main().Panicf("failed to create os.Pipe(): %s", err)
+			RootLog.Fatalf("main", "init")(nil, "failed to create os.Pipe(): %s", err)()
 		}
 		defer closeNoError(r)
 		defer closeNoError(w)
@@ -463,14 +471,14 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 		}()
 		pipe(ctx, wg, r, os.Stdout, trackReaders)
 	}
-	log.main().Debug("request handler returned normally, stopping work")
+	RootLog.Logf(4, "main")(nil, "request handler returned normally, stopping work")()
 	cancel()
 	nr, _ := wg.State(false)
 WAIT:
 	for n, N := 1, 3; nr > 0 && n <= N; n++ {
 		var names []string
 		nr, names = wg.State(true)
-		log.main(names).Tracef("waiting for child routines (%d) to finish [%d/%d]", nr, n, N)
+		RootLog.Logf(3, "main", "done")(nil, "waiting for child routines to finish [%d/%d]", n, N)("#", nr, names)
 		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		done := make(chan struct{})
 		go func() {
@@ -484,17 +492,18 @@ WAIT:
 		case <-waitCtx.Done():
 			if n == N {
 				nr, names = wg.State(true)
-				log.main(names).Error("timeout while waiting on routines, exiting forcefully")
+				RootLog.Errorf("main", "done")(nil, "timeout while waiting on child routines, exiting forcefully")(names)
 			}
 		}
 	}
 	if nr == 0 {
-		log.main().Trace("all routines finished, exiting normally")
+		RootLog.Logf(3, "main", "done")(nil, "all child routines finished, exiting normally")()
 	}
 }
 
 func populateData(ctx context.Context, wg *WaitGroup, trackReaders bool) error {
-	log.main().Debug("populating data")
+	debug1 := RootLog.Logf(1, "data", "init")
+	debug1(nil, "populating data")()
 	getResponse, err := cli.Get(*args.Prefix, true, nil, *args.DialTimeout)
 	if err != nil {
 		return fmt.Errorf("get() failed: %s", err)
@@ -505,17 +514,17 @@ func populateData(ctx context.Context, wg *WaitGroup, trackReaders bool) error {
 		dataRoot.mutex.Lock()
 		defer dataRoot.mutex.Unlock()
 		dataRoot.reload(getResponse.DataChan)
-		log.main("#records", dataRoot.recordsCount(), "#zones", dataRoot.zonesCount(), "revision", getResponse.Revision).Debug("loaded data")
+		debug1(nil, "loaded data")("#records", dataRoot.recordsCount, "#zones", dataRoot.zonesCount, "revision", getResponse.Revision)
 	}()
 	status.populated = true
-	log.main().Debug("starting data watcher")
+	debug1(nil, "starting data watcher")()
 	wg.Go("watchData", func(...any) {
 		defer recoverPanics(func(v any) bool {
 			recoverFunc(v, "watchData()", false)
 			return false
 		})
 		cli.WatchData(ctx, *args.Prefix)
-		log.main().Trace("watchData() returned normally")
+		RootLog.Logf(4, "data", "{watch}")(nil, "watchData() returned normally")()
 	})
 	return nil
 }
@@ -532,7 +541,7 @@ func pipe(ctx context.Context, wg *WaitGroup, in io.ReadCloser, out io.WriteClos
 		if err != nil {
 			client.Fatal(fmt.Errorf("setupClient() failed: %s", err))
 		}
-		log.etcd().Debugf("connected")
+		RootLog.Logf(1, "etcd", "init")(nil, "connected")()
 		if err := populateData(ctx, wg, trackReaders); err != nil {
 			client.Fatal(fmt.Errorf("populateData() failed: %s", err))
 		}
@@ -546,16 +555,16 @@ func serve(ctx context.Context, wg *WaitGroup, client *pdnsClient, initialized *
 	reqChan := startReadRequests(ctx, wg, client)
 	if initialized != nil {
 		// first request must be 'initialize'
-		client.log.pdns().Trace("waiting for initialize request")
+		client.Logf(2, "pdns", "init")("waiting for initialize request")()
 		initRequest, ok := <-reqChan
 		if !ok {
-			client.log.pdns().Trace("requests channel closed")
+			client.Logf(3, "pdns")("requests channel closed")()
 			return
 		}
 		if initRequest.Method != "initialize" {
-			client.log.pdns("method", initRequest.Method).Panic("wrong request method (waited for 'initialize')")
+			client.Fatalf("pdns", "init")("wrong request method (waited for 'initialize')")(initRequest)
 		}
-		client.log.main("parameters", initRequest.Parameters).Info("initializing")
+		client.Logf(1, "pdns", "init")("initializing")("parameters", initRequest.Parameters)
 		params := objectType[string]{}
 		for k, v := range initRequest.Parameters {
 			params[k] = v.(string)
@@ -564,7 +573,7 @@ func serve(ctx context.Context, wg *WaitGroup, client *pdnsClient, initialized *
 		if err != nil {
 			client.Fatal(err)
 		}
-		client.log.main().Debugf("successfully read parameters")
+		client.Logf(2, "pdns", "init")("successfully read parameters")()
 		logMessages := (*initialized)(client)
 		client.Respond(makeResponse(true, logMessages...))
 	}
@@ -572,10 +581,10 @@ func serve(ctx context.Context, wg *WaitGroup, client *pdnsClient, initialized *
 		*serving = true
 	}
 	for nextRequestID := uint64(1); ; nextRequestID++ {
-		client.log.pdns().Trace("waiting for next request")
+		client.Logf(2, "pdns")("waiting for next request")("nextRequestID", nextRequestID)
 		request, ok := <-reqChan
 		if !ok {
-			client.log.pdns().Trace("requests channel closed")
+			client.Logf(3, "pdns")("requests channel closed")("nextRequestID", nextRequestID)
 			break
 		}
 		handleRequest(ctx, &pdnsClientRequest{client, nextRequestID, &request})

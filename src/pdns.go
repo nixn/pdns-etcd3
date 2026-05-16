@@ -37,44 +37,65 @@ type pdnsClient struct {
 	ID          pdnsClientID
 	PdnsVersion uint
 	Comm        *commType[pdnsRequest]
-	log         logType
 	in          io.ReadCloser
 	out         io.WriteCloser
 }
 
 func newPdnsClient(ctx context.Context, id pdnsClientID, in io.ReadCloser, out io.WriteCloser) *pdnsClient {
-	idStr := id.String()
 	client := &pdnsClient{
 		ID:          id,
 		PdnsVersion: defaultPdnsVersion,
 		Comm:        newComm[pdnsRequest](ctx, in, out),
-		log:         newLog(&idStr, "main", "pdns", "data"), // TODO timings
 		in:          in,
 		out:         out,
-	}
-	for comp, logger := range client.log {
-		logger.SetLevel(log.logger(comp).GetLevel())
 	}
 	return client
 }
 
 // TODO on fatal errors which are local to a client, don't stop the whole program
 
+func (client *pdnsClient) Logf(level int, component ...string) func(string, ...any) func(...any) {
+	return func(format string, args ...any) func(...any) {
+		return RootLog.Logf(level, component...)(&client.ID, format, args...)
+	}
+}
+
+func (client *pdnsClient) Fatalf(component ...string) func(string, ...any) func(...any) {
+	return client.Logf(FatalLevel, component...)
+}
+
+func (client *pdnsClient) Errorf(component ...string) func(string, ...any) func(...any) {
+	return client.Logf(ErrorLevel, component...)
+}
+
+func (client *pdnsClient) Warnf(component ...string) func(string, ...any) func(...any) {
+	return client.Logf(WarningLevel, component...)
+}
+
 func (client *pdnsClient) Respond(response any) {
-	client.log.pdns(response).Tracef("response")
+	client.Logf(2, "pdns")("response")(response)
 	if err := client.Comm.write(response); err != nil {
-		client.log.pdns("response", response).Panicf("failed to encode response: %s", err)
+		client.Fatalf("pdns")("failed to encode response: %s", err)("response", response)
 	}
 }
 
 func (client *pdnsClient) Fatal(msg any) {
 	s := fmt.Sprintf("%s", msg)
 	client.Respond(makeResponse(false, s))
-	client.log.main().Panicf("fatal error: %s", s)
+	client.Fatalf("pdns")("fatal error: %s", s)()
 }
 
 type pdnsClientRequest struct {
 	Client    *pdnsClient
 	RequestID uint64
 	Request   *pdnsRequest
+}
+
+func (cr *pdnsClientRequest) Logf(level int, component ...string) func(string, ...any) func(...any) {
+	return func(format string, args ...any) func(...any) {
+		return func(fields ...any) {
+			fields = Prepend(fields, "reqID", any(cr.RequestID))
+			cr.Client.Logf(level, component...)(format, args...)(fields...)
+		}
+	}
 }

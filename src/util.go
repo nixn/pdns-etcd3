@@ -15,6 +15,7 @@ limitations under the License. */
 package src
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -36,6 +37,26 @@ func Reversed[T any](a []T) []T {
 		r[n-i-1] = a[i]
 	}
 	return r
+}
+
+func Concat[T any](slices ...[]T) []T {
+	totalLength := 0
+	for _, slice := range slices {
+		totalLength += len(slice)
+	}
+	result := make([]T, 0, totalLength)
+	for _, slice := range slices {
+		result = append(result, slice...)
+	}
+	return result
+}
+
+func PrependT[T any](slice []T, elements ...T) []T {
+	return Concat(elements, slice)
+}
+
+func Prepend(slice []any, elements ...any) []any {
+	return Concat(elements, slice)
 }
 
 func seconds(dur time.Duration) int64 {
@@ -170,7 +191,7 @@ func ptr2str[T any](ptr *T, format string) string {
 	if ptr == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf(`&%`+format, *ptr)
+	return fmt.Sprintf(format, *ptr)
 }
 
 func ptr2strS[T interface{ String() string }](ptr *T) *string {
@@ -196,6 +217,13 @@ func float2int(n float64) (int64, error) {
 func float2decimal(n float64) string {
 	str := fmt.Sprintf("%f", n)
 	return strings.TrimRight(str, "0.,")
+}
+
+func CutString(str string, n int, suf string) string {
+	if len(str) <= n {
+		return str
+	}
+	return str[:n-len(suf)]+suf
 }
 
 type WaitGroup struct {
@@ -265,40 +293,22 @@ func (wg *WaitGroup) State(withNames bool) (uint64, []string) {
 }
 
 func recoverPanics(f func(any) bool) {
-	if r := recover(); r != nil {
-		repanic := false
-		if f != nil {
-			repanic = f(r)
-		}
-		if repanic {
-			panic(r)
-		}
+	if r := recover(); r != nil && f != nil && f(r) {
+		panic(r)
 	}
 }
 
 func recoverFunc(v any, name string, exit bool) bool {
-	switch v := v.(type) {
-	case *logrus.Entry:
-		if lf, ok := v.Logger.Formatter.(*logFormatter); ok {
-			log.main().Tracef("%s: fatal error in %s: %s%s", name, lf.component, lf.msgPrefix, v.Message)
+	if e, ok := v.(*logrus.Entry); ok {
+		if ln, ok := e.Logger.Formatter.(*LogNode); ok {
+			ln.Logf(3)(nil, "%s: fatal error", name)(e.Message)
 			if exit {
 				os.Exit(1)
 			}
 			return true
 		}
-	case logFatal:
-		log.main().Printf("[BUG] deprecated call of log.Fatal(): %s", val2str(v))
-		suffix := ""
-		if v.clientID != nil {
-			suffix = fmt.Sprintf(" [%s]", *v.clientID)
-		}
-		log.main().Tracef("%s: fatal error in %s%s", name, v.component, suffix)
-		if exit {
-			os.Exit(v.code)
-		}
-		return true
 	}
-	log.main().Errorf("%s panicked: %s", name, val2str(v))
+	RootLog.Errorf()(nil, "%s panicked", name)(v)
 	return false
 }
 
@@ -314,6 +324,14 @@ func slicePrefixed[T comparable](slice []T, prefix ...T) bool {
 		}
 	}
 	return true
+}
+
+func Supplier1[T1, R any](fn func(T1) R, t1 T1) func() R {
+	return func() R { return fn(t1) }
+}
+
+func Supplier3[T1, T2, T3, R any](fn func(T1, T2, T3) R, t1 T1, t2 T2, t3 T3) func() R {
+	return func() R { return fn(t1, t2, t3) }
 }
 
 type SyncAccess struct {
@@ -431,4 +449,8 @@ func Some[T any](ts ...*T) *T {
 		}
 	}
 	return nil
+}
+
+func Ptr[V any](v V) *V {
+	return &v
 }

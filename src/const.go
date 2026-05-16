@@ -38,7 +38,7 @@ const (
 const (
 	pdnsVersionParam          = "pdns-version"
 	prefixParam               = "prefix"
-	logParamPrefix            = "log-"
+	logLevelParam             = "log-level"
 	configFileParam           = "config-file"
 	endpointsParam            = "endpoints"
 	dialTimeoutParam          = "timeout"
@@ -80,7 +80,7 @@ var (
 		4: {4, 1, `.`},
 		6: {16, 2, `:`},
 	}
-	ipHexRE    = regexp.MustCompile("^(0[xX])?([0-9a-fA-F]+)$")
+	ipHexRE    = regexp.MustCompile("^(?i)(0x)?([0-9a-f]+)$")
 	ip4OctetRE = regexp.MustCompile("^[0-9]{1,3}$")
 	priorityRE = regexp.MustCompile("{priority:(.*?)}")
 )

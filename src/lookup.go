@@ -60,14 +60,15 @@ func lookup(cr *pdnsClientRequest) (interface{}, error) {
 	}
 	//goland:noinspection GoPreferNilSlice
 	result := []objectType[any]{}
-	cr.Client.log.main().Tracef("lookup: RLocking up to %q", query.name.asKey(true))
+	lockDebug := cr.Client.Logf(4, "data", "locking")
+	lockDebug("lookup: RLocking up to %q", Supplier1(query.name.asKey, true))()
 	data, found := dataRoot.getChild(query.name, true)
-	cr.Client.log.main(data.LockCounts()).Tracef("lookup: RLocked %q", data.prefixKey())
+	lockDebug("lookup: RLocked %q", data.prefixKey)(data.LockCounts)
 	defer data.rUnlockUpwards(nil, true)
-	defer cr.Client.log.main(data.LockCounts()).Tracef("lookup: RUnlocking: %q", data.prefixKey())
+	defer lockDebug("lookup: RUnlocking %q", data.prefixKey)(data.LockCounts)
 	if !found {
-		cr.Client.log.data(query.name).Tracef("search returned %q", data.getQname())
-		cr.Client.log.data(query.name).Debug("no such domain")
+		cr.Client.Logf(2, "data")("lookup: search returned %q", data.getQname)(query.name)
+		cr.Client.Logf(1, "data")("lookup: no such domain")(query.name)
 		return result, nil
 	}
 	records := map[string]map[string]recordType{}
@@ -83,11 +84,11 @@ func lookup(cr *pdnsClientRequest) (interface{}, error) {
 	for qtype, records := range records {
 		for _, record := range records {
 			item := makeResultItem(qname, qtype, data, &record, cr.Client.PdnsVersion)
-			cr.Client.log.pdns(item).Trace("adding result item")
+			cr.Client.Logf(3, "pdns")("lookup: adding result item")(item)
 			result = append(result, item)
 		}
 	}
-	cr.Client.log.pdns(result).Debugf("request result (%d)", len(result))
+	cr.Client.Logf(1, "pdns")("lookup: result")("#", len(result), result)
 	return result, nil
 }
 
@@ -153,10 +154,10 @@ func findValue[T any](key, qtype, id string, data *dataNode, valuesArea entryTyp
 				if value, ok := value.content.(objectValueType)[key]; ok {
 					valuePath := valuePath{dn, &soe}
 					if value, ok := value.(T); ok {
-						log.data("value", value, "area", valuesArea).Tracef("found value for %s:%s in %s", queryPath.String(), key, valuePath.String())
+						data.Logf(4, "values")("found value for %s:%s in %s", queryPath.String, key, valuePath.String)("value", value, "area", valuesArea)
 						return value, &valuePath, nil
 					}
-					log.data("value", value, "area", valuesArea, "found-in", valuePath.String()).Tracef("invalid type of value for %s.%s: %T", queryPath.String(), key, value) // TODO use warning level?
+					data.Errorf("values")("invalid type of value for %s.%s: %T", queryPath.String, key, value)("value", value, "area", valuesArea, "found-in", valuePath.String)
 					var zero T
 					return zero, &valuePath, fmt.Errorf("invalid value type: %T", value)
 				}
@@ -174,10 +175,10 @@ func findValueOrDefault[V any](key string, values objectType[any], qtype, id str
 	if value, ok := values[key]; ok {
 		queryPath := valuePath{data, &searchOrderElement{qtype, id}}
 		if value, ok := value.(V); ok {
-			log.data("value", value).Tracef("found value for %s:%s directly", queryPath.String(), key)
+			data.Logf(4, "values")("found value for %s:%s directly", queryPath.String, key)("value", value)
 			return value, &queryPath, nil
 		}
-		log.data("value", value).Tracef("invalid type of value for %s.%s (found directly): %T", queryPath.String(), key, value)
+		data.Errorf("values")("invalid type of value for %s.%s (found directly): %T", queryPath.String, key, value)("value", value)
 		var zeroValue V
 		return zeroValue, &queryPath, fmt.Errorf("invalid type (expected %T): %T", zeroValue, value)
 	}

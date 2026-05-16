@@ -24,14 +24,15 @@ import (
 func newTransaction(caller string, qname string, client *pdnsClient, dataGet func(*dataNode) error, timeout time.Duration) (*Transaction, error) {
 	name := ParseDomainName(strings.ToLower(qname))
 	txn, err := func() (*Transaction, error) {
-		client.log.main().Tracef("%s: RLocking up to %q", caller, name.asKey(true))
+		lockDebug := client.Logf(4, "data", "locking")
+		lockDebug("%s: RLocking up to %q", caller, Supplier1(name.asKey, true))()
 		data, found := dataRoot.getChild(name, true)
 		defer func() {
-			client.log.main(data.LockCounts()).Tracef("%s: RUnlocking %q", caller, data.prefixKey())
+			lockDebug("%s: RUnlocking %q", caller, data.prefixKey)(data.LockCounts)
 			data.rUnlockUpwards(nil, true)
 		}()
-		client.log.main(data.LockCounts()).Tracef("%s: RLocked %q", caller, data.prefixKey())
-		client.log.data("searched", name, "found", data.getQname()).Tracef("%s: search result", caller)
+		lockDebug("%s: RLocked %q", caller, data.prefixKey)(data.LockCounts)
+		client.Logf(2, "data")("%s: search result: %q", caller, data.getQname)(name.normal)
 		if !found {
 			return nil, fmt.Errorf("no such domain")
 		}
@@ -43,7 +44,7 @@ func newTransaction(caller string, qname string, client *pdnsClient, dataGet fun
 	if err != nil {
 		return nil, err
 	}
-	client.log.main("qname", qname, "timeout", timeout).Trace("starting new transaction")
+	client.Logf(3, "main")("%s: starting new transaction", caller)("qname", qname, "timeout", timeout)
 	if _, err := txn.Start(timeout); err != nil {
 		return nil, fmt.Errorf("failed to start transaction: %s", err)
 	}
@@ -63,7 +64,7 @@ func waitForReload(ctx context.Context, caller string, name Name, rev int64) {
 			data, _ := dataRoot.getChild(name, true)
 			//goland:noinspection GoDeferInLoop // this case breaks the loop, so that defer is not a problem
 			defer data.rUnlockUpwards(nil, true)
-			log.main("name", name.normal(), "rev", rev, "zoneRev", data.zoneRev(), "after", after).Debugf("%s: waitForReload was interrupted by context", caller)
+			data.Logf(2)("%s: waitForReload was interrupted by context after %s", caller, after)("rev", rev, "zoneRev", data.zoneRev)
 			return
 		default:
 			time.Sleep(time.Millisecond)
