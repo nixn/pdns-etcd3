@@ -267,6 +267,22 @@ func domainName(key string) rrFunc {
 	}
 }
 
+// fixedSerial returns MetaFixedSerial (if set and a valid uint32) or zoneRev() otherwise.
+func (p *rrParams) fixedSerial() int64 {
+	values, ok := p.data.metadata[MetaFixedSerial]
+	if !ok || len(values) == 0 {
+		return p.data.zoneRev()
+	}
+	raw := strings.TrimSpace(values[0])
+	v, err := strconv.ParseUint(raw, 10, 32)
+	if err != nil {
+		p.Logf(WarningLevel)("invalid %s metadata, falling back to zoneRev", MetaFixedSerial)("value", raw, "err", err)
+		return p.data.zoneRev()
+	}
+	p.Logf(3)("using %s metadata as SOA serial", MetaFixedSerial)("serial", v)
+	return int64(v)
+}
+
 func soa(params *rrParams) {
 	// primary
 	primary, vPath, err := getValue[string]("primary", params)
@@ -303,8 +319,8 @@ func soa(params *rrParams) {
 		params.Logf(ErrorLevel)("failed to append zone domain to 'mail': %v", err)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
-	// serial
-	serial := params.data.zoneRev() // no need for findZone(), because SOA defines the zone
+	// serial: MetaFixedSerial overrides zoneRev (e.g. to match RRSIG(SOA) in pre-signed mode).
+	serial := params.fixedSerial()
 	// refresh
 	refresh, vPath, err := getDuration("refresh", params)
 	if vPath == nil || err != nil {
