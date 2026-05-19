@@ -40,6 +40,10 @@ the third development release, considered alpha quality. Any testing is apprecia
 * [Multi-level defaults and options](doc/ETCD-structure.md#defaults-and-options), overridable
 * [Domain metadata](https://doc.powerdns.com/authoritative/domainmetadata.html)
     * can also be read and modified with the command line tool `pdnsutil` (`pdnssec` in v3.4)
+* [Pre-signed DNSSEC zones](doc/ETCD-structure.md#pre-signed-dnssec) (online signing is still [planned](#planned))
+    * an external signer (e.g. `ldns-signzone`, `dnssec-signzone`, OpenDNSSEC) produces the signed records (`RRSIG`, `NSEC`/`NSEC3`, `DNSKEY`, …) and stores them in ETCD just like any other record
+    * `PRESIGNED=1` is set as ordinary [metadata](doc/ETCD-structure.md#metadata) — there is no DNSSEC-specific switch on the backend
+    * the served SOA serial can be pinned with the [`X-PE3-FIXED-SERIAL`](doc/ETCD-structure.md#metadata) metadata to match the value baked into `RRSIG(SOA)` by the signer
 * [Upgrade data structure](doc/ETCD-structure.md#upgrading) (if needed for new program version) without interrupting service
 * Run [standalone](#standalone-modes) for usage as a [Unix or HTTP connector][pdns-remote-usage]
   * This could be needed for big data sets, because the initialization from PowerDNS is done lazily (at least as of v4) on first request (which possibly could time out on "big data"…) :-(
@@ -59,7 +63,8 @@ the third development release, considered alpha quality. Any testing is apprecia
 * "Labels" for selectively applying defaults and/or options to record entries
   * sth. like `com/example/-options-ptr` → `{"auto-ptr": true}` and `com/example/www/-options-collect` → `{"collect": …}` for `com/example/www-1/A+ptr+collect` without global options
   * precedence betweeen QTYPE and id (id > label > QTYPE)
-* DNSSEC support ([PowerDNS DNSSEC-specific calls][pdns-dnssec])
+* Online DNSSEC signing ([PowerDNS DNSSEC-specific calls][pdns-dnssec])
+  * pre-signed zones are already supported, see [Features](#features) and [ETCD structure](doc/ETCD-structure.md#pre-signed-dnssec)
 
 [pdns-dnssec]: https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dnssec-support
 [pdns-remote-usage]: https://doc.powerdns.com/authoritative/backends/remote.html#usage
