@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -101,7 +102,7 @@ func unixListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 			continue
 		}
 		RootLog.Logf(1, "conn", "unix")(nil, "new connection [%d]: %+v", nextClientID, conn)()
-		id := unixClientID{nextClientID, conn.RemoteAddr()}
+		id := &unixClientID{nextClientID, conn.RemoteAddr(), nil}
 		wg.Go(fmt.Sprintf("serve[%s]", id), func(...any) {
 			defer recoverPanics(func(v any) bool {
 				recoverFunc(v, fmt.Sprintf("unix: serve[%s]", id), false)
