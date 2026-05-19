@@ -63,6 +63,7 @@ const (
 
 const (
 	MetaMinimumSerial = "X-PE3-MINIMUM-SERIAL"
+	MetaFixedSerial   = "X-PE3-FIXED-SERIAL"
 )
 
 type ipMetaT map[int]struct {
