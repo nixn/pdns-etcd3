@@ -27,6 +27,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -265,7 +266,7 @@ type pe3Info struct {
 
 func startPE3(t *testing.T, etcdEndpoint, prefix string, moreArgs ...string) pe3Info {
 	t.Helper()
-	httpAddress, _ := url.Parse("http://0.0.0.0:8053") // the port is fixed, it is set in pdns.conf too
+	httpAddress, _ := url.Parse("http://0.0.0.0:8053") // the port is fixed, it is also used in remote-connection-string PDNS setting
 	doneCtx, done := context.WithCancel(context.Background())
 	osSignals := make(chan os.Signal, 1)
 	cli = new(etcdClient)
@@ -343,6 +344,7 @@ func startPDNS(t *testing.T, dynamicSettings map[string]string) (pdnsInfo, error
 		Fatalf(t, "invalid PDNS version: %q", v)
 	}
 	settings := []string{
+		fmt.Sprintf("remote-connection-string=http:url=http://host.docker.internal:8053/client-id=%013s/pdns-version=%s/,post=yes,post_json=yes,timeout=10000", strconv.FormatUint(rand.Uint64(), 32), v[:1]),
 		"cache-ttl=0",
 		"query-cache-ttl=0",
 		"negquery-cache-ttl=0",

@@ -46,6 +46,7 @@ const (
 	dialKeepAliveTimeoutParam = "dial-keep-alive-timeout"
 	autoSyncIntervalParam     = "auto-sync-interval"
 	permitWithoutStreamParam  = "permit-without-stream"
+	clientIDParam             = "client-id"
 )
 
 const (

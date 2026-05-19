@@ -41,10 +41,15 @@ var (
 type unixClientID struct {
 	id         uint64
 	addr       net.Addr
+	clientID   *string
 }
 
-func (id unixClientID) String() string {
-	return fmt.Sprintf("%d,%s", id.id, id.addr)
+func (id *unixClientID) String() string {
+	return fmt.Sprintf("%d,%s,%s", id.id, id.addr, ptr2str(id.clientID, "[%s]"))
+}
+
+func (id *unixClientID) SetClientID(clid string) {
+	id.clientID = &clid
 }
 
 func unixListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
@@ -128,10 +133,15 @@ var (
 type httpClientID struct {
 	clientAddr string
 	requestID  uint16
+	clientID   *string
 }
 
-func (id httpClientID) String() string {
-	return fmt.Sprintf("%s #%04x", id.clientAddr, id.requestID)
+func (id *httpClientID) String() string {
+	return fmt.Sprintf("%s #%04x %s", id.clientAddr, id.requestID, ptr2str(id.clientID, "%s"))
+}
+
+func (id *httpClientID) SetClientID(clid string) {
+	id.clientID = &clid
 }
 
 func httpListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
@@ -160,11 +170,12 @@ func httpListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 		return mediatype == mt
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := httpClientID{r.RemoteAddr, uint16(rand.Uint32())}
-		idStr := id.String()
-		wg.Register(idStr)
-		defer wg.Done(idStr)
-		client := newPdnsClient(ctx, id, r.Body, &httpWriter{w})
+		requestID := uint16(rand.Uint32())
+		routineID := fmt.Sprintf("%s %04x", r.RemoteAddr, requestID)
+		wg.Register(routineID)
+		defer wg.Done(routineID)
+		clientID := &httpClientID{r.RemoteAddr, requestID, nil}
+		client := newPdnsClient(ctx, clientID, r.Body, &httpWriter{w})
 		client.Logf(2, "conn", "http")("new request")("method", r.Method, "url", r.URL.String, "header", r.Header) // lesser debug level due to no real request information here (determined later from body)
 		if r.Method != http.MethodPost {
 			client.Logf(1, "conn", "http")("non-POST method")(r.Method)
@@ -179,6 +190,17 @@ func httpListener(ctx context.Context, wg *WaitGroup, u *url.URL) {
 		if !headerIsMT(client, r, "Accept", "application/json") {
 			client.Logf(1, "conn", "http")("non-JSON accept header")(Supplier1(r.Header.Get, "Accept"))
 			http.Error(w, "Accept must be application/json", http.StatusUnsupportedMediaType)
+			return
+		}
+		params := objectType[string]{}
+		for _, param := range strings.Split(r.URL.Path, "/") {
+			if k, v, _ := strings.Cut(param, "="); k != "" {
+				params[k] = v
+			}
+		}
+		if err := readParameters(params, client); err != nil {
+			client.Errorf("conn", "http")("failed to read parameters: %s", err)(params)
+			http.Error(w, "Failed to read parameters: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 		cur := requestsCount.cur.Add(1)

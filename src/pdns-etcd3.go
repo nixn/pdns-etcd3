@@ -166,6 +166,9 @@ func readParameters(params objectType[string], client *pdnsClient) error {
 			err = setPdnsVersionParameter(&client.PdnsVersion)(v)
 		case !standalone && k == logLevelParam:
 			setLogLevels(v)
+		case standalone && k == clientIDParam:
+			client.Logf(2, "pdns", "init")("setting inner client ID")(v)
+			client.ID.SetClientID(v)
 		case k == "path": // TODO standalone?
 			// ignore
 		default:
@@ -424,6 +427,7 @@ func main(programVersion VersionType, gitVersion string, cmdLineArgs []string, o
 		setLogLevels(*logLevelArg)
 	}
 	if *pdnsVersionArg != "" {
+		// TODO remove this, because now the HTTP clients can pass parameters, too
 		RootLog.Logf(1, "main", "init")(nil, "setting default PDNS version")(*pdnsVersionArg)
 		if err := setPdnsVersionParameter(&defaultPdnsVersion)(*pdnsVersionArg); err != nil {
 			RootLog.Fatalf("main", "init")(nil, "failed to set default PDNS version: %s", err)("arg", *pdnsVersionArg)
@@ -534,6 +538,8 @@ type pipeClientID struct{}
 func (id pipeClientID) String() string {
 	return "*"
 }
+
+func (id pipeClientID) SetClientID(string) {}
 
 func pipe(ctx context.Context, wg *WaitGroup, in io.ReadCloser, out io.WriteCloser, trackReaders bool) {
 	initialized := func(client *pdnsClient) []string {

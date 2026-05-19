@@ -31,6 +31,7 @@ func (req *pdnsRequest) String() string {
 
 type pdnsClientID interface {
 	String() string
+	SetClientID(clid string)
 }
 
 type pdnsClient struct {
