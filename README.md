@@ -170,11 +170,12 @@ The requests would be rejected otherwise.
 Example PowerDNS configuration file:
 ```text
 launch=remote
-remote-connection-string=http:url=http://localhost:8053/,post=yes,post_json=yes
+remote-connection-string=http:url=http://localhost:8053[/client-id=xyz][/pdns-version=3],post=yes,post_json=yes
 ```
 
-Because there is no 'initialize' call, the version of a connecting PowerDNS cannot be known (and is not passed in the requests).
-Thus, when one has to change the assumed version, they can use the `-pdns-version` option (see below).
+Because there is no 'initialize' call, the version of a connecting PowerDNS must be given as a parameter,
+if it differs from the default PDNS version. The default PDNS version can be changed via the `-pdns-version` option (see below).
+Other parameters could be set the same way, the URL path replaces the 'initialize' call for the HTTP connector.
 
 ### Parameters
 
