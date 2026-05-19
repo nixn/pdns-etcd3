@@ -32,6 +32,8 @@ const (
 	ImportantLevel = -1
 )
 
+// TODO enable client-specific logging (parameters from requests)
+
 type logNodeParent struct {
 	node      *LogNode
 	component string

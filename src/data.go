@@ -16,6 +16,7 @@ package src
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -170,11 +171,12 @@ func (dn *dataNode) Errorf(component ...string) func(string, ...any) func(...any
 }
 
 func (dn *dataNode) getName() Name {
-	var parts []namePart
+	parts := make([]namePart, 0, 10)
 	for dn := dn; dn.lname != ""; dn = dn.parent {
 		parts = append(parts, namePart{dn.lname, dn.keyPrefix})
 	}
-	return Reversed(parts)
+	slices.Reverse(parts)
+	return parts
 }
 
 // this method is only called from reload(), which itself is called under writer lock, so no locking needed here

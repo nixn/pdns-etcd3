@@ -20,6 +20,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,13 +31,10 @@ import (
 
 type objectType[T any] map[string]T
 
-func Reversed[T any](a []T) []T {
-	n := len(a)
-	r := make([]T, n)
-	for i := 0; i < n; i++ {
-		r[n-i-1] = a[i]
-	}
-	return r
+// Reverse reverses the slice in place and returns it.
+func Reverse[T any](slice []T) []T {
+	slices.Reverse(slice)
+	return slice
 }
 
 func Concat[T any](slices ...[]T) []T {
@@ -223,7 +221,7 @@ func CutString(str string, n int, suf string) string {
 	if len(str) <= n {
 		return str
 	}
-	return str[:n-len(suf)]+suf
+	return str[:n-len(suf)] + suf
 }
 
 type WaitGroup struct {

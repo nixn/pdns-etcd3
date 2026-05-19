@@ -82,7 +82,7 @@ func (name Name) asKey(withTrailingKeySeparator bool) string {
 }
 
 func ParseDomainName(name string) Name {
-	return Map(Reversed(splitDomainName(name, ".")), func(lname string, i int) namePart {
+	return Map(Reverse(splitDomainName(name, ".")), func(lname string, i int) namePart {
 		if i == 0 {
 			return namePart{lname, ""}
 		}
