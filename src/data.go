@@ -358,7 +358,7 @@ func parseEntryKey(key string) (name Name, entryType entryType, qtype, id string
 				switch qtype {
 				case "A", "AAAA", "ALIAS", "CNAME", "DNAME", "MX", "NS", "PTR", "SOA": // TODO add others, even not-supported ones?
 					for _, lname := range name {
-						if strings.IndexRune(lname.name, '_') >= 0 {
+						if strings.ContainsRune(lname.name, '_') {
 							err = fmt.Errorf("records for hostnames may not have underscores: %q", lname.name)
 							return
 						}

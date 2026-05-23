@@ -136,11 +136,11 @@ func (cli *etcdClient) Put(key string, value string, timeout time.Duration) (*cl
 func (cli *etcdClient) Del(key string, multi bool, timeout time.Duration) (*clientv3.DeleteResponse, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	opts := make([]clientv3.OpOption, 0, 1)
 	if multi {
-		return cli.Client.Delete(ctx, key, clientv3.WithPrefix())
-	} else {
-		return cli.Client.Delete(ctx, key)
+		opts = append(opts, clientv3.WithPrefix())
 	}
+	return cli.Client.Delete(ctx, key, opts...) //nolint:staticcheck // same as in Put
 }
 
 func delOp(key string, multi bool) clientv3.Op {

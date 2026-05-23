@@ -255,7 +255,7 @@ func testEqual(t *testing.T, a, b any, conditions map[string]Condition, path str
 
 var compiledConditionsCache = (&MapSyncAccess[string, *regexp.Regexp]{}).Init()
 
-func testEqualR(t *testing.T, a, b reflect.Value, conditions map[string]Condition, path string) *DeepError {
+func testEqualR(t *testing.T, a, b reflect.Value, conditions map[string]Condition, path string) *DeepError { //nolint:gocyclo
 	t.Helper()
 	if a.Kind() == reflect.Interface {
 		a = a.Elem()

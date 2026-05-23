@@ -54,7 +54,7 @@ func txnT(t *testing.T, ops ...clientv3.Op) int64 {
 	}
 }
 
-func putT(t *testing.T, prefix, key, value string) int64 {
+func putT(t *testing.T, prefix, key, value string) int64 { //nolint:unused
 	t.Helper()
 	if resp, err := cli.Put(prefix+key, value, 10*time.Second); err != nil {
 		Fatalf(t, "failed to put %q: %s", prefix+key, err)
