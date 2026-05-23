@@ -60,9 +60,11 @@ the third development release, considered alpha quality. Any testing is apprecia
   * sth. like `com/example/-options-ptr` → `{"auto-ptr": true}` and `com/example/www/-options-collect` → `{"collect": …}` for `com/example/www-1/A+ptr+collect` without global options
   * precedence betweeen QTYPE and id (id > label > QTYPE)
 * DNSSEC support ([PowerDNS DNSSEC-specific calls][pdns-dnssec])
+* [Search][pdns-search] support
 
 [pdns-dnssec]: https://doc.powerdns.com/authoritative/appendices/backend-writers-guide.html#dnssec-support
 [pdns-remote-usage]: https://doc.powerdns.com/authoritative/backends/remote.html#usage
+[pdns-search]: https://doc.powerdns.com/authoritative/backends/remote.html#searchrecords
 
 #### Optional
 
@@ -77,6 +79,16 @@ the third development release, considered alpha quality. Any testing is apprecia
 * [Prometheus exporter](https://prometheus.io/docs/guides/go-application/)
 * ZeroMQ connector
 * Redirecting (or duplicating) log output to something else than stderr
+
+### Overview over the support of optional [PDNS features in a remote backend][pdns-remote]:
+* Primary and (Auto)Secondary: no
+  * AXFR support: not yet
+* DNSSEC (live-signing): not yet (planned feature)
+  * Metadata: yes
+* Search (web API): not yet (planned feature)
+* API lookup (for web): not yet
+* Disabled zones/domains: no
+* Zone caching: yes
 
 ## Installation
 
@@ -226,6 +238,8 @@ are tagged by *#STANDALONE*; *pipe mode* means the PDNS setting `remote-connecti
   The (major) PowerDNS version. Version 3 and 4 have incompatible protocols with the backend, so one must use the proper one.
   Version 5 is accepted, but works currently the same as 4 (no relevant API changes yet).<br>
   Defaults to `4`.
+* `client-id`<br>
+  // TODO describe
 * `log-level=[<component>[.<subcomponent>]...=]<level>[;...]` *#STANDALONE* and *pipe mode*<br>
   Sets the logging level(s) for the given (sub-)component `<component>[.<subcomponent>]...` to `<level>` (see below for values).
   Leaving out the component names means to set the root level. Can be repeated for other (sub-)components by using the `;` separator.
@@ -286,8 +300,9 @@ The levels are as follows:
 * `D+3` (debug 3, `3`) - "Coarse trace", like "parsing entry key Y"
 * `D+4` (debug 4, `4`) - "Fine trace", like "value for X found in Y", coroutine tracing (begin, end, status)
 
-There is no logical limit in the debug levels (and not a real technical limit, being an int), but currently only the four described levels are used.
-Fatal errors cannot be suppressed; (simple) errors can, but that is not recommended in non-data components.
+There is no logical limit in the debug levels (and not a real technical limit, being an int),
+but currently only the nine described levels are used (three exceptional, two informational, four debug).
+Fatal errors cannot be suppressed; (simple) errors can, but that is not recommended (especially in non-data components).
 The level for the root log can be set, which takes effect in every component, unless overridden.
 
 For output, the [logrus][] library is used, with its output handling.
