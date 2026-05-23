@@ -116,7 +116,7 @@ func setDurationParameterFunc(param *time.Duration, minValue *time.Duration) set
 }
 
 func setLogLevels(value string) {
-	for _, v := range strings.Split(value, ",") {
+	for _, v := range strings.Split(value, ";") {
 		v = strings.TrimSpace(v)
 		if v == "" {
 			continue
