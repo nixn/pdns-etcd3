@@ -7,10 +7,6 @@ on:
         description: 'Commit SHA, branch name, or tag to build (e.g. master, v1.2.3, a1b2c3d).'
         required: true
         default: 'release'
-      data_version:
-        description: 'The corresponding data version (for naming the file)'
-        required: true
-        default: '0.2.0'
       go_version:
         description: 'Go version to use (e.g. 1.26)'
         required: true
@@ -24,25 +20,10 @@ jobs:
   build-and-upload:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout at specified ref
+      - name: Checkout
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.inputs.checkout_ref }}
-          fetch-depth: 0
-      - name: Verify ref existence
-        run: |
-          set -e
-          REF="${{ github.event.inputs.checkout_ref }}"
-          # try to resolve ref locally; if it fails, fetch remote refs then try again
-          if ! git rev-parse --verify --quiet "$REF" >/dev/null; then
-            git fetch --all --tags
-            if ! git rev-parse --verify --quiet "$REF" >/dev/null; then
-              echo "Ref not found: $REF"
-              git show --summary || true
-              exit 1
-            fi
-          fi
-          echo "Checked out ref: $(git rev-parse HEAD)"
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
@@ -53,7 +34,7 @@ jobs:
           GOARCH: amd64
           CGO_ENABLED: 0
         run: |
-          set -e
+          set -ex
           BUILD_TAG=${{ github.event.inputs.checkout_ref }}_linux_amd64
           go build -o pdns-etcd3_${BUILD_TAG} -a -ldflags="-extldflags=-static -X main.gitVersion=$(git describe --always --dirty)"
           ./pdns-etcd3_${BUILD_TAG} -help
