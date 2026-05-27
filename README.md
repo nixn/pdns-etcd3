@@ -128,7 +128,7 @@ distributor-threads=1
 ```
 
 `<config>` is one of `config-file=...` or `endpoints=...` (see "Parameters" below for details on the value).
-`config-file` overrides `endpoints`.
+When using `config-file`, all other ETCD configuration flags are ignored.
 
 ### Standalone mode(s)
 
@@ -201,7 +201,7 @@ are tagged by *#STANDALONE*; *pipe mode* means the PDNS setting `remote-connecti
   The path to an ETCD (client) configuration file, as accepted by the official client
   (see [etcd/client/v3/config.go](https://github.com/etcd-io/etcd/blob/master/client/v3/config.go), TODO find documentation)<br>
   TLS and authentication is only possible when using such a configuration file.<br>
-  Overrides `endpoints` parameter. Defaults to not set.
+  When used, disables (ignores) all other ETCD configuration flags. Defaults to not set.
 * `endpoints=<IP:Port>[|<IP:Port>|...]` *#STANDALONE*<br>
   For a simple connection use the endpoints given here. `endpoints` accepts hostnames too (instead of `IP`), but be sure
   they are resolvable before PowerDNS has started.<br>

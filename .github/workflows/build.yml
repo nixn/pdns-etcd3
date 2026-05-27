@@ -42,7 +42,7 @@ jobs:
               exit 1
             fi
           fi
-          echo "Checked out ref: $(git rev-parse --short HEAD)"
+          echo "Checked out ref: $(git rev-parse HEAD)"
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
@@ -53,9 +53,12 @@ jobs:
           GOARCH: amd64
           CGO_ENABLED: 0
         run: |
-          go build -o pdns-etcd3_${{ github.event.inputs.checkout_ref }}+${{ github.event.inputs.data_version }}_amd64 -a -ldflags="-extldflags=-static -X main.gitVersion=$(git describe --always --dirty)"
+          set -e
+          BUILD_TAG=${{ github.event.inputs.checkout_ref }}_linux_amd64
+          go build -o pdns-etcd3_${BUILD_TAG} -a -ldflags="-extldflags=-static -X main.gitVersion=$(git describe --always --dirty)"
+          ./pdns-etcd3_${BUILD_TAG} -help
       - name: Upload
         uses: actions/upload-artifact@v7
         with:
-          path: pdns-etcd3_${{ github.event.inputs.checkout_ref }}+${{ github.event.inputs.data_version }}_amd64
+          path: pdns-etcd3_*
           archive: false
