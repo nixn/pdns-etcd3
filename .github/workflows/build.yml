@@ -1,0 +1,61 @@
+name: Build and Upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      checkout_ref:
+        description: 'Commit SHA, branch name, or tag to build (e.g. master, v1.2.3, a1b2c3d).'
+        required: true
+        default: 'release'
+      data_version:
+        description: 'The corresponding data version (for naming the file)'
+        required: true
+        default: '0.2.0'
+      go_version:
+        description: 'Go version to use (e.g. 1.26)'
+        required: true
+        default: '1.26'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout at specified ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.checkout_ref }}
+          fetch-depth: 0
+      - name: Verify ref existence
+        run: |
+          set -e
+          REF="${{ github.event.inputs.checkout_ref }}"
+          # try to resolve ref locally; if it fails, fetch remote refs then try again
+          if ! git rev-parse --verify --quiet "$REF" >/dev/null; then
+            git fetch --all --tags
+            if ! git rev-parse --verify --quiet "$REF" >/dev/null; then
+              echo "Ref not found: $REF"
+              git show --summary || true
+              exit 1
+            fi
+          fi
+          echo "Checked out ref: $(git rev-parse --short HEAD)"
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ github.event.inputs.go_version }}
+      - name: Build
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: 0
+        run: |
+          go build -o pdns-etcd3_${{ github.event.inputs.checkout_ref }}+${{ github.event.inputs.data_version }}_amd64 -a -ldflags="-extldflags=-static -X main.gitVersion=$(git describe --always --dirty)"
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          path: pdns-etcd3_${{ github.event.inputs.checkout_ref }}+${{ github.event.inputs.data_version }}_amd64
+          archive: false

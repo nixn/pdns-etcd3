@@ -26,7 +26,7 @@ import (
 )
 
 var (
-	// update this when changing data structure (only major/minor, patch is always 0). also change it in docs!
+	// update this when changing data structure (only major/minor, patch is always 0). also change it in docs and in build workflow!
 	dataVersion = VersionType{IsDevelopment: true, Major: 2, Minor: 0}
 )
 
