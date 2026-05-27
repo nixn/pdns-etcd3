@@ -8,14 +8,14 @@ It uses the [official client][etcd-client] to get the data from the cluster.
 Responses are authoritative for each zone found in the data.
 Only the DNS class `IN` is supported, but that's because of the limitation of PowerDNS.
 
-There is no stable release yet, even no beta. The latest release is [v0.3.0+0.1.2][],
-the third development release, considered alpha quality. Any testing is appreciated.
+There is no stable release yet, even no beta. The latest release is [v0.4.0+0.2.0][],
+the fourth development release, considered alpha quality. Any testing is appreciated.
 
 [pdns]: https://www.powerdns.com/
 [pdns-remote]: https://doc.powerdns.com/authoritative/backends/remote.html
 [etcd]: https://github.com/etcd-io/etcd/
 [etcd-client]: https://github.com/etcd-io/etcd/tree/main/client/v3
-[v0.3.0+0.1.2]: https://github.com/nixn/pdns-etcd3/releases/tag/v0.3.0%2B0.1.2
+[v0.4.0+0.2.0]: https://github.com/nixn/pdns-etcd3/releases/tag/v0.4.0%2B0.2.0
 
 ## Features
 
