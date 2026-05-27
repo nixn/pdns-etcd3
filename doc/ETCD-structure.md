@@ -558,7 +558,7 @@ The `TXT` record is not parsed, when being written in a plain string syntax.
 The changelog lists every change which led to a data version increase (major or minor).
 One can use it to check their data - whether an adjustment is needed for a new program version which has a new data version.
 
-### 0.2.0 (unreleased)
+### 0.2.0
 * allow JSON5 syntax
 * allow YAML syntax for objects
 * added `` ` `` (backquote) marker
