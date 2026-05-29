@@ -583,93 +583,93 @@ Initial version (base).
 
 ## Full example
 
-*To be precise on the value, it is almost always (except for YAML) enclosed in '...' (single quotes); they are not part of the value themselves.*
+The following tables list the ETCD keys and values in four different syntaxes (if applicable):
+*Plain (String)*, *Last (Field Value)*, *JSON5* (object) and *YAML* (object).
+So one can see the shortest or easiest way to store a value (mostly plain string or last-field-value in records,
+for defaults and options there is only an object notation).
 
-* `prefix` is `DNS/`<br>
-(note the trailing slash, it is part of the prefix, *not* inserted automatically)
+The prefix is `DNS/` (note the trailing slash, it is part of the prefix, *not* inserted automatically).
 
 Global defaults:
-```
-DNS/-defaults- → '{ttl: "1h"} // can omit quotes on simple keys; and use comments!'
-DNS/-defaults-/SRV → '{priority: 0, weight: 0 /* should set to 10 and override when appropriate */}'
-DNS/-defaults-/SOA → (the following lines give the value in YAML syntax; the indentation is only for presentation in this document)
-                     ---
-                     refresh: 1h
-                     retry: 30m
-                     expire: 604800
-                     neg-ttl: 10m
-```
+
+| Key                  | Plain | Last  | JSON5                                                             | YAML                                                               |
+|:---------------------|:------|:------|:------------------------------------------------------------------|:-------------------------------------------------------------------|
+| `DNS/-defaults-`     | *n/a* | *n/a* | `{ttl: "1h"}`                                                     | ---<br>ttl: 1h                                                     |
+| `DNS/-defaults-/SRV` | *n/a* | *n/a* | `{priority: 0, weight: 0}`                                        | ---<br>priority: 0<br>weight: 0                                    |
+| `DNS/-defaults-/SOA` | *n/a* | *n/a* | `{refresh: "1h", retry: "30m", expire: 604800, "neg-ttl": "10m"}` | ---<br>refresh: 1h<br>retry: 30m<br>expire: 604800<br>neg-ttl: 10m |
 
 Forward zone for `example.net`:
-```
-DNS/net.example/SOA → '{primary: "ns1", mail: "horst.master"}'
-DNS/net.example/NS#first → '{hostname: "ns1"} // not valid JSON, but valid JSON5!'
-DNS/net.example/NS#second → '="ns2" // even here a comment is fine'
-DNS/net.example/-options-/A → '{ /* cannot omit quotes here :( */ "ip-prefix": [192, 0, 2]}'
-DNS/net.example/-options-/AAAA → '{"ip-prefix": "20010db8"}'
-DNS/net.example/ns1/A → '=/* ns1 has IP 2? */2'
-DNS/net.example/ns1/AAAA → '="02"'
-DNS/net.example/ns2/A → '{ip: "192.0.2.3"}'
-DNS/net.example/ns2/AAAA → '{ip: [3]}'
-DNS/net.example/-defaults-/MX → '{ttl: "2h"}'
-DNS/net.example/MX#1 → '{priority: 10, target: "mail"}'
-DNS/net.example/mail/A → '{ip: [192,0,2,10]}'
-DNS/net.example/mail/AAAA → '2001:db8::10'
-DNS/net.example/TXT#spf → 'v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all'
-DNS/net.example/TXT#{j5} → '{text:"{text in curly braces (the id too)}"}'
-DNS/net.example/TXT#{bq} → '`{text in curly braces}'
-DNS/net.example/TXT#"" → '="some string"'
-DNS/net.example/TXT#[] → '=["string 1", 2, "string 3"]'
-DNS/net.example/kerberos1/-defaults-/#ip → '="15"'
-DNS/net.example/kerberos1/A#ip → '_'
-DNS/net.example/kerberos1/AAAA#ip → '_'
-DNS/net.example/kerberos2/A# → '192.0.2.25'
-DNS/net.example/kerberos2/AAAA# → '2001:db8::25'
-DNS/net.example/_tcp/_kerberos/-defaults-/SRV → '{port: 88}'
-DNS/net.example/_tcp/_kerberos/SRV#1 → '_ _ _ kerberos1'
-DNS/net.example/_tcp/_kerberos/SRV#2 → '="kerberos2"'
-DNS/net.example/kerberos-master/CNAME → '{target: "kerberos1"}'
-DNS/net.example/mail/HINFO → '"amd64" "Linux"'
-DNS/net.example/mail/-defaults-/HINFO → '{ttl: "2h"}'
-DNS/net.example/www/A → '20'
-DNS/net.example/www/AAAA → '20'
-DNS/net.example/ALIAS → 'www'
-DNS/net.example/TYPE123 → '\# 0'
-DNS/net.example/TYPE237 → '\# 1 2a'
-DNS/net.example/-metadata-/PRESIGNED → '0'
-DNS/net.example/www/-metadata-/X-MY-COMMENT#1 → 'one comment'
-DNS/net.example/www/-metadata-/X-MY-COMMENT#b → 'another comment (under the same key)'
-```
 
-Reverse zone for `192.0.2.0/24`:
-```
-DNS/arpa.in-addr/192.0.2/-options- → '{"zone-append-domain": "example.net."}'
-DNS/arpa.in-addr/192.0.2/SOA → '{primary: "ns1", mail: "horst.master"}'
-DNS/arpa.in-addr/192.0.2/NS#a → '{hostname: "ns1"}'
-DNS/arpa.in-addr/192.0.2/NS#b → 'ns2.example.net.'
-DNS/arpa.in-addr/192.0.2/2/PTR → '="ns1"'
-DNS/arpa.in-addr/192.0.2/3/PTR → 'ns2'
-DNS/arpa.in-addr/192.0.2/10/PTR → 'mail'
-DNS/arpa.in-addr/192.0.2/15/PTR → '="kerberos1"'
-DNS/arpa.in-addr/192.0.2/25/PTR → '="kerberos2"'
-```
+| Key                                             | Plain                                            | Last                                                | JSON5                                                      | YAML                                                          |
+|:------------------------------------------------|:-------------------------------------------------|:----------------------------------------------------|:-----------------------------------------------------------|:--------------------------------------------------------------|
+| `DNS/net.example/SOA`                           | `ns1 horst.master _ _ _ _ _`                     | *n/a*                                               | `{primary: "ns1", mail: "horst.master"}`                   | ---<br>primary: ns1<br>mail: horst.master                     |
+| `DNS/net.example/NS#first`                      | `ns1`                                            | `="ns1"`                                            | `{hostname: "ns1"}`                                        | ---<br>hostname: ns1                                          |
+| `DNS/net.example/NS#second`                     | `ns2`                                            | `="ns2" // even here a comment is fine`             | `{hostname: "ns2"}`                                        | ---<br># some comment<br>hostname: ns2                        |
+| `DNS/net.example/-options-/A`                   | *n/a*                                            | *n/a*                                               | `{ "ip-prefix": [192, 0, 2]}`                              | ---<br>ip-prefix: [192, 0, 2]                                 |
+| `DNS/net.example/-options-/AAAA`                | *n/a*                                            | *n/a*                                               | `{"ip-prefix": "20010db8"}`                                | ---<br>ip-prefix: 20010db8                                    |
+| `DNS/net.example/ns1/A`                         | `2`                                              | `=2`                                                | `{ip: 2}`                                                  | ---<br>ip: 2                                                  |
+| `DNS/net.example/ns1/AAAA`                      | `02`                                             | `="02"`                                             | `{ip: "02"}`                                               | ---<br>ip: "02"                                               |
+| `DNS/net.example/ns2/A`                         | `192.0.2.3`                                      | `="192.0.2.3"`                                      | `{ip: "192.0.2.3"}`                                        | ---<br>ip: 192.0.2.3                                          |
+| `DNS/net.example/ns2/AAAA`                      | `3`                                              | `=[3]`                                              | `{ip: [3]}`                                                | ---<br>ip: [3]                                                |
+| `DNS/net.example/-defaults-/MX`                 | *n/a*                                            | *n/a*                                               | `{ttl: "2h"}`                                              | ---<br>ttl: 2h                                                |
+| `DNS/net.example/MX#1`                          | `10 _ mail`                                      | *n/a*                                               | `{priority: 10, target: "mail"}`                           | ---<br>priority: 10<br>target: mail                           |
+| `DNS/net.example/mail/A`                        | `192.0.2.10`                                     | `=[192,0,2,10]`                                     | `{ip: [192,0,2,10]}`                                       | ---<br>ip: [192,0,2,10]                                       |
+| `DNS/net.example/mail/AAAA`                     | `2001:db8::10`                                   | `="2001:db8::10"`                                   | `{ip: "2001:db8::10"}`                                     | ---<br>ip: 2001:db8::10                                       |
+| `DNS/net.example/TXT#spf`                       | `v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all` | `="v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all"` | `{text: "v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all"}` | ---<br>text: "v=spf1 ip4:192.0.2.0/24 ip6:2001:db8::/32 -all" |
+| `DNS/net.example/TXT#{}`                        | ``` `{text in curly braces} ```                  | `="{text in curly braces}"`                         | `{text: "{text in curly braces}"}`                         | ---<br>text: "{text in curly braces}"                         |
+| `DNS/net.example/TXT#[]`                        | `"string 1" "2" "string 3"`                      | `=["string 1", 2, "string 3"]`                      | `{text: ["string 1", 2, "string 3"]}`                      | ---<br>text: ["string 1", 2, "string 3"]                      |
+| `DNS/net.example/kerberos1/-defaults-/#ip`      | *n/a*                                            | *n/a*                                               | `{ip: "15"}`                                               | ---<br>ip: "15"                                               |
+| `DNS/net.example/kerberos1/A#ip`                | `_`                                              | *n/a*                                               | `{}`                                                       | ---                                                           |
+| `DNS/net.example/kerberos1/AAAA#ip`             | `_`                                              | *n/a*                                               | `{}`                                                       | ---                                                           |
+| `DNS/net.example/kerberos2/A#`                  | `192.0.2.25`                                     | `="192.0.2.25"`                                     | `{ip: "192.0.2.25"}`                                       | ---<br>ip: 192.0.2.25                                         |
+| `DNS/net.example/kerberos2/AAAA#`               | `2001:db8::25`                                   | `="2001:db8::25"`                                   | `{ip: "2001:db8::25"}`                                     | ---<br>ip: 2001:db8::25                                       |
+| `DNS/net.example/_tcp/_kerberos/-defaults-/SRV` | *n/a*                                            | *n/a*                                               | `{port: 88}`                                               | ---<br>port: 88                                               |
+| `DNS/net.example/_tcp/_kerberos/SRV#1`          | `_ _ _ kerberos1`                                | `="kerberos1"`                                      | `{target: "kerberos1"}`                                    | ---<br>target: kerberos1                                      |
+| `DNS/net.example/_tcp/_kerberos/SRV#2`          | `_ _ _ kerberos2`                                | `="kerberos2"`                                      | `{target: "kerberos2"}`                                    | ---<br>target: kerberos2                                      |
+| `DNS/net.example/kerberos-master/CNAME`         | `kerberos1`                                      | `="kerberos1"`                                      | `{target: "kerberos1"}`                                    | ---<br>target: kerberos1                                      |
+| `DNS/net.example/mail/HINFO`                    | `"amd64" "Linux"`                                | *n/a*                                               | *n/a*                                                      | *n/a*                                                         |
+| `DNS/net.example/mail/-defaults-/HINFO`         | *n/a*                                            | *n/a*                                               | `{ttl: "2h"}`                                              | ---<br>ttl: 2h                                                |
+| `DNS/net.example/www/A`                         | `20`                                             | `=20`                                               | `{ip: 20}`                                                 | ---<br>ip: 20                                                 |
+| `DNS/net.example/www/AAAA`                      | `20`                                             | `="20"`                                             | `{ip: "20"}`                                               | ---<br>ip: "20"                                               |
+| `DNS/net.example/ALIAS`                         | `www`                                            | `="www"`                                            | `{target: "www"}`                                          | ---<br>target: www                                            |
+| `DNS/net.example/TYPE123`                       | `\# 0`                                           | *n/a*                                               | *n/a*                                                      | *n/a*                                                         |
+| `DNS/net.example/TYPE237`                       | `\# 1 2a`                                        | *n/a*                                               | *n/a*                                                      | *n/a*                                                         |
+| `DNS/net.example/-metadata-/PRESIGNED`          | `0`                                              | *n/a*                                               | *n/a*                                                      | *n/a*                                                         |
+| `DNS/net.example/www/-metadata-/X-MY-COMMENT#1` | `one comment`                                    | *n/a*                                               | *n/a*                                                      | *n/a*                                                         |
+| `DNS/net.example/www/-metadata-/X-MY-COMMENT#b` | `another comment (under the same key)`           | *n/a*                                               | *n/a*                                                      | *n/a*                                                         |
 
-Reverse zone for `2001:db8::/32`:
-```
-DNS/arpa.ip6/2.0.0.1.0.d.b.8/SOA → '{primary:"ns1.example.net.", mail:"horst.master@example.net."}'
-DNS/arpa.ip6/2.0.0.1.0.d.b.8/NS#1 → 'ns1.example.net.'
-DNS/arpa.ip6/2.0.0.1.0.d.b.8/NS#2 → '`ns2.example.net.'
-DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.2/PTR → 'ns1.example.net.'
-DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.3/PTR → 'ns2.example.net.'
-DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.1.0/PTR → 'mail.example.net.'
-DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.1.5/PTR → 'kerberos1.example.net.'
-DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.2.5/PTR → 'kerberos2.example.net.'
-```
+Reverse zone for `192.0.2.0/24` (with option `zone-append-domain`):
+
+| Key                                  | Plain                                   | Last                  | JSON5                                    | YAML                                      |
+|:-------------------------------------|:----------------------------------------|:----------------------|:-----------------------------------------|:------------------------------------------|
+| `DNS/arpa.in-addr/192.0.2/-options-` | *n/a*                                   | *n/a*                 | `{"zone-append-domain": "example.net."}` | ---<br>zone-append-domain: example.net.   |
+| `DNS/arpa.in-addr/192.0.2/SOA`       | `ns1 horst.master _ _ _ _ _`            | *n/a*                 | `{primary: "ns1", mail: "horst.master"}` | ---<br>primary: ns1<br>mail: horst.master |
+| `DNS/arpa.in-addr/192.0.2/NS#a`      | `ns1`                                   | `="ns1"`              | `{hostname: "ns1"}`                      | ---<br>hostname: ns1                      |
+| `DNS/arpa.in-addr/192.0.2/NS#b`      | `ns2.example.net.` (still can use FQDN) | `="ns2.example.net."` | `{hostname: "ns2.example.net."}`         | ---<br>hostname: ns2.example.net.         |
+| `DNS/arpa.in-addr/192.0.2/2/PTR`     | `ns1`                                   | `="ns1"`              | `{hostname: "ns1"}`                      | ---<br>hostname: ns1                      |
+| `DNS/arpa.in-addr/192.0.2/3/PTR`     | `ns2`                                   | `="ns2"`              | `{hostname: "ns2"}`                      | ---<br>hostname: ns2                      |
+| `DNS/arpa.in-addr/192.0.2/10/PTR`    | `mail`                                  | `="mail"`             | `{hostname: "mail"}`                     | ---<br>hostname: mail                     |
+| `DNS/arpa.in-addr/192.0.2/15/PTR`    | `kerberos1`                             | `="kerberos1"`        | `{hostname: "kerberos1"}`                | ---<br>hostname: kerberos1                |
+| `DNS/arpa.in-addr/192.0.2/25/PTR`    | `kerberos2`                             | `="kerberos2"`        | `{hostname: "kerberos2"}`                | ---<br>hostname: kerberos2                |
+
+Reverse zone for `2001:db8::/32` (without option `zone-append-domain`):
+
+| Key                                                                                | Plain                                                  | Last                        | JSON5                                                              | YAML                                                                |
+|:-----------------------------------------------------------------------------------|:-------------------------------------------------------|:----------------------------|:-------------------------------------------------------------------|:--------------------------------------------------------------------|
+| `DNS/arpa.ip6/2.0.0.1.0.d.b.8/SOA`                                                 | `ns1.example.net. horst.master@example.net. _ _ _ _ _` | *n/a*                       | `{primary: "ns1.example.net.", mail: "horst.master@example.net."}` | ---<br>primary: ns1.example.net.<br>mail: horst.master@example.net. |
+| `DNS/arpa.ip6/2.0.0.1.0.d.b.8/NS#1`                                                | `ns1.example.net.`                                     | `="ns1.example.net."`       | `{hostname: "ns1.example.net."}`                                   | ---<br>hostname: ns1.example.net.                                   |
+| `DNS/arpa.ip6/2.0.0.1.0.d.b.8/NS#2`                                                | `ns2.example.net.`                                     | `="ns2.example.net."`       | `{hostname: "ns2.example.net."}`                                   | ---<br>hostname: ns2.example.net.                                   |
+| `DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.2/PTR` | `ns1.example.net.`                                     | `="ns1.example.net."`       | `{hostname: "ns1.example.net."}`                                   | ---<br>hostname: ns1.example.net.                                   |
+| `DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.0.3/PTR` | `ns2.example.net.`                                     | `="ns2.example.net."`       | `{hostname: "ns2.example.net."}`                                   | ---<br>hostname: ns2.example.net.                                   |
+| `DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.1.0/PTR` | `mail.example.net.`                                    | `="mail.example.net."`      | `{hostname: "mail.example.net."}`                                  | ---<br>hostname: mail.example.net.                                  |
+| `DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.1.5/PTR` | `kerberos1.example.net.`                               | `="kerberos1.example.net."` | `{hostname: "kerberos1.example.net."}`                             | ---<br>hostname: kerberos1.example.net.                             |
+| `DNS/arpa.ip6/2.0.0.1.0.d.b.8/0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0/0.0.2.5/PTR` | `kerberos2.example.net.`                               | `="kerberos2.example.net."` | `{hostname: "kerberos2.example.net."}`                             | ---<br>hostname: kerberos2.example.net.                             |
 
 Delegation and glue records for `subunit.example.net.`:
-```
-DNS/net.example/subunit/NS#1 → '{hostname: "ns1.subunit"}'
-DNS/net.example/subunit/NS#2 → '="ns2.subunit"'
-DNS/net.example/subunit/ns1/A → '192.0.3.2'
-DNS/net.example/subunit/ns2/A → '=[3, 3]'
-```
+
+| Key                             | Plain         | Last             | JSON5                       | YAML                         |
+|:--------------------------------|:--------------|:-----------------|:----------------------------|:-----------------------------|
+| `DNS/net.example/subunit/NS#1`  | `ns1.subunit` | `="ns1.subunit"` | `{hostname: "ns1.subunit"}` | ---<br>hostname: ns1.subunit |
+| `DNS/net.example/subunit/NS#2`  | `ns2.subunit` | `="ns2.subunit"` | `{hostname: "ns2.subunit"}` | ---<br>hostname: ns2.subunit |
+| `DNS/net.example/subunit/ns1/A` | `3.2`         | `=[3,2]`         | `{ip: [3,2]}`               | ---<br>ip: 3.2               |
+| `DNS/net.example/subunit/ns2/A` | `3.3`         | `=[3,3]`         | `{ip: [3,3]}`               | ---<br>ip: 3.3               |

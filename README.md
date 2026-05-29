@@ -241,9 +241,9 @@ are tagged by *#STANDALONE*; *pipe mode* means the PDNS setting `remote-connecti
 * `client-id`<br>
   // TODO describe
 * `log-level=[<component>[.<subcomponent>]...=]<level>[;...]` *#STANDALONE* and *pipe mode*<br>
-  Sets the logging level(s) for the given (sub-)component `<component>[.<subcomponent>]...` to `<level>` (see below for values).
-  Leaving out the component names means to set the root level. Can be repeated for other (sub-)components by using the `;` separator.
-  The order is not important for different (sub-)components: `-log-level=4;data.values=2` results in the same effect as `-log-level=data.values=2;4`
+  Sets the logging level(s) for the given (sub)component `<component>[.<subcomponent>]...` to `<level>` (see below for values).
+  Leaving out the component names means to set the root level. Can be repeated for other (sub)components by using the `;` separator.
+  The order is not important for different (sub)components: `-log-level=4;data.values=2` results in the same effect as `-log-level=data.values=2;4`
   (root level 4 = currently all messages, but omit messages of levels 3+ in `data.values`).<br>
   Currently only numbers are allowed for the `<level>` (names should be supported in a future version).<br>
   Example: `log-level=-1;conn=4;data.values=3`<br>
@@ -271,7 +271,7 @@ so one can be sure to have a working combination for deploying, when using those
 There is much logging in the program for being able to test and debug it properly. It is structured and leveled.
 
 The structure consists of different components, namely `main`, `etcd`, `pdns`, `conn` and `data`;
-all components (can) have subcomponents, every (sub-)component can have its own level, which makes it easier to debug only things of interest.
+all components (can) have subcomponents, every (sub)component can have its own level, which makes it easier to debug only things of interest.
 The components and subcomponents in detail:
 * `main` - The main thread / loop of the program, e.g. setting up logging, creating data objects, processing signals and events, etc.
   * `init` - Setting up things (reading configuration, creating main objects, ...).
