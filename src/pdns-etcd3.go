@@ -221,24 +221,24 @@ func startReadRequests(ctx context.Context, wg *WaitGroup, client *pdnsClient) <
 	return ch
 }
 
-func handleRequest(ctx context.Context, cr *pdnsClientRequest) {
-	cr.Client.Logf(2, "main")("handling request")(cr.Request)
+func (cr *pdnsClientRequest) handleRequest(ctx context.Context) {
+	cr.Logf(2, "main")("handling request")(cr.Request)
 	since := time.Now()
 	var result any
 	var err error
 	switch strings.ToLower(cr.Request.Method) {
 	case "lookup":
-		result, err = lookup(cr)
+		result, err = cr.lookup()
 	case "getalldomainmetadata":
-		result, err = getAllDomainMetadata(cr.Request.Parameters, cr.Client)
+		result, err = cr.getAllDomainMetadata()
 	case "getdomainmetadata":
-		result, err = getDomainMetadata(cr.Request.Parameters, cr.Client)
+		result, err = cr.getDomainMetadata()
 	case "setdomainmetadata":
-		result, err = setDomainMetadata(ctx, cr.Request.Parameters, cr.Client)
+		result, err = cr.setDomainMetadata(ctx)
 	case "getalldomains":
 		result = dataRoot.allDomains([]domainInfo{}) // must not be nil, for empty answers it would not be marshaled into `[]`
 	case "getdomaininfo":
-		result, err = getDomainInfo(cr.Request.Parameters, cr.Client)
+		result, err = cr.getDomainInfo()
 	default:
 		result, err = false, fmt.Errorf("unknown/unimplemented request: %s", val2str(cr.Request))
 	}
@@ -248,7 +248,7 @@ func handleRequest(ctx context.Context, cr *pdnsClientRequest) {
 		cr.Client.Respond(makeResponse(result, err.Error()))
 	}
 	dur := time.Since(since)
-	cr.Client.Logf(1, "main")("request and result")("request", cr.Request, "result", result, "dur", dur, "err", err)
+	cr.Logf(1, "main")("request and result")("request", cr.Request, "result", result, "dur", dur, "err", err)
 }
 
 func handleEvents(revision int64, events []*clientv3.Event) {
@@ -593,7 +593,8 @@ func serve(ctx context.Context, wg *WaitGroup, client *pdnsClient, initialized *
 			client.Logf(3, "pdns")("requests channel closed")("nextRequestID", nextRequestID)
 			break
 		}
-		handleRequest(ctx, &pdnsClientRequest{client, nextRequestID, &request})
+		cr := &pdnsClientRequest{client, nextRequestID, &request}
+		cr.handleRequest(ctx)
 	}
 	if serving != nil {
 		*serving = false

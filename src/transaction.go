@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-func newTransaction(caller string, qname string, client *pdnsClient, dataGet func(*dataNode) error, timeout time.Duration) (*Transaction, error) {
+func (client *pdnsClient) newTransaction(caller string, qname string, dataGet func(*dataNode) error, timeout time.Duration) (*Transaction, error) {
 	name := ParseDomainName(strings.ToLower(qname))
 	txn, err := func() (*Transaction, error) {
 		lockDebug := client.Logf(4, "data", "locking")
@@ -52,6 +52,7 @@ func newTransaction(caller string, qname string, client *pdnsClient, dataGet fun
 }
 
 func waitForReload(ctx context.Context, caller string, name Name, rev int64) {
+	RootLog.Logf(4, "main")(nil, "%s: waitForReload", caller)(name.normal, "rev", rev)
 	since := time.Now()
 	for func() bool {
 		data, found := dataRoot.getChild(name, true)
@@ -61,6 +62,7 @@ func waitForReload(ctx context.Context, caller string, name Name, rev int64) {
 		select {
 		case <-ctx.Done():
 			after := time.Since(since)
+			// TODO is this locking needed? only used for logging...
 			data, _ := dataRoot.getChild(name, true)
 			//goland:noinspection GoDeferInLoop // this case breaks the loop, so that defer is not a problem
 			defer data.rUnlockUpwards(nil, true)
@@ -70,4 +72,6 @@ func waitForReload(ctx context.Context, caller string, name Name, rev int64) {
 			time.Sleep(time.Millisecond)
 		}
 	}
+	after := time.Since(since)
+	RootLog.Logf(3, "main")(nil, "%s: waitForReload finished after %s", caller, after)(name.normal, "rev", rev)
 }

@@ -100,3 +100,7 @@ func (cr *pdnsClientRequest) Logf(level int, component ...string) func(string, .
 		}
 	}
 }
+
+func (cr *pdnsClientRequest) Errorf(component ...string) func(string, ...any) func(...any) {
+	return cr.Logf(ErrorLevel, component...)
+}

@@ -49,7 +49,7 @@ var (
 	}
 )
 
-func lookup(cr *pdnsClientRequest) (interface{}, error) {
+func (cr *pdnsClientRequest) lookup() (interface{}, error) {
 	// RFC 1035 2.3.3: remember original qname and use it later in the result
 	qname := ParseDomainName(cr.Request.Parameters["qname"].(string))
 	query := queryType{

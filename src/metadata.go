@@ -37,24 +37,24 @@ func withRLock[R any](method string, client *pdnsClient, name Name, notFound R, 
 	return body(data)
 }
 
-func getDomainInfo(params objectType[any], client *pdnsClient) (any, error) {
-	name := ParseDomainName(strings.ToLower(params["name"].(string)))
-	return withRLock("getDomainInfo", client, name, false, func(data *dataNode) (any, error) {
+func (cr *pdnsClientRequest) getDomainInfo() (any, error) {
+	name := ParseDomainName(strings.ToLower(cr.Request.Parameters["name"].(string)))
+	return withRLock("getDomainInfo", cr.Client, name, false, func(data *dataNode) (any, error) {
 		if !data.hasSOA() {
-			client.Logf(1, "data")("getDomainInfo: not a zone")(name.normal)
+			cr.Logf(1, "data")("getDomainInfo: not a zone")(name.normal)
 			return false, nil
 		}
 		return objectType[any]{
-			"zone":   params["name"],
+			"zone":   cr.Request.Parameters["name"],
 			"serial": data.zoneRev(),
 		}, nil
 	})
 }
 
-func getDomainMetadata(params objectType[any], client *pdnsClient) ([]string, error) {
-	name := ParseDomainName(strings.ToLower(params["name"].(string)))
-	return withRLock("getDomainMetadata", client, name, []string{}, func(data *dataNode) ([]string, error) {
-		metadata := data.metadata[strings.ToUpper(params["kind"].(string))]
+func (cr *pdnsClientRequest) getDomainMetadata() ([]string, error) {
+	name := ParseDomainName(strings.ToLower(cr.Request.Parameters["name"].(string)))
+	return withRLock("getDomainMetadata", cr.Client, name, []string{}, func(data *dataNode) ([]string, error) {
+		metadata := data.metadata[strings.ToUpper(cr.Request.Parameters["kind"].(string))]
 		if metadata == nil {
 			metadata = []string{}
 		}
@@ -62,19 +62,19 @@ func getDomainMetadata(params objectType[any], client *pdnsClient) ([]string, er
 	})
 }
 
-func getAllDomainMetadata(params objectType[any], client *pdnsClient) (map[string][]string, error) {
-	name := ParseDomainName(strings.ToLower(params["name"].(string)))
-	return withRLock("getAllDomainMetadata", client, name, map[string][]string{}, func(data *dataNode) (map[string][]string, error) {
+func (cr *pdnsClientRequest) getAllDomainMetadata() (map[string][]string, error) {
+	name := ParseDomainName(strings.ToLower(cr.Request.Parameters["name"].(string)))
+	return withRLock("getAllDomainMetadata", cr.Client, name, map[string][]string{}, func(data *dataNode) (map[string][]string, error) {
 		return data.metadata, nil
 	})
 }
 
-func setDomainMetadata(ctx context.Context, params objectType[any], client *pdnsClient) (bool, error) {
+func (cr *pdnsClientRequest) setDomainMetadata(ctx context.Context) (bool, error) {
 	// TODO possibly use optimistic locking
 	var name Name
 	var zoneRev int64
 	timeout := 15 * time.Second
-	txn, err := newTransaction("setDomainMetadata", params["name"].(string), client, func(data *dataNode) error {
+	txn, err := cr.Client.newTransaction("setDomainMetadata", cr.Request.Parameters["name"].(string), func(data *dataNode) error {
 		name = data.getName()
 		zoneData := data.findZone()
 		if zoneData == nil {
@@ -86,26 +86,26 @@ func setDomainMetadata(ctx context.Context, params objectType[any], client *pdns
 	if err != nil {
 		return false, fmt.Errorf("failed to create transaction: %s", err)
 	}
-	kind := strings.ToUpper(params["kind"].(string))
-	values := params["value"].([]any)
+	kind := strings.ToUpper(cr.Request.Parameters["kind"].(string))
+	values := cr.Request.Parameters["value"].([]any)
 	keyPrefix := metadataKey + keySeparator + kind + idSeparator
 	txn.Del(keyPrefix, true)
 	for i, value := range values {
 		txn.Put(keyPrefix+strconv.FormatInt(int64(i+1), 10), value.(string))
 	}
 	if txn.PutsCount() == 0 {
-		client.Logf(3, "main")("setDomainMetadata: no puts, adding metadata put for new minimum serial")("rev", zoneRev)
+		cr.Logf(3, "main")("setDomainMetadata: no puts, adding metadata put for new minimum serial")("rev", zoneRev)
 		txn.Put(metadataKey+keySeparator+MetaMinimumSerial, strconv.FormatInt(zoneRev+1, 10))
 	} else {
 		txn.Del(metadataKey+keySeparator+MetaMinimumSerial, false)
 	}
-	client.Logf(2, "main")("setDomainMetadata: committing transaction")("puts", txn.puts, "dels", txn.dels)
+	cr.Logf(2, "main")("setDomainMetadata: committing transaction")("puts", txn.puts, "dels", txn.dels)
 	rev, err := txn.Commit(timeout)
 	if err != nil {
 		return false, fmt.Errorf("transaction commit failed: %s", err)
 	}
-	client.Logf(2, "main")("setDomainMetadata successful, waiting for reload")("rev", rev)
+	cr.Logf(2, "main")("setDomainMetadata successful, waiting for reload")("rev", rev)
 	waitForReload(ctx, "setDomainMetadata", name, rev)
-	client.Logf(3, "main")("setDomainMetadata finished")("kind", kind, "values", values)
+	cr.Logf(3, "main")("setDomainMetadata finished")("kind", kind, "values", values)
 	return true, nil
 }
