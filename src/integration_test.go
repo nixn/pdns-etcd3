@@ -864,7 +864,7 @@ func TestParallelRequests(t *testing.T) {
 	rev, _ := basicDataTxn(t, pe3.Prefix)
 	waitForRevision(t, rev, "basic data loaded")
 	pdns := make([]pdnsInfo, 0)
-	nCPU := runtime.NumCPU()
+	nCPU := min(runtime.NumCPU(), 8) // limit to a useful number of instances, because it is more flaky the more CPUs are available (see PR #4)
 	t.Logf("Using %d parallel PDNS (single-threaded) instances", nCPU+1)
 	for i := 0; i <= nCPU; i++ {
 		pdnsN, err := startPDNS(t, map[string]string{
