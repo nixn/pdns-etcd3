@@ -237,7 +237,7 @@ func startContainer(t *testing.T, cr testcontainers.ContainerRequest, endpoint n
 
 func startETCD(t *testing.T) (*ctInfo, error) {
 	t.Helper()
-	image := fmt.Sprintf("quay.io/coreos/etcd:v%s", getenvT("ETCD_VERSION", "3.6.7"))
+	image := fmt.Sprintf("quay.io/coreos/etcd:v%s", getenvT("ETCD_VERSION", "3.6.12"))
 	Logf(t, "Using ETCD image %s", image)
 	return startContainer(t, testcontainers.ContainerRequest{
 		Image:          image,

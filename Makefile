@@ -63,7 +63,7 @@ tests+coverage:
 
 .PHONY: integration-tests-matrix integration-tests-matrix-etcd integration-tests-matrix-pdns
 
-ETCD_VERSIONS := 3.2.32 3.3.27 3.4.40 3.5.26 3.6.7
+ETCD_VERSIONS := 3.2.32 3.3.27 3.4.45 3.5.31 3.6.12
 PDNS_VERSIONS := 34 40 41 44 45 46 47 48 49 50 51
 
 integration-tests-matrix-etcd:
