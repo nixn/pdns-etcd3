@@ -57,6 +57,8 @@ func TestParseEntryKey(t *testing.T) {
 		{"com.example/dept.fin/-defaults-/NS#1@2.3", ve[pk]{v: pk{[]namePart{{"com", ""}, {"example", "."}, {"dept", "/"}, {"fin", "."}}, "defaults", "NS", "1", &VersionType{false, 2, 3, 0}}}},
 		{"SOA#id", ve[pk]{e: "SOA entry cannot have an id"}},
 		{"miXed-CaSe", ve[pk]{e: "invalid key"}},
+		{"-metadata-/X-PE3-MINIMUM-SERIAL", ve[pk]{v: pk{nil, metadataEntry, "X-PE3-MINIMUM-SERIAL", "", nil}}},
+		{"-metadata-/SOMETHING#1", ve[pk]{v: pk{nil, metadataEntry, "SOMETHING", "1", nil}}},
 		// TODO add way more tests (e.g. names with underscores, wildcard, more entry types, ...)
 	} {
 		checkRun(t, fmt.Sprintf("(%d)%q", i+1, spec.input), tf, spec.input, spec.expected, false)
