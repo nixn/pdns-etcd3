@@ -179,7 +179,7 @@ func asNumber[T interface {
 	var val int64
 	switch value := value.(type) {
 	case float64:
-		if v, err := float2int(value); err != nil {
+		if v, err := float2int(value, 64); err != nil {
 			return 0, fmt.Errorf("failed to convert float (%v) to int: %s", value, err)
 		} else {
 			val = v
@@ -493,12 +493,9 @@ func parseOctets(value any, ipVer int, asPrefix bool) ([]byte, error) {
 				octets = append(octets, b)
 			}
 		case float64:
-			vI, err := float2int(v)
+			vI, err := float2uint(v, 8)
 			if err != nil {
-				return nil, fmt.Errorf("octet #%d (%v): failed to convert from float to int: %s", i, v, err)
-			}
-			if vI < 0 || v > 255 {
-				return nil, fmt.Errorf("octet #%d (%v): value out of range (0-255)", i, vI)
+				return nil, fmt.Errorf("octet #%d (%v): failed to convert from float to byte: %s", i, v, err)
 			}
 			octets = append(octets, byte(vI))
 		case string:

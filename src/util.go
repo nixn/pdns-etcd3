@@ -208,8 +208,12 @@ func err2str(err error) string {
 	return err.Error()
 }
 
-func float2int(n float64) (int64, error) {
-	return strconv.ParseInt(fmt.Sprintf("%.0f", n), 10, 64)
+func float2int(n float64, bits int) (int64, error) {
+	return strconv.ParseInt(fmt.Sprintf("%.0f", n), 10, bits)
+}
+
+func float2uint(n float64, bits int) (uint64, error) {
+	return strconv.ParseUint(fmt.Sprintf("%.0f", n), 10, bits)
 }
 
 func float2decimal(n float64) string {
