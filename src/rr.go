@@ -267,19 +267,19 @@ func domainName(key string) rrFunc {
 	}
 }
 
-// fixedSerial returns MetaFixedSerial (if set and a valid uint32) or zoneRev() otherwise.
-func (p *rrParams) fixedSerial() int64 {
-	values, ok := p.data.metadata[MetaFixedSerial]
+// soaSerial returns MetaFixedSerial (if set and a valid uint32) or data.zoneRev() otherwise.
+func soaSerial(data *dataNode) int64 {
+	values, ok := data.metadata[MetaFixedSerial]
 	if !ok || len(values) == 0 {
-		return p.data.zoneRev()
+		return data.zoneRev()
 	}
 	raw := strings.TrimSpace(values[0])
 	v, err := strconv.ParseUint(raw, 10, 32)
 	if err != nil {
-		p.Logf(WarningLevel)("invalid %s metadata, falling back to zoneRev", MetaFixedSerial)("value", raw, "err", err)
-		return p.data.zoneRev()
+		data.Logf(WarningLevel)("invalid %s metadata, falling back to zoneRev", MetaFixedSerial)("value", raw, "err", err)
+		return data.zoneRev()
 	}
-	p.Logf(3)("using %s metadata as SOA serial", MetaFixedSerial)("serial", v)
+	data.Logf(3)("using %s metadata as SOA serial", MetaFixedSerial)("serial", v)
 	return int64(v)
 }
 
@@ -320,7 +320,7 @@ func soa(params *rrParams) {
 		return
 	}
 	// serial: MetaFixedSerial overrides zoneRev (e.g. to match RRSIG(SOA) in pre-signed mode).
-	serial := params.fixedSerial()
+	serial := soaSerial(params.data)
 	// refresh
 	refresh, vPath, err := getDuration("refresh", params)
 	if vPath == nil || err != nil {

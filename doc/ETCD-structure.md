@@ -304,7 +304,7 @@ Metadata keys starting with `X-PE3-` are reserved for use by this backend. They 
 * `X-PE3-FIXED-SERIAL` — when set on a zone, its first value (parsed as an unsigned 32-bit integer per [RFC 1035][rfc1035]) replaces the automatic [zone-revision serial](#soa) in the served `SOA` record. Anything that does not parse (out of range, unparseable, empty) is logged and the automatic serial is used instead.
     * The main use case is [pre-signed DNSSEC](#pre-signed-dnssec): the served `SOA` serial must match the value the external signer baked into `RRSIG(SOA)`, otherwise validating resolvers reject the answer.
     * It is also useful without DNSSEC, for operators who want to control the serial manually (e.g. to mirror an existing zone byte-for-byte).
-* `X-PE3-MINIMUM-SERIAL` — internal book-keeping. It is added/removed automatically by `setDomainMetadata` transactions to ensure the zone revision (and thus the serial) never moves backwards across a key-delete. Operators normally do not write this key by hand.
+* `X-PE3-MINIMUM-SERIAL` — zone serial handling. It is added/removed automatically by transactions to ensure the zone revision (and thus the serial) never moves backwards across a key-delete. Operators should write this key by hand, when they are only deleting keys manually.
 
 [rfc1035]: https://datatracker.ietf.org/doc/html/rfc1035#section-3.3.13
 
@@ -315,7 +315,7 @@ there is no need to create or delete them manually. They are not part of the aut
 
 ## Pre-signed DNSSEC
 
-pdns-etcd3 supports DNSSEC in the [pre-signed (front-signing)][rfc4035-presigned] model: an external signer (`ldns-signzone`, `dnssec-signzone`, OpenDNSSEC, …) produces the signed records and pushes them into ETCD under the same key layout as ordinary records. The backend itself does not sign anything; [online signing](https://doc.powerdns.com/authoritative/dnssec/modes-of-operation.html) is on the [Planned](../README.md#planned) list.
+pdns-etcd3 supports DNSSEC currently only in the [pre-signed (front-signing)][rfc4035-presigned] model: an external signer (`ldns-signzone`, `dnssec-signzone`, OpenDNSSEC, …) produces the signed records and pushes them into ETCD under the same key layout as ordinary records. The backend itself does not sign anything yet; [online signing](https://doc.powerdns.com/authoritative/dnssec/modes-of-operation.html) is on the [Planned](../README.md#planned) list.
 
 Setup checklist:
 
@@ -327,7 +327,7 @@ Setup checklist:
 Operational notes:
 
 * Re-signing happens outside the backend. When a re-sign batch lands in ETCD, the zone is reloaded as usual.
-* `NSEC`/`NSEC3` chains must remain consistent at all times. Push chain updates atomically (e.g. using a single ETCD transaction or [`setDomainMetadata`-style locks](#locks)) so resolvers never observe a broken denial-of-existence chain.
+* `NSEC`/`NSEC3` chains must remain consistent at all times. Push chain updates atomically (e.g. using a single ETCD transaction or [transaction locks](#locks)) so resolvers never observe a broken denial-of-existence chain.
 * `getDomainKeys` is not implemented — pdns-etcd3 does not store DNSSEC private keys. This is fine for `PRESIGNED=1` zones; it is the missing piece for online signing.
 
 [rfc4035-presigned]: https://datatracker.ietf.org/doc/html/rfc4035

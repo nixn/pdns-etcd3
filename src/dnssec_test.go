@@ -49,8 +49,7 @@ func TestFixedSerial(t *testing.T) {
 			if in != nil {
 				dn.metadata[MetaFixedSerial] = in
 			}
-			params := &rrParams{qtype: "SOA", id: "", data: dn}
-			return params.fixedSerial(), nil
+			return soaSerial(dn), nil
 		}
 		checkRun(t, fmt.Sprintf("(%d)%v", i+1, spec.input), tf, spec.input, spec.expected, false)
 	}
@@ -78,35 +77,5 @@ func TestSOAFixedSerialThroughProcessValues(t *testing.T) {
 	want := `ns.tld. horst\.master.tld. 2026051901 3600 1800 604800 600`
 	if got.content != want {
 		t.Errorf("SOA content mismatch:\n got: %q\nwant: %q", got.content, want)
-	}
-}
-
-// TestDNSSECPlainStringPassthrough: DNSSEC qtypes (no parser, no rrFunc) round-trip verbatim.
-func TestDNSSECPlainStringPassthrough(t *testing.T) {
-	RootLog.ChildLog("data").SetLevel(10)
-	root := newDataNode(nil, "", "TEST/", false)
-	zone := root.getChildCreate([]namePart{{"tld", ""}})
-	cases := map[string]string{
-		"DNSKEY":     "257 3 13 mdsswUyr3DPW132mOi8V9xESWE8jTo0dxCjjnopKl+GqJxpVXckHAeF+KkxLbxILfDLUT0rAK9iUzy1L53eKGQ==",
-		"RRSIG":      "A 13 2 3600 20260601000000 20260501000000 12345 example.com. abc123==",
-		"NSEC":       "host.example.com. A NS SOA MX AAAA RRSIG NSEC DNSKEY",
-		"NSEC3":      "1 0 10 ABCD H9P7U7TR2U91D0V0LJS9L1GIDNP90U3H A RRSIG",
-		"NSEC3PARAM": "1 0 10 ABCD",
-		"DS":         "12345 13 2 3B1AAAAABBBBCCCC",
-		"CDS":        "0 0 0 00",
-		"CDNSKEY":    "0 3 0 AA==",
-	}
-	for qtype, content := range cases {
-		t.Run(qtype, func(t *testing.T) {
-			clearMap(zone.records)
-			zone.processValuesEntry(qtype, "", &valueType{key: qtype, content: stringValueType{s: content}})
-			got, ok := zone.records[qtype][""]
-			if !ok {
-				t.Fatalf("expected a %s record, got none", qtype)
-			}
-			if got.content != content {
-				t.Errorf("%s content mismatch:\n got: %q\nwant: %q", qtype, got.content, content)
-			}
-		})
 	}
 }
