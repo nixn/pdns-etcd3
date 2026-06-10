@@ -297,10 +297,40 @@ this is especially important when using user-defined keys, beginning with `X-`.
 
 The values of metadata entries are always read as strings and not modified in any way, just passed as-is to PDNS.
 
+### Reserved `X-PE3-*` keys
+
+Metadata keys starting with `X-PE3-` are reserved for use by this backend. They are not forwarded to PowerDNS as ordinary metadata (PDNS already ignores unknown `X-` keys), but they alter how pdns-etcd3 serves the zone:
+
+* `X-PE3-FIXED-SERIAL` — when set on a zone, its first value (parsed as an unsigned 32-bit integer per [RFC 1035][rfc1035]) replaces the automatic [zone-revision serial](#soa) in the served `SOA` record. Anything that does not parse (out of range, unparseable, empty) is logged and the automatic serial is used instead.
+    * The main use case is [pre-signed DNSSEC](#pre-signed-dnssec): the served `SOA` serial must match the value the external signer baked into `RRSIG(SOA)`, otherwise validating resolvers reject the answer.
+    * It is also useful without DNSSEC, for operators who want to control the serial manually (e.g. to mirror an existing zone byte-for-byte).
+* `X-PE3-MINIMUM-SERIAL` — zone serial handling. It is added/removed automatically by transactions to ensure the zone revision (and thus the serial) never moves backwards across a key-delete. Operators should write this key by hand, when they are only deleting keys manually.
+
+[rfc1035]: https://datatracker.ietf.org/doc/html/rfc1035#section-3.3.13
+
 ## Locks
 
 Every zone can be locked for transactions. These entries have a prefix of `<domain>/-lock-` and are handled automatically,
 there is no need to create or delete them manually. They are not part of the automatic SOA serial determination.
+
+## Pre-signed DNSSEC
+
+pdns-etcd3 supports DNSSEC currently only in the [pre-signed (front-signing)][rfc4035-presigned] model: an external signer (`ldns-signzone`, `dnssec-signzone`, OpenDNSSEC, …) produces the signed records and pushes them into ETCD under the same key layout as ordinary records. The backend itself does not sign anything yet; [online signing](https://doc.powerdns.com/authoritative/dnssec/modes-of-operation.html) is on the [Planned](../README.md#planned) list.
+
+Setup checklist:
+
+1. Store each signed record as a plain presentation-format string under its name and qtype. The relevant qtypes (`DNSKEY`, `RRSIG`, `NSEC`, `NSEC3`, `NSEC3PARAM`, `DS`, `CDS`, `CDNSKEY`) are not object-supported and have no plain-string parser — they are passed through to PowerDNS unchanged, which is exactly what pre-signed zones need.
+    * As always, [start such values with a backtick](#resource-record-values) if the first character is non-alphanumeric — for example `RRSIG` entries that begin with whitespace, parentheses or a leading sign character.
+2. Set `PRESIGNED=1` as ordinary metadata on the zone, e.g. via `pdnsutil set-meta <zone> PRESIGNED 1` or by writing `<zone>/-metadata-/PRESIGNED` directly. PowerDNS will then serve `RRSIG`/`NSEC`/`DNSKEY` records from the backend instead of trying to sign on the fly.
+3. (Recommended) Set [`X-PE3-FIXED-SERIAL`](#reserved-x-pe3--keys) on the zone to the serial value the signer wrote into `SOA` / `RRSIG(SOA)`. Update it in the same transaction as the new signed RRsets so the served serial stays consistent with the signatures.
+
+Operational notes:
+
+* Re-signing happens outside the backend. When a re-sign batch lands in ETCD, the zone is reloaded as usual.
+* `NSEC`/`NSEC3` chains must remain consistent at all times. Push chain updates atomically (e.g. using a single ETCD transaction or [transaction locks](#locks)) so resolvers never observe a broken denial-of-existence chain.
+* `getDomainKeys` is not implemented — pdns-etcd3 does not store DNSSEC private keys. This is fine for `PRESIGNED=1` zones; it is the missing piece for online signing.
+
+[rfc4035-presigned]: https://datatracker.ietf.org/doc/html/rfc4035
 
 ## Supported records
 
@@ -458,6 +488,8 @@ as described in syntax for "domain name"! It also can be only the local part (wi
 
 There is no serial field, because the program takes the latest modification revision of the zone as serial.
 This way the operator does not have to increase it manually each time he/she changes DNS data.
+
+If the automatic serial does not fit the use case (e.g. [pre-signed DNSSEC zones](#pre-signed-dnssec) where the serial must match the value the signer put into `RRSIG(SOA)`, or operators wanting full manual control), set the [`X-PE3-FIXED-SERIAL`](#reserved-x-pe3--keys) metadata on the zone. Its value (parsed as an unsigned 32-bit integer per RFC 1035) is then served verbatim in the `SOA` record. With no such metadata, the automatic serial is used.
 
 Options:
 * `no-aa` or `not-authoritative`: boolean
