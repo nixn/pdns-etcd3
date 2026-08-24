@@ -283,6 +283,14 @@ func soaSerial(data *dataNode) int64 {
 	return int64(v)
 }
 
+// soaWireSerial projects the (possibly >uint32) automatic serial onto uint32 for
+// the SOA wire format. Monotone under RFC 1982 because increments between secondary
+// polls always stay far below 2^31. X-PE3-FIXED-SERIAL still takes precedence (it is
+// validated as uint32 inside soaSerial).
+func soaWireSerial(data *dataNode) uint32 {
+	return uint32(soaSerial(data))
+}
+
 func soa(params *rrParams) {
 	// primary
 	primary, vPath, err := getValue[string]("primary", params)
@@ -319,8 +327,8 @@ func soa(params *rrParams) {
 		params.Logf(ErrorLevel)("failed to append zone domain to 'mail': %v", err)("vp", Supplier1(ptr2strS, vPath))
 		return
 	}
-	// serial: MetaFixedSerial overrides zoneRev (e.g. to match RRSIG(SOA) in pre-signed mode).
-	serial := soaSerial(params.data)
+	// serial: projected onto uint32; MetaFixedSerial overrides zoneRev (e.g. to match RRSIG(SOA)).
+	serial := soaWireSerial(params.data)
 	// refresh
 	refresh, vPath, err := getDuration("refresh", params)
 	if vPath == nil || err != nil {

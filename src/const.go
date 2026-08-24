@@ -54,6 +54,8 @@ const (
 	optionsKey       = "-options-"
 	metadataKey      = "-metadata-"
 	lockKey          = "-lock-"
+	tsigKey          = "-tsig-"
+	notifiedKey      = "-notified-"
 	keySeparator     = "/"
 	labelPrefix      = "+"
 	idSeparator      = "#"
@@ -66,6 +68,9 @@ const (
 	MetaFixedSerial   = "X-PE3-FIXED-SERIAL"
 )
 
+// kindMaster is the PowerDNS domain kind reported for every zone (we are always primary).
+const kindMaster = "MASTER"
+
 type ipMetaT map[int]struct {
 	totalOctets int
 	partOctets  int
@@ -77,7 +82,7 @@ var (
 	nameRegex  = regexp.MustCompile(`^([a-z_0-9]|[a-z_0-9][a-z_0-9-]*[a-z_0-9]|\*)([./])`)
 	entryRegex = regexp.MustCompile(`^(-[a-z]+-)(?:$|/|#)`)
 	valsRegex  = regexp.MustCompile(`^([A-Z][A-Z0-9]*)?(?:#([^@#]*))?$`)
-	metaRegex  = regexp.MustCompile(`^([A-Z][A-Z0-9-]*)#([^@#]*)$`)
+	metaRegex  = regexp.MustCompile(`^([A-Z][A-Z0-9-]*)(?:#([^@#]*))?$`)
 	ipMeta     = ipMetaT{
 		4: {4, 1, `.`},
 		6: {16, 2, `:`},

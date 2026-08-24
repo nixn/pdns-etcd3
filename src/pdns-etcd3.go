@@ -236,9 +236,24 @@ func (cr *pdnsClientRequest) handleRequest(ctx context.Context) {
 	case "setdomainmetadata":
 		result, err = cr.setDomainMetadata(ctx)
 	case "getalldomains":
-		result = dataRoot.allDomains([]domainInfo{}) // must not be nil, for empty answers it would not be marshaled into `[]`
+		result, err = cr.getAllDomains()
 	case "getdomaininfo":
 		result, err = cr.getDomainInfo()
+	case "list":
+		result, err = cr.list()
+	case "getupdatedmasters", "getupdatedprimaries":
+		result, err = cr.getUpdatedMasters()
+	case "setnotified":
+		result, err = cr.setNotified()
+	case "gettsigkey":
+		result, err = cr.getTSIGKey()
+	case "gettsigkeys":
+		result, err = cr.getTSIGKeys()
+	case "getdomainkeys":
+		// remote-dnssec=yes (required to enable getTSIGKey) makes PowerDNS enumerate DNSSEC
+		// keys per zone; pe3 manages none (zones are plain or pre-signed), so report an
+		// empty set instead of erroring.
+		result = []objectType[any]{} // must not be nil → marshals to `[]`
 	default:
 		result, err = false, fmt.Errorf("unknown/unimplemented request: %s", val2str(cr.Request))
 	}
@@ -272,6 +287,13 @@ EVENTS:
 		}
 		if err != nil {
 			RootLog.Errorf("etcd", "events")(nil, "failed to parse entry key %q, ignoring event: %s", entryKey, err)()
+			continue
+		}
+		if entryType == tsigEntry || entryType == notifiedEntry {
+			// TSIG keys and notified-serial markers are global, read on demand, never stored
+			// in the data tree, and must not influence any zone serial → ignore before any
+			// zone resolution/reload.
+			debug3(nil, "ignoring events for %s entries", entryType)(entryKey)
 			continue
 		}
 		if entryType == lockEntry && event.Type != clientv3.EventTypeDelete {

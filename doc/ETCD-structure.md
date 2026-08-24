@@ -224,7 +224,7 @@ from above: 1, 2 (only added entries), 4, 6, 8 and 9.
 
 #### Current version
 
-The current data version is `0.2.0` and is described in this document.
+The current data version is `0.2.1` and is described in this document.
 
 ### Defaults and options
 
@@ -312,6 +312,39 @@ Metadata keys starting with `X-PE3-` are reserved for use by this backend. They 
 
 Every zone can be locked for transactions. These entries have a prefix of `<domain>/-lock-` and are handled automatically,
 there is no need to create or delete them manually. They are not part of the automatic SOA serial determination.
+
+## TSIG keys
+
+[TSIG](https://doc.powerdns.com/authoritative/tsig.html) keys are stored as a *global* pseudo-entry, not under any zone:
+
+* Key: `-tsig-/<keyname>` (a single key, no `<domain>` prefix; `<keyname>` is the literal TSIG key name).
+* Value: `"<algorithm> <base64-secret>"` — the algorithm name and the base64-encoded shared secret, separated by whitespace.
+  * Example: `-tsig-/axfrkey.` → `hmac-sha256 <base64-secret>`
+
+These entries are read on demand by the `getTSIGKey` / `getTSIGKeys` remote-backend methods (which PowerDNS calls when it needs to verify or sign a TSIG-protected message, e.g. for [AXFR](#primary--axfr)). They are **never cached in the data tree** (so they are not part of any zone reload) and **never affect any zone serial**. Malformed values (not of the `<algorithm> <base64-secret>` form) are logged and skipped.
+
+**PowerDNS must be configured with `remote-dnssec=yes`** for any of this to take effect: the remote backend gates `getTSIGKey`/`getTSIGKeys` (and the other DNSSEC methods) behind its `dnssec` flag, and otherwise never queries the backend for the key (the signed transfer is refused with `NOTAUTH`). pe3 manages no DNSSEC keys, so it answers `getDomainKeys` with an empty set.
+
+The `<keyname>` is whatever PowerDNS sends; it may or may not carry a trailing `.` (FQDN). To be safe, store the key under both spellings (`<name>` and `<name>.`) so the lookup matches regardless of canonicalization.
+
+## Primary / AXFR
+
+pdns-etcd3 acts as a PowerDNS [primary (master)](https://doc.powerdns.com/authoritative/modes-of-operation.html) — every zone is reported with kind `MASTER`. Outgoing zone transfers (AXFR-OUT) and `NOTIFY` are driven entirely by the existing [metadata](#metadata) passthrough plus the [TSIG keys](#tsig-keys) above; there are no new on-etcd key shapes beyond `-tsig-`.
+
+The relevant per-zone metadata keys (stored as ordinary metadata, `<zone>/-metadata-/<KEY>#<id>`, value passed verbatim to PowerDNS) are:
+
+* `TSIG-ALLOW-AXFR` — list of TSIG key names allowed to request AXFR. Each value is one key name; the name must match a [`-tsig-/<keyname>`](#tsig-keys) entry. Use one entry per allowed key (different `#<id>` per value).
+* `ALLOW-AXFR-FROM` — list of IP addresses / networks allowed to request AXFR without TSIG.
+* `ALSO-NOTIFY` — list of extra `ip[:port]` targets to send `NOTIFY` to (in addition to the zone's `NS` records).
+* `PRESIGNED` — marks a [pre-signed DNSSEC](#pre-signed-dnssec) zone (`PRESIGNED=1`); PowerDNS then serves the stored `RRSIG`/`NSEC`/`DNSKEY` records as-is.
+
+Automatic `NOTIFY` on zone changes relies on tracking the last *notified* serial per zone (PowerDNS compares it to the current serial to decide whether to notify). pdns-etcd3 persists this value in ETCD under a **global pseudo-entry keyed by domain id**:
+
+```text
+<prefix>-notified-/<id>   →   "<serial>"
+```
+
+It is written by `setNotified` and read by `getUpdatedMasters`/`getDomainInfo`/`getAllDomains`. The `<id>` is the `domain_id` PowerDNS uses — a deterministic 31-bit hash of the zone name (stable across processes). The entry lives **outside any zone's prefix**, so recording it never enters a zone's `zoneRev()`/serial (which would otherwise trigger a NOTIFY feedback loop); like the `-tsig-` keys it is read/written on demand and is **never** part of a zone reload. Because the state is in ETCD (not process memory), automatic `NOTIFY` works in **any run mode — pipe as well as standalone**.
 
 ## Pre-signed DNSSEC
 
@@ -589,6 +622,11 @@ The `TXT` record is not parsed, when being written in a plain string syntax.
 
 The changelog lists every change which led to a data version increase (major or minor).
 One can use it to check their data - whether an adjustment is needed for a new program version which has a new data version.
+
+### 0.2.1
+* added global TSIG key pseudo-entry `-tsig-/<keyname>` → `"<algorithm> <base64-secret>"` (for AXFR-OUT)
+* added global notified-serial pseudo-entry `-notified-/<id>` → `"<serial>"` (drives automatic `NOTIFY` in any run mode, incl. pipe)
+* documented [primary / AXFR](#primary--axfr) operation: per-zone metadata `TSIG-ALLOW-AXFR`, `ALLOW-AXFR-FROM`, `ALSO-NOTIFY`, `PRESIGNED` (all via the existing metadata passthrough)
 
 ### 0.2.0
 * allow JSON5 syntax

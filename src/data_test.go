@@ -57,7 +57,12 @@ func TestParseEntryKey(t *testing.T) {
 		{"com.example/dept.fin/-defaults-/NS#1@2.3", ve[pk]{v: pk{[]namePart{{"com", ""}, {"example", "."}, {"dept", "/"}, {"fin", "."}}, "defaults", "NS", "1", &VersionType{false, 2, 3, 0}}}},
 		{"SOA#id", ve[pk]{e: "SOA entry cannot have an id"}},
 		{"miXed-CaSe", ve[pk]{e: "invalid key"}},
-		// TODO add way more tests (e.g. names with underscores, wildcard, more entry types, ...)
+		{"com.example/_domainkey.selector1/CNAME", ve[pk]{v: pk{[]namePart{{"com", ""}, {"example", "."}, {"_domainkey", "/"}, {"selector1", "."}}, "normal", "CNAME", "", nil}}},
+		{"com.example/foo_bar/CNAME", ve[pk]{e: "underscore"}},
+		{"com.example/__x/CNAME", ve[pk]{e: "underscore"}},
+		{"es.shara/-metadata-/X-PE3-MINIMUM-SERIAL", ve[pk]{v: pk{[]namePart{{"es", ""}, {"shara", "."}}, "metadata", "X-PE3-MINIMUM-SERIAL", "", nil}}},
+		{"es.shara/-metadata-/ALLOW-AXFR-FROM#1", ve[pk]{v: pk{[]namePart{{"es", ""}, {"shara", "."}}, "metadata", "ALLOW-AXFR-FROM", "1", nil}}},
+		// TODO add way more tests (e.g. wildcard, more entry types, ...)
 	} {
 		checkRun(t, fmt.Sprintf("(%d)%q", i+1, spec.input), tf, spec.input, spec.expected, false)
 	}
@@ -226,4 +231,80 @@ func TestProcessValues(t *testing.T) {
 			}, false)
 		}
 	})
+}
+
+func TestParseTSIGEntryKey(t *testing.T) {
+	prefix := ""
+	args = programArgs{Prefix: &prefix}
+	name, et, qtype, id, _, err := parseEntryKey("-tsig-/xfrkey")
+	if err != nil {
+		Fatalf(t, "unexpected error: %s", err)
+	}
+	if et != tsigEntry {
+		Errorf(t, "entryType = %q, want tsig", et)
+	}
+	if id != "xfrkey" {
+		Errorf(t, "id = %q, want xfrkey", id)
+	}
+	if len(name) != 0 || qtype != "" {
+		Errorf(t, "name/qtype should be empty: %v %q", name, qtype)
+	}
+	// dotted key names must survive verbatim
+	if _, _, _, dottedID, _, err := parseEntryKey("-tsig-/xfr.example.com"); err != nil {
+		Errorf(t, "unexpected error for dotted key: %s", err)
+	} else if dottedID != "xfr.example.com" {
+		Errorf(t, "dotted id = %q, want xfr.example.com", dottedID)
+	}
+}
+
+func TestAllDomainsReportsKindAndID(t *testing.T) {
+	apex := newDataNode(nil, "example", "", false)
+	apex.records["SOA"] = map[string]recordType{"": {content: "ns1 host 1 2 3 4 5"}}
+	apex.maxRev = 7
+	got := apex.allDomains([]domainInfo{})
+	if len(got) != 1 {
+		Fatalf(t, "want 1 domain, got %d", len(got))
+	}
+	if got[0].Kind != "MASTER" {
+		Errorf(t, "kind = %q, want MASTER", got[0].Kind)
+	}
+	if got[0].ID != domainID("example.") {
+		Errorf(t, "id = %d, want domainID(\"example.\") = %d", got[0].ID, domainID("example."))
+	}
+	if got[0].Serial != 7 {
+		Errorf(t, "serial = %d, want 7", got[0].Serial)
+	}
+}
+
+// TestReloadMetadataLandsOnEntryNode is a regression test: reload must store metadata on
+// the entry's OWN node (itemData), not on the reload receiver (dn). A freshly-created zone
+// reloads via the root, so storing on dn put a zone's metadata on the root — silently
+// breaking FIXED-SERIAL, PRESIGNED detection and TSIG-ALLOW-AXFR for new zones.
+func TestReloadMetadataLandsOnEntryNode(t *testing.T) {
+	prefix := ""
+	args = programArgs{Prefix: &prefix}
+	saved := dataRoot
+	defer func() { dataRoot = saved }()
+	dataRoot = newDataNode(nil, "", "", false)
+
+	ch := make(chan etcdItem, 2)
+	ch <- etcdItem{Key: "net.example/-metadata-/PRESIGNED#1", Value: []byte("1"), CRev: 5, MRev: 5}
+	ch <- etcdItem{Key: "net.example/-metadata-/X-PE3-FIXED-SERIAL#1", Value: []byte("2026010101"), CRev: 5, MRev: 5}
+	close(ch)
+	dataRoot.reload(ch) // reload on the ROOT, as handleEvents does for a freshly-created zone
+
+	node, found := dataRoot.getChild(ParseDomainName("example.net."), false)
+	defer node.rUnlockUpwards(nil, false)
+	if !found {
+		Fatalf(t, "example.net node not created by reload")
+	}
+	if got := node.metadata["PRESIGNED"]; len(got) != 1 || got[0] != "1" {
+		Errorf(t, "PRESIGNED must land on the zone node, got %v", got)
+	}
+	if got := node.metadata["X-PE3-FIXED-SERIAL"]; len(got) != 1 || got[0] != "2026010101" {
+		Errorf(t, "X-PE3-FIXED-SERIAL must land on the zone node, got %v", got)
+	}
+	if len(dataRoot.metadata) != 0 {
+		Errorf(t, "metadata wrongly stored on the reload receiver (root): %v", dataRoot.metadata)
+	}
 }

@@ -212,6 +212,24 @@ func float2int(n float64) (int64, error) {
 	return strconv.ParseInt(fmt.Sprintf("%.0f", n), 10, 64)
 }
 
+// paramInt64 coerces a PowerDNS request parameter to int64. JSON numbers decode to
+// float64, but standalone/string sources may deliver int64, int, or string, so all are
+// handled. Non-numeric values (e.g. bool, nil) yield an error rather than a panic.
+func paramInt64(v any) (int64, error) {
+	switch n := v.(type) {
+	case float64:
+		return int64(n), nil
+	case int64:
+		return n, nil
+	case int:
+		return int64(n), nil
+	case string:
+		return strconv.ParseInt(n, 10, 64)
+	default:
+		return 0, fmt.Errorf("not a number: %v (%T)", v, v)
+	}
+}
+
 func float2decimal(n float64) string {
 	str := fmt.Sprintf("%f", n)
 	return strings.TrimRight(str, "0.,")

@@ -55,6 +55,25 @@ func TestFixedSerial(t *testing.T) {
 	}
 }
 
+// TestSOAWireSerial: the wire serial is soaSerial() projected onto uint32.
+func TestSOAWireSerial(t *testing.T) {
+	for i, spec := range []test[func(*dataNode), uint32]{
+		// plain zoneRev within uint32
+		{func(dn *dataNode) { dn.maxRev = 42 }, ve[uint32]{v: 42}},
+		// zoneRev above uint32 wraps (4294967296 + 5)
+		{func(dn *dataNode) { dn.maxRev = 4294967301 }, ve[uint32]{v: 5}},
+		// FIXED-SERIAL takes precedence and round-trips exactly
+		{func(dn *dataNode) { dn.maxRev = 9; dn.metadata[MetaFixedSerial] = []string{"100"} }, ve[uint32]{v: 100}},
+	} {
+		tf := func(_ *testing.T, setup func(*dataNode)) (uint32, error) {
+			dn := newDataNode(nil, "", "TEST/", false)
+			setup(dn)
+			return soaWireSerial(dn), nil
+		}
+		checkRun(t, fmt.Sprintf("(%d)", i+1), tf, spec.input, spec.expected, false)
+	}
+}
+
 // TestSOAFixedSerialThroughProcessValues: the override actually lands in the served SOA content.
 func TestSOAFixedSerialThroughProcessValues(t *testing.T) {
 	RootLog.ChildLog("data").SetLevel(10)

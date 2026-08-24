@@ -37,6 +37,11 @@ the fourth development release, considered alpha quality. Any testing is appreci
     * e.g. in an `SRV` entry: `20 5 _ server1`, the port will be searched for in default values, the name `server1` will be appended with the zone name
     * same entry in JSON5 syntax: `{priority: 20, weight: 5, target: "server1"}` (this is longer but clearer)
 * [`ALIAS`](https://doc.powerdns.com/authoritative/guides/alias.html) support
+* [Primary (master) mode with AXFR zone transfer](#primary-mode-axfr-zone-transfer)
+    * every zone is served to PowerDNS as `MASTER`, so secondaries can `AXFR` it (the `list` remote-backend method)
+    * automatic `NOTIFY` on zone changes (via `getUpdatedMasters` / `setNotified`) in any run mode (the notified serial is persisted in ETCD)
+    * AXFR ACL by IP (`allow-axfr-ips` / `ALLOW-AXFR-FROM` metadata) and/or [TSIG key](doc/ETCD-structure.md#tsig-keys) (`TSIG-ALLOW-AXFR` metadata)
+    * pre-signed DNSSEC zones are transferred as-is
 * [Multi-level defaults and options](doc/ETCD-structure.md#defaults-and-options), overridable
 * [Domain metadata](https://doc.powerdns.com/authoritative/domainmetadata.html)
     * can also be read and modified with the command line tool `pdnsutil` (`pdnssec` in v3.4)
@@ -87,8 +92,10 @@ the fourth development release, considered alpha quality. Any testing is appreci
 * Redirecting (or duplicating) log output to something else than stderr
 
 ### Overview over the support of optional [PDNS features in a remote backend][pdns-remote]:
-* Primary and (Auto)Secondary: no
-  * AXFR support: not yet
+* Primary (master): yes — see [Primary mode (AXFR zone transfer)](#primary-mode-axfr-zone-transfer)
+  * AXFR support: yes (`list` method), with IP and/or TSIG ACL — requires PowerDNS 4.0+ (the legacy 3.4 remote-backend protocol does not support AXFR-out)
+  * automatic NOTIFY: yes, in any run mode (the notified serial is persisted in ETCD)
+* (Auto)Secondary: no
 * DNSSEC: pre-signed yes, live-signing not yet (planned feature)
   * Metadata: yes
 * Search (web API): not yet (planned feature)
@@ -194,6 +201,100 @@ remote-connection-string=http:url=http://localhost:8053[/client-id=xyz][/pdns-ve
 Because there is no 'initialize' call, the version of a connecting PowerDNS must be given as a parameter,
 if it differs from the default PDNS version. The default PDNS version can be changed via the `-pdns-version` option (see below).
 Other parameters could be set the same way, the URL path replaces the 'initialize' call for the HTTP connector.
+
+### Primary mode (AXFR zone transfer)
+
+pdns-etcd3 reports every zone it holds to PowerDNS as a [primary (master)][pdns-modes],
+so PowerDNS can answer outgoing zone transfers (AXFR) and send `NOTIFY` to your secondaries.
+On the backend side this is implemented by the remote-backend methods `getDomainInfo` / `getAllDomains`
+(report `kind=MASTER`, an integer `id` and a `notified_serial`), `list` (serves the full zone for AXFR),
+`getUpdatedMasters` / `getUpdatedPrimaries` + `setNotified` (drive automatic NOTIFY),
+and `getTSIGKey` / `getTSIGKeys` (TSIG verification/signing). There is nothing to enable in the backend itself —
+just configure PowerDNS and (optionally) the per-zone [metadata](doc/ETCD-structure.md#primary--axfr) below.
+Note: TSIG-secured transfers additionally require `remote-dnssec=yes` in PowerDNS (see [TSIG](#tsig)).
+
+The authoritative on-ETCD layout for everything mentioned here is in the ETCD structure document:
+[Primary / AXFR](doc/ETCD-structure.md#primary--axfr) and [TSIG keys](doc/ETCD-structure.md#tsig-keys).
+
+[pdns-modes]: https://doc.powerdns.com/authoritative/modes-of-operation.html
+
+#### PowerDNS configuration
+
+Enable primary operation in the PowerDNS configuration (in addition to the `remote-connection-string` from the run-mode
+sections above):
+```text
+# PowerDNS >= 4.5
+primary=yes
+# PowerDNS < 4.5 use the old spelling instead:
+#master=yes
+```
+For AXFR, PowerDNS notifies the zone's `NS` records plus any [`also-notify`][pdns-also-notify] targets
+(per-zone via the `ALSO-NOTIFY` metadata). IP-based AXFR access can be restricted with the PowerDNS
+[`allow-axfr-ips`][pdns-allow-axfr-ips] setting (global) and/or the per-zone `ALLOW-AXFR-FROM` metadata.
+
+[pdns-also-notify]: https://doc.powerdns.com/authoritative/settings.html#also-notify
+[pdns-allow-axfr-ips]: https://doc.powerdns.com/authoritative/settings.html#allow-axfr-ips
+
+#### Run mode
+
+Both plain AXFR serving (a secondary pulling the zone) and automatic `NOTIFY` on zone changes work in
+**any** run mode (pipe or standalone). PowerDNS detects a changed zone by comparing the serial to the last
+*notified* serial, which pdns-etcd3 persists in ETCD under a global `-notified-/<id>` entry (kept outside any
+zone's prefix so that recording it never bumps a zone's own serial — which would otherwise cause a NOTIFY
+feedback loop). Because that state lives in ETCD it is shared across processes, so it also works in pipe mode,
+where PowerDNS spawns a fresh short-lived process per request thread.
+
+#### Pointing an external secondary
+
+Configure the secondary (BIND, Knot, PowerDNS, …) to transfer the zone *from your PowerDNS server* (not from ETCD or
+pdns-etcd3 directly). Make sure the transfer is permitted: either by IP (`allow-axfr-ips` / `ALLOW-AXFR-FROM`) or by
+TSIG (see below), or both. Verify with `dig` (see [Verifying](#verifying) below) before relying on the secondary.
+
+#### TSIG
+
+**Required PowerDNS setting:** enable `remote-dnssec=yes`. PowerDNS's remote backend gates the DNSSEC/TSIG
+methods (including `getTSIGKey`) behind the backend's `dnssec` flag — without `remote-dnssec=yes` PowerDNS never
+queries the backend for the TSIG key and denies the signed transfer with `NOTAUTH`. (pe3 manages no DNSSEC keys, so
+it answers `getDomainKeys` with an empty set; pre-signed zones still work via the `PRESIGNED` metadata.)
+
+TSIG keys are stored as a *global* pseudo-entry in ETCD (not under any zone), read on demand by `getTSIGKey` /
+`getTSIGKeys`:
+```text
+<prefix>-tsig-/<keyname>   →   "<algorithm> <base64-secret>"
+# e.g.
+<prefix>-tsig-/axfrkey.    →   "hmac-sha256 <base64-secret>"
+```
+Then authorize the key for a zone's AXFR with the per-zone `TSIG-ALLOW-AXFR` metadata (a list of allowed key names,
+e.g. via `pdnsutil set-meta <zone> TSIG-ALLOW-AXFR <keyname>`). Each value names one key, which must match a
+`-tsig-/<keyname>` entry.
+
+**Trailing-dot caveat:** `getTSIGKey` does an *exact-match* lookup in ETCD with no name canonicalization, so the key
+must be stored under the exact name PowerDNS requests. Whether that name carries a trailing `.` (FQDN) depends on
+PowerDNS; to be safe, store the secret under both spellings — `<keyname>` and `<keyname>.` — so the lookup matches
+either way.
+
+See [TSIG keys](doc/ETCD-structure.md#tsig-keys) in the ETCD structure document for the authoritative key layout.
+
+#### Pre-signed DNSSEC over AXFR
+
+A [pre-signed DNSSEC zone](doc/ETCD-structure.md#pre-signed-dnssec) is transferred as-is: store the signed records
+(`RRSIG`, `NSEC`/`NSEC3`, `DNSKEY`, …) in ETCD like any other record, set `PRESIGNED=1` as metadata on the zone, and
+pin the served serial with the [`X-PE3-FIXED-SERIAL`](doc/ETCD-structure.md#reserved-x-pe3--keys) metadata so it matches
+the serial the signer baked into `RRSIG(SOA)` (otherwise validating resolvers reject the answer). Delegation `NS` records
+and glue are emitted non-authoritative. See the [Pre-signed DNSSEC zones](#features) feature note and the
+[ETCD structure section](doc/ETCD-structure.md#pre-signed-dnssec) for details.
+
+#### Verifying
+
+Trigger a transfer from the PowerDNS host to confirm it works:
+```shell
+# plain AXFR (allowed by allow-axfr-ips / ALLOW-AXFR-FROM)
+dig AXFR example.com @<pdns-host>
+
+# TSIG-protected AXFR
+dig -y hmac-sha256:<keyname>:<base64-secret> AXFR example.com @<pdns-host>
+```
+A successful transfer prints the full zone (starting and ending with the `SOA` record).
 
 ### Parameters
 

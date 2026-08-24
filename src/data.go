@@ -27,7 +27,7 @@ import (
 
 var (
 	// update this when changing data structure (only major/minor, patch is always 0). also change it in docs and in build workflow!
-	dataVersion = VersionType{IsDevelopment: true, Major: 2, Minor: 0}
+	dataVersion = VersionType{IsDevelopment: true, Major: 2, Minor: 1}
 )
 
 type recordType struct {
@@ -278,15 +278,32 @@ func (dn *dataNode) zonesCount() int {
 }
 
 type domainInfo struct {
-	Zone   string `json:"zone"`
-	Serial int64  `json:"serial"`
+	ID             int64  `json:"id"`
+	Zone           string `json:"zone"`
+	Serial         int64  `json:"serial"`
+	NotifiedSerial int64  `json:"notified_serial"`
+	Kind           string `json:"kind"`
 }
 
 func (dn *dataNode) allDomains(result []domainInfo) []domainInfo {
-	if _, ok := dn.records["SOA"][""]; ok {
-		zone, serial := dn.getQname(), dn.zoneRev()
+	// RLock this node while reading its records/children: zone reloads rebuild them
+	// under a write lock. Each recursive call self-locks the child, and we keep this
+	// node RLocked until the child loop finishes, so the walked path is locked
+	// top-down (parent-before-child, matching getChild's order) — no deadlock vs the
+	// reload WLock and no concurrent-map access.
+	dn.RLock(false)
+	defer dn.RUnlock(false)
+	if dn.hasSOA() {
+		zone := dn.getQname()
+		serial := int64(soaWireSerial(dn))
 		dn.Logf(3)("allDomains: found zone %q", zone)("serial", serial)
-		result = append(result, domainInfo{zone, serial})
+		result = append(result, domainInfo{
+			ID:     domainID(zone),
+			Zone:   zone,
+			Serial: serial,
+			Kind:   kindMaster,
+			// NotifiedSerial is filled in by the request handler from the persisted etcd state.
+		})
 	}
 	for _, child := range dn.children {
 		result = child.allDomains(result)
@@ -358,8 +375,10 @@ func parseEntryKey(key string) (name Name, entryType entryType, qtype, id string
 				switch qtype {
 				case "A", "AAAA", "ALIAS", "CNAME", "DNAME", "MX", "NS", "PTR", "SOA": // TODO add others, even not-supported ones?
 					for _, lname := range name {
-						if strings.ContainsRune(lname.name, '_') {
-							err = fmt.Errorf("records for hostnames may not have underscores: %q", lname.name)
+						// a single leading underscore is allowed (RFC 8552 underscored
+						// node names, e.g. _domainkey for delegated DKIM CNAMEs)
+						if strings.ContainsRune(strings.TrimPrefix(lname.name, "_"), '_') {
+							err = fmt.Errorf("records for hostnames may not have underscores (except a single leading one): %q", lname.name)
 							return
 						}
 					}
@@ -374,6 +393,14 @@ func parseEntryKey(key string) (name Name, entryType entryType, qtype, id string
 			return
 		}
 	case lockEntry:
+		id = key
+		return
+	case tsigEntry:
+		// the remainder after "-tsig-/" is the key name (may contain dots)
+		id = key
+		return
+	case notifiedEntry:
+		// the remainder after "-notified-/" is the domain id
 		id = key
 		return
 	default:
@@ -465,6 +492,13 @@ ITEMS:
 			debug3("ignoring lock entry")(item.Key)
 			continue ITEMS
 		}
+		if entryType == tsigEntry || entryType == notifiedEntry {
+			// TSIG keys and notified-serial markers are global, read on demand, never stored
+			// in the data tree, and must not influence any zone serial → skip before the
+			// maxRev update below.
+			debug3("ignoring %s entry", entryType)(item.Key)
+			continue ITEMS
+		}
 		// check if the entry belongs to this domain
 		if name.len() < depth {
 			continue ITEMS
@@ -503,8 +537,12 @@ ITEMS:
 			vals[qtype][id] = valueType{item.Key, content, itemVersion}
 			debug3values("stored %v for %s", entryType, target)(content)
 		case metadataEntry:
+			// store on itemData (the node the entry belongs to), NOT on dn (the reload
+			// receiver): a full/parent reload has dn above the zone, so using dn would put
+			// a sub-zone's metadata on the wrong node — breaking soaSerial (FIXED-SERIAL),
+			// PRESIGNED detection and TSIG-ALLOW-AXFR for freshly-created zones.
 			value := string(item.Value)
-			dn.metadata[qtype] = append(dn.metadata[qtype], value)
+			itemData.metadata[qtype] = append(itemData.metadata[qtype], value)
 			debug3values("stored %v for %s", entryType, target)(value)
 		default:
 			dn.Errorf()("unhandled entry type")(entryType)

@@ -407,3 +407,13 @@ func getenvT(key, def string) string {
 	}
 	return v
 }
+
+// testClient returns a minimal *pdnsClient suitable for unit tests. RootLog is
+// initialized at package load (logging.go), so client.Logf works without further
+// setup; only ID and PdnsVersion are needed by the request handlers under test.
+func testClient(_ *testing.T) *pdnsClient {
+	return &pdnsClient{
+		ID:          pipeClientID{},
+		PdnsVersion: 4,
+	}
+}

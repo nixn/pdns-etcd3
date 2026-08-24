@@ -44,9 +44,13 @@ func (cr *pdnsClientRequest) getDomainInfo() (any, error) {
 			cr.Logf(1, "data")("getDomainInfo: not a zone")(name.normal)
 			return false, nil
 		}
+		id := domainID(data.getQname())
 		return objectType[any]{
-			"zone":   cr.Request.Parameters["name"],
-			"serial": data.zoneRev(),
+			"id":              id,
+			"zone":            data.getQname(),
+			"serial":          int64(soaWireSerial(data)),
+			"notified_serial": int64(getNotifiedSerial(id)),
+			"kind":            kindMaster,
 		}, nil
 	})
 }
@@ -108,4 +112,40 @@ func (cr *pdnsClientRequest) setDomainMetadata(ctx context.Context) (bool, error
 	waitForReload(ctx, "setDomainMetadata", name, rev)
 	cr.Logf(3, "main")("setDomainMetadata finished")("kind", kind, "values", values)
 	return true, nil
+}
+
+// setNotified records the serial PowerDNS just notified secondaries about. It only
+// updates the in-memory registry (no etcd write) to avoid bumping the zone revision and
+// triggering a NOTIFY feedback loop.
+func (cr *pdnsClientRequest) setNotified() (bool, error) {
+	id, err := paramInt64(cr.Request.Parameters["id"])
+	if err != nil {
+		return false, fmt.Errorf("bad id: %s", err)
+	}
+	serial, err := paramInt64(cr.Request.Parameters["serial"])
+	if err != nil {
+		return false, fmt.Errorf("bad serial: %s", err)
+	}
+	if err := putNotifiedSerial(id, uint32(serial)); err != nil {
+		return false, fmt.Errorf("failed to persist notified serial: %s", err)
+	}
+	cr.Logf(2, "main")("setNotified")("id", id, "serial", serial)
+	return true, nil
+}
+
+// getAllDomains lists every zone (kind=MASTER) with its serial and persisted notified serial.
+func (cr *pdnsClientRequest) getAllDomains() (any, error) {
+	domains := dataRoot.allDomains([]domainInfo{})
+	notified := getAllNotifiedSerials()
+	for i := range domains {
+		domains[i].NotifiedSerial = int64(notified[domains[i].ID])
+	}
+	return domains, nil
+}
+
+// getUpdatedMasters returns the zones whose serial changed since PowerDNS last notified the
+// secondaries (so PowerDNS sends NOTIFY). The notified serial is read from the shared etcd
+// state, so this works in any run mode (pipe or standalone).
+func (cr *pdnsClientRequest) getUpdatedMasters() (any, error) {
+	return filterUpdated(dataRoot.allDomains([]domainInfo{}), getAllNotifiedSerials()), nil
 }

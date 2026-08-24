@@ -25,6 +25,8 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"strconv"
@@ -37,6 +39,7 @@ import (
 	"github.com/docker/go-connections/nat"
 	"github.com/miekg/dns"
 	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -235,13 +238,25 @@ func startContainer(t *testing.T, cr testcontainers.ContainerRequest, endpoint n
 	return ctInfo, nil
 }
 
-func startETCD(t *testing.T) (*ctInfo, error) {
+func startETCD(t *testing.T, netAliases ...map[string][]string) (*ctInfo, error) {
 	t.Helper()
+	// optional: attach to a docker network so other containers (e.g. a pipe-mode pe3 running
+	// inside the PowerDNS container) can reach etcd by alias
+	var nets []string
+	var aliases map[string][]string
+	if len(netAliases) > 0 && netAliases[0] != nil {
+		aliases = netAliases[0]
+		for n := range aliases {
+			nets = append(nets, n)
+		}
+	}
 	image := fmt.Sprintf("quay.io/coreos/etcd:v%s", getenvT("ETCD_VERSION", "3.6.7"))
 	Logf(t, "Using ETCD image %s", image)
 	return startContainer(t, testcontainers.ContainerRequest{
 		Image:          image,
 		Hostname:       "etcd",
+		Networks:       nets,
+		NetworkAliases: aliases,
 		ExposedPorts:   []string{"2379"},
 		LogConsumerCfg: &testcontainers.LogConsumerConfig{Consumers: []testcontainers.LogConsumer{CtLogger{t, "ETCD"}}},
 		Cmd: []string{
@@ -264,9 +279,19 @@ type pe3Info struct {
 	Prefix      string
 }
 
+// pe3HTTPPort returns the host port for the standalone HTTP listener. It is fixed
+// by default (also used in the remote-connection-string PDNS setting), but
+// PE3_TEST_HTTP_PORT overrides it for hosts where 8053 is already taken.
+func pe3HTTPPort() string {
+	if p := os.Getenv("PE3_TEST_HTTP_PORT"); p != "" {
+		return p
+	}
+	return "8053"
+}
+
 func startPE3(t *testing.T, etcdEndpoint, prefix string, moreArgs ...string) pe3Info {
 	t.Helper()
-	httpAddress, _ := url.Parse("http://0.0.0.0:8053") // the port is fixed, it is also used in remote-connection-string PDNS setting
+	httpAddress, _ := url.Parse("http://0.0.0.0:" + pe3HTTPPort())
 	doneCtx, done := context.WithCancel(context.Background())
 	osSignals := make(chan os.Signal, 1)
 	cli = new(etcdClient)
@@ -321,8 +346,17 @@ type pdnsInfo struct {
 	Version string
 }
 
-func startPDNS(t *testing.T, dynamicSettings map[string]string) (pdnsInfo, error) {
+func startPDNS(t *testing.T, dynamicSettings map[string]string, netAliases ...map[string][]string) (pdnsInfo, error) {
 	t.Helper()
+	// optional: attach to a docker network (network name → aliases) so other containers can reach it
+	var nets []string
+	var aliases map[string][]string
+	if len(netAliases) > 0 && netAliases[0] != nil {
+		aliases = netAliases[0]
+		for n := range aliases {
+			nets = append(nets, n)
+		}
+	}
 	var image string
 	var fromDockerfile testcontainers.FromDockerfile
 	repo := "localhost/pdns-etcd3/pdns"
@@ -344,7 +378,7 @@ func startPDNS(t *testing.T, dynamicSettings map[string]string) (pdnsInfo, error
 		Fatalf(t, "invalid PDNS version: %q", v)
 	}
 	settings := []string{
-		fmt.Sprintf("remote-connection-string=http:url=http://host.docker.internal:8053/client-id=%013s/pdns-version=%s/,post=yes,post_json=yes,timeout=10000", strconv.FormatUint(rand.Uint64(), 32), v[:1]),
+		fmt.Sprintf("remote-connection-string=http:url=http://host.docker.internal:%s/client-id=%013s/pdns-version=%s/,post=yes,post_json=yes,timeout=10000", pe3HTTPPort(), strconv.FormatUint(rand.Uint64(), 32), v[:1]),
 		"cache-ttl=0",
 		"query-cache-ttl=0",
 		"negquery-cache-ttl=0",
@@ -371,6 +405,8 @@ func startPDNS(t *testing.T, dynamicSettings map[string]string) (pdnsInfo, error
 	ctInfo, err := startContainer(t, testcontainers.ContainerRequest{
 		Image:          image,
 		FromDockerfile: fromDockerfile,
+		Networks:       nets,
+		NetworkAliases: aliases,
 		HostConfigModifier: func(hc *container.HostConfig) {
 			hc.ExtraHosts = []string{"host.docker.internal:host-gateway"}
 		},
@@ -840,6 +876,500 @@ func TestWithPDNS(t *testing.T) {
 	// TODO add tests for metadata after adding support for `pdnsutil metadata` command
 }
 
+// primaryModeSetting returns the PDNS config setting that enables primary (master)
+// operation for the given 2-digit PDNS version string: "master=yes" before 4.5,
+// "primary=yes" from 4.5 on. PDNS 5.0 removed the deprecated "master" alias and FATALs
+// on it, so the two are mutually exclusive — only the version-appropriate one is set.
+func primaryModeSetting(pdnsVersion string) string {
+	if pdnsVersion < "45" {
+		return "master=yes"
+	}
+	return "primary=yes"
+}
+
+// skipIfPDNSBelow40 skips AXFR tests on PowerDNS < 4.0: AXFR-out via the remote-backend `list`
+// method is not supported on the legacy PowerDNS 3.4 protocol (only the bracketing SOA is sent).
+func skipIfPDNSBelow40(t *testing.T) {
+	t.Helper()
+	if v := getenvT("PDNS_VERSION", "50"); v < "40" {
+		t.Skipf("AXFR-out via the remote-backend list method needs PowerDNS 4.0+; PDNS %s uses the legacy protocol", v)
+	}
+}
+
+func TestPDNSAXFR(t *testing.T) {
+	defer recoverPanicsT(t)
+	skipIfPDNSBelow40(t)
+	// ETCD
+	etcd, err := startETCD(t)
+	fatalOnErr(t, "start ETCD container", err)
+	defer etcd.Terminate()
+	Logf(t, "ETCD endpoint (2379): %s", etcd.Endpoint)
+	// PDNS-ETCD3
+	sleepT(t, 1*time.Second)
+	pe3 := startPE3(t, etcd.Endpoint, "", "-log-level=10;data.values=2", "-pdns-version="+getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1])
+	defer pe3.Terminate()
+	Logf(t, "PDNS-ETCD3 endpoint: %s", pe3.HttpAddress)
+	err = waitFor(t, "PE3 ready", func() bool { return status.serving }, 10*time.Millisecond, 30*time.Second)
+	fatalOnErr(t, "wait for PE3 ready", err)
+	sleepT(t, 1*time.Second)
+	// seed a small zone example.net. (key prefix net.example): SOA + NS (apex) + A records
+	put := func(key, value string) clientv3.Op {
+		return putOp(pe3.Prefix+key, value)
+	}
+	rev := txnT(t,
+		put("-defaults-", `{ttl: "1h"}`),
+		put("-defaults-/SOA", "---\nrefresh: 1h\nretry: 30m\nexpire: 604800\nneg-ttl: 10m\nprimary: ns1\nmail: horst.master\n"),
+		put("net.example/-options-/A", `{"ip-prefix": [192, 0, 2]}`),
+		put("net.example/SOA", `{}`),
+		put("net.example/NS#first", `="ns1"`),
+		put("net.example/ns1/A", `=2`), // ns1.example.net. A 192.0.2.2
+		put("net.example/www/A", `=1`), // www.example.net. A 192.0.2.1
+	)
+	waitForRevision(t, rev, "zone data loaded")
+	// PDNS with AXFR-OUT enabled (allow the test client to transfer) + primary mode
+	// (version-appropriate master/primary — PDNS 5.0 FATALs on the removed "master" alias).
+	pdns, err := startPDNS(t, map[string]string{
+		"allow-axfr-ips=0.0.0.0/0,::/0":                   "34",
+		primaryModeSetting(getenvT("PDNS_VERSION", "50")): "34",
+	})
+	fatalOnErr(t, "start PDNS container", err)
+	defer pdns.Terminate()
+	Logf(t, "PDNS endpoint: %s", pdns.Endpoint)
+	// perform the AXFR
+	zone := "example.net."
+	tr := &dns.Transfer{
+		DialTimeout: 10 * time.Second,
+		ReadTimeout: 10 * time.Second,
+	}
+	m := new(dns.Msg)
+	m.SetAxfr(zone)
+	ch, err := tr.In(m, pdns.Endpoint)
+	fatalOnErr(t, "start AXFR", err)
+	var rrs []dns.RR
+	for env := range ch {
+		if env.Error != nil {
+			Fatalf(t, "AXFR envelope error: %s", env.Error)
+		}
+		rrs = append(rrs, env.RR...)
+	}
+	Logf(t, "AXFR transferred %d RRs", len(rrs))
+	for _, rr := range rrs {
+		Logf(t, "  %s", rr)
+	}
+	// assertions
+	if len(rrs) < 2 {
+		Fatalf(t, "AXFR returned too few records: %d", len(rrs))
+	}
+	if _, ok := rrs[0].(*dns.SOA); !ok {
+		Errorf(t, "AXFR must start with SOA, got %s", rrs[0])
+	}
+	if _, ok := rrs[len(rrs)-1].(*dns.SOA); !ok {
+		Errorf(t, "AXFR must end with SOA, got %s", rrs[len(rrs)-1])
+	}
+	var soaCount, nsCount, aCount int
+	var foundWWW, foundNS1 bool
+	for _, rr := range rrs {
+		switch v := rr.(type) {
+		case *dns.SOA:
+			soaCount++
+			if v.Ns != "ns1.example.net." {
+				Errorf(t, "SOA primary mismatch: %q", v.Ns)
+			}
+		case *dns.NS:
+			nsCount++
+			if v.Ns != "ns1.example.net." {
+				Errorf(t, "unexpected NS target: %q", v.Ns)
+			}
+		case *dns.A:
+			aCount++
+			switch v.Hdr.Name {
+			case "www.example.net.":
+				foundWWW = true
+				if v.A.String() != "192.0.2.1" {
+					Errorf(t, "www A mismatch: %s", v.A)
+				}
+			case "ns1.example.net.":
+				foundNS1 = true
+				if v.A.String() != "192.0.2.2" {
+					Errorf(t, "ns1 A mismatch: %s", v.A)
+				}
+			}
+		}
+	}
+	if soaCount < 2 {
+		Errorf(t, "expected at least 2 SOA records (start+end), got %d", soaCount)
+	}
+	if nsCount < 1 {
+		Errorf(t, "expected at least one NS record, got %d", nsCount)
+	}
+	if !foundWWW {
+		Errorf(t, "expected www.example.net. A 192.0.2.1 in transfer (saw %d A records)", aCount)
+	}
+	if !foundNS1 {
+		Errorf(t, "expected ns1.example.net. A 192.0.2.2 in transfer (saw %d A records)", aCount)
+	}
+}
+
+// TestPDNSAXFRPresigned proves a PRE-SIGNED DNSSEC zone transfers over AXFR with its
+// DNSSEC records intact: the AXFR envelope must contain the stored *dns.DNSKEY and
+// *dns.RRSIG records (plus the bracketing SOA), and the served SOA serial must equal
+// the pinned X-PE3-FIXED-SERIAL. It is a close variant of TestPDNSAXFR.
+//
+// Naming: the test MUST be prefixed "TestPDNS" so CI's `-run PDNS` matrix job runs it
+// across the PDNS-version matrix; an unprefixed name would be silently skipped.
+//
+// What pe3 does (and what this test exercises): pe3 does NOT sign anything. The signed
+// records (DNSKEY/RRSIG/NSEC) are stored in etcd as ordinary plain-string entries under
+// their name + qtype; these qtypes are not object-supported and have no plain-string
+// parser, so their content is passed through to PowerDNS VERBATIM (see
+// doc/ETCD-structure.md "Pre-signed DNSSEC" and data.go::processValuesEntry, which calls
+// SetContent on the raw string for unparsed qtypes). The PRESIGNED=1 metadata tells
+// PowerDNS to serve those RRSIG/NSEC/DNSKEY records as-is instead of signing on the fly,
+// and X-PE3-FIXED-SERIAL pins the SOA serial so it matches the value a real signer would
+// have baked into RRSIG(SOA).
+//
+// ASSUMPTIONS (validated by CI; documented per task requirements):
+//  1. The DNSSEC RDATA strings below are cryptographically DUMMY but
+//     SYNTACTICALLY VALID presentation format. This is sufficient because the task only
+//     requires that the records transfer intact — cryptographic validation by a secondary
+//     is NOT required. pe3 stores/serves them verbatim and PowerDNS forwards them as-is
+//     over AXFR; no signature is verified anywhere in this path. (The strings were
+//     verified to round-trip through miekg/dns — the same parser the test client uses —
+//     into *dns.DNSKEY / *dns.RRSIG / *dns.NSEC.)
+//  2. For the REMOTE backend, marking a zone presigned is done entirely via the
+//     getDomainMetadata passthrough: PRESIGNED=1 is returned to PowerDNS, which then
+//     serves backend-supplied DNSSEC records. No server-level "dnssec" pdns.conf option
+//     gates presigned AXFR for the remote backend (presigned-ness is per-zone metadata),
+//     so none is added. Metadata caching is already disabled in startPDNS, so PowerDNS
+//     consults the PRESIGNED metadata fresh.
+//  3. All DNSSEC RDATA strings here begin with an alphanumeric character (a digit for
+//     DNSKEY, a letter for RRSIG/NSEC), so they are safe as plain strings without the
+//     backtick marker (per the ETCD-structure warning about non-alphanumeric leading
+//     characters).
+//
+// First failure mode if an assumption is wrong (what CI tells us): if PowerDNS needs more
+// than PRESIGNED metadata to serve a presigned zone over AXFR (e.g. it drops the
+// RRSIG/DNSKEY records), the DNSKEY/RRSIG assertions below fail with a clear message.
+func TestPDNSAXFRPresigned(t *testing.T) {
+	defer recoverPanicsT(t)
+	skipIfPDNSBelow40(t)
+	// The serial baked into RRSIG(SOA) by a (hypothetical) signer; pe3 must serve exactly
+	// this as the SOA serial via X-PE3-FIXED-SERIAL so the answer stays self-consistent.
+	const fixedSerial uint32 = 2026061601
+	// ETCD
+	etcd, err := startETCD(t)
+	fatalOnErr(t, "start ETCD container", err)
+	defer etcd.Terminate()
+	Logf(t, "ETCD endpoint (2379): %s", etcd.Endpoint)
+	// PDNS-ETCD3
+	sleepT(t, 1*time.Second)
+	pe3 := startPE3(t, etcd.Endpoint, "", "-log-level=10;data.values=2", "-pdns-version="+getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1])
+	defer pe3.Terminate()
+	Logf(t, "PDNS-ETCD3 endpoint: %s", pe3.HttpAddress)
+	err = waitFor(t, "PE3 ready", func() bool { return status.serving }, 10*time.Millisecond, 30*time.Second)
+	fatalOnErr(t, "wait for PE3 ready", err)
+	sleepT(t, 1*time.Second)
+	// seed zone example.net. (same shape as TestPDNSAXFR) PLUS pre-signed DNSSEC records
+	// stored verbatim, plus PRESIGNED + X-PE3-FIXED-SERIAL metadata.
+	put := func(key, value string) clientv3.Op {
+		return putOp(pe3.Prefix+key, value)
+	}
+	// Dummy-but-syntactically-valid DNSSEC RDATA (presentation format, content only — the
+	// owner/class/type/ttl come from the etcd key + default ttl). Verified to round-trip
+	// through miekg/dns into the corresponding *dns.* types.
+	const (
+		// DNSKEY: flags=257 (KSK) protocol=3 algorithm=8 (RSASHA256) publickey(base64)
+		dnskeyRDATA = "257 3 8 AwEAAcKvAYr0Z8h3hZ3cQv0p9Wb0nKZ3sZ1jKpV3pQ8mC2x1aXQ9pZ4dN0kT8xY7vL5wRb2cF0aG6hJ4mN8pQ2sT5uW7yZ0bD3eF6gH8iJ1kL3mN5oP7qR9sT2uV4wX6yZ8aB0cD2eF4gH6iJ8kL0mN2oP4qR6sT8uV0w"
+		// RRSIG covering SOA: type-covered algo labels orig-ttl expiration inception keytag signer signature(base64)
+		rrsigSOA = "SOA 8 2 3600 20270101000000 20260101000000 12345 example.net. abcdefABCDEF0123456789+/aGdHjKlMnOpQrStUvWxYzAbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefABCDEFGHIJKLMNOPqrstuvwxYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQ="
+		// RRSIG covering the apex DNSKEY RRset
+		rrsigDNSKEY = "DNSKEY 8 2 3600 20270101000000 20260101000000 12345 example.net. ZZZZdefABCDEF0123456789+/aGdHjKlMnOpQrStUvWxYzAbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefABCDEFGHIJKLMNOPqrstuvwxYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQ="
+		// RRSIG covering www's A RRset (labels=3 for www.example.net.)
+		rrsigA = "A 8 3 3600 20270101000000 20260101000000 12345 example.net. YYYYdefABCDEF0123456789+/aGdHjKlMnOpQrStUvWxYzAbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefABCDEFGHIJKLMNOPqrstuvwxYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQ="
+		// NSEC at the apex (next name + covered types)
+		nsecApex = "www.example.net. A NS SOA RRSIG NSEC DNSKEY"
+	)
+	rev := txnT(t,
+		put("-defaults-", `{ttl: "1h"}`),
+		put("-defaults-/SOA", "---\nrefresh: 1h\nretry: 30m\nexpire: 604800\nneg-ttl: 10m\nprimary: ns1\nmail: horst.master\n"),
+		put("net.example/-options-/A", `{"ip-prefix": [192, 0, 2]}`),
+		put("net.example/SOA", `{}`),
+		put("net.example/NS#first", `="ns1"`),
+		put("net.example/ns1/A", `=2`), // ns1.example.net. A 192.0.2.2
+		put("net.example/www/A", `=1`), // www.example.net. A 192.0.2.1
+		// pre-signed DNSSEC records (stored verbatim; not object-supported, no parser).
+		put("net.example/DNSKEY", dnskeyRDATA),       // example.net. DNSKEY
+		put("net.example/RRSIG#soa", rrsigSOA),       // example.net. RRSIG (SOA)
+		put("net.example/RRSIG#dnskey", rrsigDNSKEY), // example.net. RRSIG (DNSKEY)
+		put("net.example/NSEC", nsecApex),            // example.net. NSEC
+		put("net.example/www/RRSIG", rrsigA),         // www.example.net. RRSIG (A)
+		// metadata: mark the zone presigned and pin the SOA serial to the signer's value.
+		put("net.example/"+metadataKey+keySeparator+"PRESIGNED#1", "1"),
+		put("net.example/"+metadataKey+keySeparator+MetaFixedSerial+"#1", strconv.FormatUint(uint64(fixedSerial), 10)),
+	)
+	waitForRevision(t, rev, "presigned zone data loaded")
+	// PDNS primary mode with AXFR-OUT enabled (same gating as TestPDNSAXFR). PRESIGNED is
+	// delivered via the getdomainmetadata passthrough — no extra server setting needed.
+	pdns, err := startPDNS(t, map[string]string{
+		"allow-axfr-ips=0.0.0.0/0,::/0":                   "34",
+		primaryModeSetting(getenvT("PDNS_VERSION", "50")): "34",
+	})
+	fatalOnErr(t, "start PDNS container", err)
+	defer pdns.Terminate()
+	Logf(t, "PDNS endpoint: %s", pdns.Endpoint)
+	// perform the AXFR
+	zone := "example.net."
+	tr := &dns.Transfer{
+		DialTimeout: 10 * time.Second,
+		ReadTimeout: 10 * time.Second,
+	}
+	m := new(dns.Msg)
+	m.SetAxfr(zone)
+	ch, err := tr.In(m, pdns.Endpoint)
+	fatalOnErr(t, "start AXFR", err)
+	var rrs []dns.RR
+	for env := range ch {
+		if env.Error != nil {
+			Fatalf(t, "AXFR envelope error: %s", env.Error)
+		}
+		rrs = append(rrs, env.RR...)
+	}
+	Logf(t, "AXFR transferred %d RRs", len(rrs))
+	for _, rr := range rrs {
+		Logf(t, "  %s", rr)
+	}
+	// assertions
+	if len(rrs) < 2 {
+		Fatalf(t, "AXFR returned too few records: %d", len(rrs))
+	}
+	if _, ok := rrs[0].(*dns.SOA); !ok {
+		Errorf(t, "AXFR must start with SOA, got %s", rrs[0])
+	}
+	if _, ok := rrs[len(rrs)-1].(*dns.SOA); !ok {
+		Errorf(t, "AXFR must end with SOA, got %s", rrs[len(rrs)-1])
+	}
+	var soaCount, dnskeyCount, rrsigCount int
+	var serialOK bool
+	for _, rr := range rrs {
+		switch v := rr.(type) {
+		case *dns.SOA:
+			soaCount++
+			if v.Serial == fixedSerial {
+				serialOK = true
+			} else {
+				Errorf(t, "SOA serial mismatch: got %d, want pinned X-PE3-FIXED-SERIAL %d", v.Serial, fixedSerial)
+			}
+		case *dns.DNSKEY:
+			dnskeyCount++
+		case *dns.RRSIG:
+			rrsigCount++
+		}
+	}
+	if soaCount < 2 {
+		Errorf(t, "expected at least 2 SOA records (start+end), got %d", soaCount)
+	}
+	if !serialOK {
+		Errorf(t, "no SOA carried the pinned serial %d", fixedSerial)
+	}
+	if dnskeyCount < 1 {
+		Errorf(t, "expected at least one DNSKEY record in presigned AXFR, got %d", dnskeyCount)
+	}
+	if rrsigCount < 1 {
+		Errorf(t, "expected at least one RRSIG record in presigned AXFR, got %d", rrsigCount)
+	}
+}
+
+// TestPDNSAXFRTSIG proves TSIG-secured AXFR end-to-end: a TSIG-signed transfer
+// SUCCEEDS, and an UNSIGNED transfer is REFUSED when access is gated only by TSIG
+// (no allow-axfr-ips). It is a close variant of TestPDNSAXFR.
+//
+// Naming: the test MUST be prefixed "TestPDNS" so CI's `-run PDNS` matrix job runs
+// it across the PDNS-version matrix; an unprefixed name would be silently skipped.
+//
+// TSIG key-name consistency (the central correctness concern): the same FQDN string
+// "axfrkey." is used in all THREE places that must agree —
+//  1. the etcd key holding the secret:  <prefix>-tsig-/axfrkey.
+//  2. the zone metadata value:          TSIG-ALLOW-AXFR = ["axfrkey."]
+//  3. the dns client TsigSecret map key + SetTsig name: "axfrkey."
+//
+// miekg/dns requires the TsigSecret map key to be a canonical FQDN (lowercase, with
+// trailing dot) — see dns.Transfer.TsigSecret docs — so "axfrkey." is mandatory on the
+// client side; we mirror that dotted form everywhere for consistency.
+//
+// HEDGE / ASSUMPTION (CI validates): PowerDNS canonicalizes TSIG names as DNSNames and
+// it is not 100%-certain from outside whether it sends the `getTSIGKey` `name` parameter
+// (and looks up the etcd key) WITH or WITHOUT the trailing dot. To be robust against
+// both, the secret is seeded into etcd under BOTH "axfrkey." and "axfrkey" (harmless —
+// -tsig- entries are never stored in the tree nor affect any serial). If CI shows only
+// one form is consulted, the other seed is simply unused.
+func TestPDNSAXFRTSIG(t *testing.T) {
+	defer recoverPanicsT(t)
+	skipIfPDNSBelow40(t)
+	// TSIG material: a fixed, valid HMAC-SHA256 secret (base64 of exactly 32 bytes).
+	const (
+		tsigKeyName = "axfrkey."                                     // canonical FQDN, used identically in all 3 places
+		tsigAlgo    = "hmac-sha256"                                  // etcd/PDNS algorithm token (no trailing dot)
+		tsigSecret  = "cGUzLWF4ZnItdHNpZy1zZWNyZXQtMzJieXRlcy1rZXk=" // base64 of 32 bytes
+	)
+	// ETCD
+	etcd, err := startETCD(t)
+	fatalOnErr(t, "start ETCD container", err)
+	defer etcd.Terminate()
+	Logf(t, "ETCD endpoint (2379): %s", etcd.Endpoint)
+	// PDNS-ETCD3
+	sleepT(t, 1*time.Second)
+	pe3 := startPE3(t, etcd.Endpoint, "", "-log-level=10;data.values=2", "-pdns-version="+getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1])
+	defer pe3.Terminate()
+	Logf(t, "PDNS-ETCD3 endpoint: %s", pe3.HttpAddress)
+	err = waitFor(t, "PE3 ready", func() bool { return status.serving }, 10*time.Millisecond, 30*time.Second)
+	fatalOnErr(t, "wait for PE3 ready", err)
+	sleepT(t, 1*time.Second)
+	// seed zone example.net. (same shape as TestPDNSAXFR) PLUS the TSIG key and the
+	// TSIG-ALLOW-AXFR metadata gating AXFR by that key name.
+	put := func(key, value string) clientv3.Op {
+		return putOp(pe3.Prefix+key, value)
+	}
+	rev := txnT(t,
+		put("-defaults-", `{ttl: "1h"}`),
+		put("-defaults-/SOA", "---\nrefresh: 1h\nretry: 30m\nexpire: 604800\nneg-ttl: 10m\nprimary: ns1\nmail: horst.master\n"),
+		put("net.example/-options-/A", `{"ip-prefix": [192, 0, 2]}`),
+		put("net.example/SOA", `{}`),
+		put("net.example/NS#first", `="ns1"`),
+		put("net.example/ns1/A", `=2`), // ns1.example.net. A 192.0.2.2
+		put("net.example/www/A", `=1`), // www.example.net. A 192.0.2.1
+		// TSIG key: <prefix>-tsig-/<name> = "<algorithm> <base64-secret>"
+		// (read on demand by getTSIGKey; never stored in the data tree). Seed both the
+		// dotted and undotted name forms so the test is robust to PDNS canonicalization.
+		put(tsigKey+keySeparator+tsigKeyName, tsigAlgo+" "+tsigSecret),                          // -tsig-/axfrkey.
+		put(tsigKey+keySeparator+strings.TrimSuffix(tsigKeyName, "."), tsigAlgo+" "+tsigSecret), // -tsig-/axfrkey
+		// zone metadata TSIG-ALLOW-AXFR (key form <zone>/-metadata-/<KEY>#<id>, value verbatim).
+		put("net.example/"+metadataKey+keySeparator+"TSIG-ALLOW-AXFR#1", tsigKeyName), // = "axfrkey."
+	)
+	waitForRevision(t, rev, "zone + TSIG data loaded")
+	// PDNS primary mode, AXFR gated by TSIG ONLY (deliberately NO allow-axfr-ips, so an
+	// unsigned transfer must be refused; a TSIG-signed one is allowed via TSIG-ALLOW-AXFR).
+	// Version-appropriate master/primary (PDNS 5.0 FATALs on the removed "master" alias).
+	// remote-dnssec=yes is REQUIRED for TSIG: PowerDNS's remote backend gates getTSIGKey
+	// behind the backend "dnssec" flag (remotebackend.cc: `if (!d_dnssec) return false;`),
+	// so without it PowerDNS never calls getTSIGKey and denies the signed AXFR (NOTAUTH).
+	pdns, err := startPDNS(t, map[string]string{
+		primaryModeSetting(getenvT("PDNS_VERSION", "50")): "34",
+		"remote-dnssec=yes": "34",
+	})
+	fatalOnErr(t, "start PDNS container", err)
+	defer pdns.Terminate()
+	Logf(t, "PDNS endpoint: %s", pdns.Endpoint)
+	zone := "example.net."
+
+	// --- Positive: TSIG-signed AXFR must SUCCEED ---
+	t.Run("signed", func(t *testing.T) {
+		tr := &dns.Transfer{
+			DialTimeout: 10 * time.Second,
+			ReadTimeout: 10 * time.Second,
+			TsigSecret:  map[string]string{tsigKeyName: tsigSecret},
+		}
+		m := new(dns.Msg)
+		m.SetAxfr(zone)
+		m.SetTsig(tsigKeyName, dns.HmacSHA256, 300, time.Now().Unix())
+		ch, err := tr.In(m, pdns.Endpoint)
+		fatalOnErr(t, "start signed AXFR", err)
+		var rrs []dns.RR
+		for env := range ch {
+			if env.Error != nil {
+				Fatalf(t, "signed AXFR envelope error: %s", env.Error)
+			}
+			rrs = append(rrs, env.RR...)
+		}
+		Logf(t, "signed AXFR transferred %d RRs", len(rrs))
+		for _, rr := range rrs {
+			Logf(t, "  %s", rr)
+		}
+		// must be SOA-bracketed and contain the seeded records
+		if len(rrs) < 2 {
+			Fatalf(t, "signed AXFR returned too few records: %d", len(rrs))
+		}
+		if _, ok := rrs[0].(*dns.SOA); !ok {
+			Errorf(t, "signed AXFR must start with SOA, got %s", rrs[0])
+		}
+		if _, ok := rrs[len(rrs)-1].(*dns.SOA); !ok {
+			Errorf(t, "signed AXFR must end with SOA, got %s", rrs[len(rrs)-1])
+		}
+		var soaCount, nsCount int
+		var foundWWW, foundNS1 bool
+		for _, rr := range rrs {
+			switch v := rr.(type) {
+			case *dns.SOA:
+				soaCount++
+			case *dns.NS:
+				nsCount++
+				if v.Ns != "ns1.example.net." {
+					Errorf(t, "unexpected NS target: %q", v.Ns)
+				}
+			case *dns.A:
+				switch v.Hdr.Name {
+				case "www.example.net.":
+					foundWWW = v.A.String() == "192.0.2.1"
+				case "ns1.example.net.":
+					foundNS1 = v.A.String() == "192.0.2.2"
+				}
+			}
+		}
+		if soaCount < 2 {
+			Errorf(t, "expected at least 2 SOA records (start+end), got %d", soaCount)
+		}
+		if nsCount < 1 {
+			Errorf(t, "expected at least one NS record, got %d", nsCount)
+		}
+		if !foundWWW {
+			Errorf(t, "expected www.example.net. A 192.0.2.1 in signed transfer")
+		}
+		if !foundNS1 {
+			Errorf(t, "expected ns1.example.net. A 192.0.2.2 in signed transfer")
+		}
+	})
+
+	// --- Negative: UNSIGNED AXFR must be REFUSED (the meaningful test) ---
+	t.Run("unsigned", func(t *testing.T) {
+		tr := &dns.Transfer{
+			DialTimeout: 10 * time.Second,
+			ReadTimeout: 10 * time.Second,
+		}
+		m := new(dns.Msg)
+		m.SetAxfr(zone)
+		ch, err := tr.In(m, pdns.Endpoint)
+		if err != nil {
+			// connection-level refusal already counts as "not succeeded"
+			Logf(t, "unsigned AXFR refused at start (expected): %s", err)
+			return
+		}
+		// drain the channel: a refused/unauthorized AXFR yields an envelope error
+		// and/or no usable zone data (notably no closing SOA). Any of these means
+		// "did not succeed".
+		var rrs []dns.RR
+		var sawError bool
+		for env := range ch {
+			if env.Error != nil {
+				sawError = true
+				Logf(t, "unsigned AXFR envelope error (expected): %s", env.Error)
+				continue
+			}
+			rrs = append(rrs, env.RR...)
+		}
+		Logf(t, "unsigned AXFR yielded %d RRs (sawError=%v)", len(rrs), sawError)
+		// Success would be a complete, SOA-bracketed transfer with the zone records.
+		// Assert we did NOT get that.
+		soaBracketed := len(rrs) >= 2
+		if soaBracketed {
+			_, firstSOA := rrs[0].(*dns.SOA)
+			_, lastSOA := rrs[len(rrs)-1].(*dns.SOA)
+			soaBracketed = firstSOA && lastSOA
+		}
+		if !sawError && soaBracketed {
+			Errorf(t, "unsigned AXFR unexpectedly SUCCEEDED (%d RRs, SOA-bracketed); TSIG gating not enforced", len(rrs))
+		}
+	})
+}
+
 func TestUnixListener(t *testing.T) {
 	t.Skip("not implemented yet")
 }
@@ -1056,4 +1586,325 @@ func TestMetadata(t *testing.T) {
 		}
 		return dataRoot.children[tld].children[domain].metadata[key], nil
 	}, struct{}{}, ve[any]{v: SliceContains{Ordered: false, All: true, Only: true, Elements: []any{"x", "y"}}}, true)
+}
+
+// containerIPOnNetwork returns the container's IP address on the named docker network.
+func containerIPOnNetwork(t *testing.T, ct testcontainers.Container, netName string) string {
+	t.Helper()
+	ins, err := ct.Inspect(context.Background())
+	fatalOnErr(t, "inspect container", err)
+	ep, ok := ins.NetworkSettings.Networks[netName]
+	if !ok || ep == nil {
+		Fatalf(t, "container has no endpoint on network %q", netName)
+	}
+	return ep.IPAddress
+}
+
+// startBindSecondary starts an ISC BIND9 container configured as a secondary (slave) for
+// `zone`, transferring from `primaryIP` over the shared docker network `netName`. The image's
+// default CMD logs to a file, so override it with `-g` (foreground + log to stderr) so
+// testcontainers can wait on / surface the logs.
+func startBindSecondary(t *testing.T, netName, primaryIP, zone string) (*ctInfo, error) {
+	t.Helper()
+	zoneName := strings.TrimSuffix(zone, ".")
+	namedConf := fmt.Sprintf(`options {
+    directory "/var/cache/bind";
+    recursion no;
+    dnssec-validation no;
+    listen-on { any; };
+    listen-on-v6 { none; };
+    allow-query { any; };
+};
+zone "%s" {
+    type secondary;
+    primaries { %s; };
+    file "%s.db";
+    allow-notify { %s; };
+};
+`, zoneName, primaryIP, zoneName, primaryIP)
+	return startContainer(t, testcontainers.ContainerRequest{
+		Image:          "internetsystemsconsortium/bind9:9.20",
+		Cmd:            []string{"-g", "-c", "/etc/bind/named.conf"}, // -g: foreground + log to stderr
+		Networks:       []string{netName},
+		NetworkAliases: map[string][]string{netName: {"secondary"}},
+		ExposedPorts:   []string{"53/tcp"},
+		LogConsumerCfg: &testcontainers.LogConsumerConfig{Consumers: []testcontainers.LogConsumer{CtLogger{t, "BIND"}}},
+		Files: []testcontainers.ContainerFile{
+			{Reader: strings.NewReader(namedConf), ContainerFilePath: "/etc/bind/named.conf", FileMode: 0o644},
+		},
+		WaitingFor: wait.ForLog("running").WithStartupTimeout(60 * time.Second),
+	}, "53/tcp")
+}
+
+// TestPDNSAXFRSecondary spins up a REAL secondary DNS server (ISC BIND9) in its own
+// container and verifies the full primary→secondary flow over a shared docker network:
+// (1) BIND transfers the zone from PowerDNS+pe3 via AXFR on startup and serves it, and
+// (2) after the zone changes in etcd, the secondary picks up the update (via NOTIFY —
+// pdns_control notify-host — and/or the SOA refresh).
+func TestPDNSAXFRSecondary(t *testing.T) {
+	defer recoverPanicsT(t)
+	skipIfPDNSBelow40(t)
+	ctx := context.Background()
+	// shared network so the primary (PowerDNS) and the secondary (BIND) can reach each other
+	nw, err := network.New(ctx)
+	fatalOnErr(t, "create docker network", err)
+	defer func() { _ = nw.Remove(ctx) }()
+	netName := nw.Name
+
+	etcd, err := startETCD(t)
+	fatalOnErr(t, "start ETCD container", err)
+	defer etcd.Terminate()
+	sleepT(t, 1*time.Second)
+	pe3 := startPE3(t, etcd.Endpoint, "", "-log-level=10;data.values=2", "-pdns-version="+getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1])
+	defer pe3.Terminate()
+	fatalOnErr(t, "wait for PE3 ready", waitFor(t, "PE3 ready", func() bool { return status.serving }, 10*time.Millisecond, 30*time.Second))
+	sleepT(t, 1*time.Second)
+
+	// seed example.net. with a short SOA refresh so the secondary re-checks the serial quickly
+	put := func(key, value string) clientv3.Op { return putOp(pe3.Prefix+key, value) }
+	rev := txnT(t,
+		put("-defaults-", `{ttl: "1h"}`),
+		put("-defaults-/SOA", "---\nrefresh: 10s\nretry: 10s\nexpire: 604800\nneg-ttl: 10m\nprimary: ns1\nmail: horst.master\n"),
+		put("net.example/-options-/A", `{"ip-prefix": [192, 0, 2]}`),
+		put("net.example/SOA", `{}`),
+		put("net.example/NS#first", `="ns1"`),
+		put("net.example/ns1/A", `=2`), // ns1.example.net. A 192.0.2.2
+		put("net.example/www/A", `=1`), // www.example.net. A 192.0.2.1
+	)
+	waitForRevision(t, rev, "zone data loaded")
+
+	// primary: PowerDNS + pe3, AXFR allowed, primary mode, joined to the shared network
+	pdns, err := startPDNS(t, map[string]string{
+		"allow-axfr-ips=0.0.0.0/0,::/0":                   "34",
+		primaryModeSetting(getenvT("PDNS_VERSION", "50")): "34",
+	}, map[string][]string{netName: {"primary"}})
+	fatalOnErr(t, "start PDNS container", err)
+	defer pdns.Terminate()
+	primaryIP := containerIPOnNetwork(t, pdns.Container, netName)
+	Logf(t, "primary (PowerDNS) IP on %s: %s", netName, primaryIP)
+
+	// secondary: BIND9 slaving example.net. from the primary
+	bind, err := startBindSecondary(t, netName, primaryIP, "example.net.")
+	fatalOnErr(t, "start BIND secondary", err)
+	defer bind.Terminate()
+	Logf(t, "secondary (BIND) endpoint: %s", bind.Endpoint)
+
+	queryA := func(name string) (*dns.Msg, error) {
+		m := new(dns.Msg)
+		m.SetQuestion(name, dns.TypeA)
+		c := &dns.Client{Net: "tcp", Timeout: 5 * time.Second}
+		r, _, e := c.Exchange(m, bind.Endpoint)
+		return r, e
+	}
+
+	// (1) initial AXFR-in: poll the secondary until it serves the transferred zone
+	fatalOnErr(t, "secondary serves zone after initial AXFR",
+		waitFor(t, "secondary served www.example.net after AXFR", func() bool {
+			r, e := queryA("www.example.net.")
+			return e == nil && r.Rcode == dns.RcodeSuccess && len(r.Answer) > 0
+		}, 500*time.Millisecond, 30*time.Second))
+	r, e := queryA("www.example.net.")
+	fatalOnErr(t, "query secondary for www", e)
+	if a, ok := r.Answer[0].(*dns.A); !ok || a.A.String() != "192.0.2.1" {
+		Errorf(t, "secondary served wrong A for www.example.net: %v", r.Answer)
+	} else {
+		Logf(t, "secondary correctly serves the transferred zone (www.example.net. A %s)", a.A)
+	}
+
+	// (2) update propagation: add a record (bumps the serial), notify the secondary, expect re-transfer
+	rev2 := txnT(t, put("net.example/www2/A", `=3`)) // www2.example.net. A 192.0.2.3
+	waitForRevision(t, rev2, "updated zone data loaded")
+	secondaryIP := containerIPOnNetwork(t, bind.Container, netName)
+	if code, _, e := pdns.Container.Exec(ctx, []string{"pdns_control", "notify-host", "example.net", secondaryIP}); e != nil || code != 0 {
+		Logf(t, "pdns_control notify-host returned code=%d err=%v (falling back to SOA refresh)", code, e)
+	} else {
+		Logf(t, "sent NOTIFY to secondary %s via pdns_control notify-host", secondaryIP)
+	}
+	fatalOnErr(t, "secondary picked up the update",
+		waitFor(t, "secondary served www2.example.net after update", func() bool {
+			r, e := queryA("www2.example.net.")
+			return e == nil && r.Rcode == dns.RcodeSuccess && len(r.Answer) > 0
+		}, 500*time.Millisecond, 40*time.Second))
+	Logf(t, "secondary picked up the update (www2.example.net. present)")
+}
+
+// TestPDNSNotifiedSerialPersisted verifies the notified serial lives in etcd, not process
+// memory: a value written by putNotifiedSerial is read back by fresh on-demand reads
+// (getNotifiedSerial / getAllNotifiedSerials). That process-independent persistence is what
+// makes automatic NOTIFY work in pipe mode, where getUpdatedMasters and setNotified run in
+// separate short-lived processes. (Named TestPDNS* so CI's -run PDNS job executes it.)
+func TestPDNSNotifiedSerialPersisted(t *testing.T) {
+	defer recoverPanicsT(t)
+	etcd, err := startETCD(t)
+	fatalOnErr(t, "start ETCD container", err)
+	defer etcd.Terminate()
+	sleepT(t, 1*time.Second)
+	pe3 := startPE3(t, etcd.Endpoint, "", "-pdns-version="+getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1])
+	defer pe3.Terminate()
+	fatalOnErr(t, "wait for PE3 ready", waitFor(t, "PE3 ready", func() bool { return status.serving }, 10*time.Millisecond, 30*time.Second))
+
+	id := domainID("example.net.")
+	const serial = uint32(2026061699)
+	if got := getNotifiedSerial(id); got != 0 {
+		Errorf(t, "expected notified serial 0 before any write, got %d", got)
+	}
+	fatalOnErr(t, "putNotifiedSerial", putNotifiedSerial(id, serial))
+	// read back via on-demand etcd reads (no in-memory caching involved)
+	if got := getNotifiedSerial(id); got != serial {
+		Errorf(t, "getNotifiedSerial = %d, want %d", got, serial)
+	}
+	if m := getAllNotifiedSerials(); m[id] != serial {
+		Errorf(t, "getAllNotifiedSerials[%d] = %d, want %d", id, m[id], serial)
+	}
+	Logf(t, "notified serial persisted in etcd and read back on demand (id=%d serial=%d)", id, serial)
+}
+
+// buildPE3Binary builds a static pe3 binary (linux/amd64) to be mounted into and spawned by the
+// PowerDNS container in pipe mode.
+func buildPE3Binary(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "pdns-etcd3")
+	cmd := exec.Command("go", "build", "-o", bin, "..") // module root is the parent of ./src
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		Fatalf(t, "building pe3 binary failed: %s\n%s", err, out)
+	}
+	Logf(t, "built pe3 binary at %s", bin)
+	return bin
+}
+
+// seedPipeZone writes example.net. (prefix DNS/) directly into etcd via a raw client — in pipe
+// mode there is no in-process pe3, so the test seeds etcd itself. A short SOA refresh lets the
+// secondary re-check the serial quickly.
+func seedPipeZone(t *testing.T, ec *clientv3.Client) {
+	t.Helper()
+	kvs := [][2]string{
+		{"DNS/-defaults-", `{ttl: "1h"}`},
+		{"DNS/-defaults-/SOA", "---\nrefresh: 10s\nretry: 10s\nexpire: 604800\nneg-ttl: 10m\nprimary: ns1\nmail: horst.master\n"},
+		{"DNS/net.example/-options-/A", `{"ip-prefix": [192, 0, 2]}`},
+		{"DNS/net.example/SOA", `{}`},
+		{"DNS/net.example/NS#first", `="ns1"`},
+		{"DNS/net.example/ns1/A", `=2`}, // ns1.example.net. A 192.0.2.2
+		{"DNS/net.example/www/A", `=1`}, // www.example.net. A 192.0.2.1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	for _, kv := range kvs {
+		if _, err := ec.Put(ctx, kv[0], kv[1]); err != nil {
+			Fatalf(t, "seed put %q: %s", kv[0], err)
+		}
+	}
+}
+
+// startPDNSPipe starts PowerDNS configured to run the pe3 BINARY in PIPE mode (one process per
+// request thread), connecting to etcd over the shared network. This is the real-deployment shape
+// (PowerDNS spawns pe3 per request) used to validate that primary operation — including the
+// etcd-persisted notified serial — works in pipe mode, not just standalone.
+func startPDNSPipe(t *testing.T, netName, binPath, etcdAddr string) (pdnsInfo, error) {
+	t.Helper()
+	v := getenvT("PDNS_VERSION", "50")
+	image := fmt.Sprintf("powerdns/pdns-auth-%s", v)
+	settings := []string{
+		fmt.Sprintf("remote-connection-string=pipe:command=/pdns-etcd3,pdns-version=%s,endpoints=%s,prefix=DNS/", v[:1], etcdAddr),
+		"distributor-threads=1", // pipe mode requires a single distributor (one pe3 process per thread)
+		"cache-ttl=0",
+		"query-cache-ttl=0",
+		"negquery-cache-ttl=0",
+		"allow-axfr-ips=0.0.0.0/0,::/0",
+		primaryModeSetting(v),
+	}
+	if v >= "44" {
+		settings = append(settings, "consistent-backends=no")
+	}
+	if v >= "45" {
+		settings = append(settings, "zone-cache-refresh-interval=0")
+	}
+	Logf(t, "PDNS (pipe) settings: %v", settings)
+	ctInfo, err := startContainer(t, testcontainers.ContainerRequest{
+		Image:          image,
+		Networks:       []string{netName},
+		NetworkAliases: map[string][]string{netName: {"primary"}},
+		ExposedPorts:   []string{"53/tcp"},
+		LogConsumerCfg: &testcontainers.LogConsumerConfig{Consumers: []testcontainers.LogConsumer{CtLogger{t, "PDNS"}}},
+		Files: []testcontainers.ContainerFile{
+			{HostFilePath: "../testdata/pdns.conf", ContainerFilePath: "/etc/powerdns/pdns.conf", FileMode: 0o555},
+			{Reader: linesReader(settings), ContainerFilePath: "/etc/powerdns/pdns.d/settings.conf", FileMode: 0o555},
+			{HostFilePath: binPath, ContainerFilePath: "/pdns-etcd3", FileMode: 0o755},
+		},
+		WaitingFor: wait.ForLog("ready to distribute questions|operating unthreaded").AsRegexp().WithStartupTimeout(120 * time.Second),
+	}, "53/tcp")
+	return pdnsInfo{ctInfo, v}, err
+}
+
+// TestPDNSAXFRSecondaryPipe is the PIPE-mode end-to-end test: PowerDNS spawns the pe3 binary per
+// request (the operator's real deployment shape). It verifies that a real ISC BIND9 secondary
+// transfers the zone via AXFR and picks up a later change — proving primary mode (and the
+// etcd-persisted notified serial, which is shared across the separate spawned processes) works in
+// pipe mode, not only standalone.
+func TestPDNSAXFRSecondaryPipe(t *testing.T) {
+	defer recoverPanicsT(t)
+	v := getenvT("PDNS_VERSION", "50")
+	if v < "44" {
+		t.Skipf("pipe-mode e2e targets the modern powerdns/pdns-auth image; PDNS %s uses an older/non-default protocol (the pipe protocol itself is covered by TestPipeRequests)", v)
+	}
+	ctx := context.Background()
+	nw, err := network.New(ctx)
+	fatalOnErr(t, "create docker network", err)
+	defer func() { _ = nw.Remove(ctx) }()
+	netName := nw.Name
+
+	etcd, err := startETCD(t, map[string][]string{netName: {"etcd"}})
+	fatalOnErr(t, "start ETCD container", err)
+	defer etcd.Terminate()
+
+	// In pipe mode there is no in-process pe3; PowerDNS spawns the binary. Seed etcd directly.
+	ec, err := clientv3.New(clientv3.Config{Endpoints: []string{etcd.Endpoint}, DialTimeout: 10 * time.Second})
+	fatalOnErr(t, "etcd client", err)
+	defer func() { _ = ec.Close() }()
+	seedPipeZone(t, ec)
+
+	pdns, err := startPDNSPipe(t, netName, buildPE3Binary(t), "etcd:2379")
+	fatalOnErr(t, "start PDNS (pipe) container", err)
+	defer pdns.Terminate()
+	primaryIP := containerIPOnNetwork(t, pdns.Container, netName)
+	Logf(t, "primary (PowerDNS, pipe mode) IP on %s: %s", netName, primaryIP)
+
+	bind, err := startBindSecondary(t, netName, primaryIP, "example.net.")
+	fatalOnErr(t, "start BIND secondary", err)
+	defer bind.Terminate()
+
+	queryA := func(name string) (*dns.Msg, error) {
+		m := new(dns.Msg)
+		m.SetQuestion(name, dns.TypeA)
+		c := &dns.Client{Net: "tcp", Timeout: 5 * time.Second}
+		r, _, e := c.Exchange(m, bind.Endpoint)
+		return r, e
+	}
+
+	// (1) initial AXFR-in, served by pe3 processes that PowerDNS spawns per request (pipe)
+	fatalOnErr(t, "secondary serves zone after initial AXFR (pipe)",
+		waitFor(t, "secondary served www.example.net after AXFR (pipe)", func() bool {
+			r, e := queryA("www.example.net.")
+			return e == nil && r.Rcode == dns.RcodeSuccess && len(r.Answer) > 0
+		}, 500*time.Millisecond, 40*time.Second))
+	Logf(t, "pipe mode: secondary served the transferred zone (AXFR-out via spawned pe3 works)")
+
+	// (2) change etcd → serial bumps → notify the secondary. The notified serial is read/written
+	// in etcd by separate spawned pe3 processes; this only works because it is persisted in etcd.
+	uctx, ucancel := context.WithTimeout(context.Background(), 15*time.Second)
+	_, perr := ec.Put(uctx, "DNS/net.example/www2/A", `=3`) // www2.example.net. A 192.0.2.3
+	ucancel()
+	fatalOnErr(t, "etcd update put", perr)
+	secondaryIP := containerIPOnNetwork(t, bind.Container, netName)
+	if code, _, e := pdns.Container.Exec(ctx, []string{"pdns_control", "notify-host", "example.net", secondaryIP}); e != nil || code != 0 {
+		Logf(t, "pdns_control notify-host returned code=%d err=%v (falling back to SOA refresh)", code, e)
+	} else {
+		Logf(t, "sent NOTIFY to secondary %s via pdns_control notify-host", secondaryIP)
+	}
+	fatalOnErr(t, "secondary picked up the update (pipe)",
+		waitFor(t, "secondary served www2.example.net after update (pipe)", func() bool {
+			r, e := queryA("www2.example.net.")
+			return e == nil && r.Rcode == dns.RcodeSuccess && len(r.Answer) > 0
+		}, 500*time.Millisecond, 40*time.Second))
+	Logf(t, "pipe mode: secondary picked up the update (primary mode works end-to-end in pipe)")
 }

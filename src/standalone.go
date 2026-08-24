@@ -40,9 +40,9 @@ var (
 )
 
 type unixClientID struct {
-	id         uint64
-	addr       net.Addr
-	clientID   *string
+	id       uint64
+	addr     net.Addr
+	clientID *string
 }
 
 func (id *unixClientID) String() string {

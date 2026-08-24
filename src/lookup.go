@@ -38,6 +38,8 @@ const (
 	optionsEntry  entryType = "options"
 	metadataEntry entryType = "metadata"
 	lockEntry     entryType = "lock"
+	tsigEntry     entryType = "tsig"
+	notifiedEntry entryType = "notified"
 )
 
 var (
@@ -46,6 +48,8 @@ var (
 		optionsKey:  optionsEntry,
 		metadataKey: metadataEntry,
 		lockKey:     lockEntry,
+		tsigKey:     tsigEntry,
+		notifiedKey: notifiedEntry,
 	}
 )
 
@@ -92,6 +96,25 @@ func (cr *pdnsClientRequest) lookup() (interface{}, error) {
 	return result, nil
 }
 
+func (cr *pdnsClientRequest) list() (any, error) {
+	zonename := ParseDomainName(strings.ToLower(cr.Request.Parameters["zonename"].(string)))
+	//goland:noinspection GoPreferNilSlice
+	result := []objectType[any]{}
+	lockDebug := cr.Client.Logf(4, "data", "locking")
+	lockDebug("list: RLocking up to %q", Supplier1(zonename.asKey, true))()
+	data, found := dataRoot.getChild(zonename, true)
+	lockDebug("list: RLocked %q", data.prefixKey)(data.LockCounts)
+	defer data.rUnlockUpwards(nil, true)
+	defer lockDebug("list: RUnlocking %q", data.prefixKey)(data.LockCounts)
+	if !found || !data.hasSOA() {
+		cr.Client.Logf(1, "data")("list: not a served zone")(zonename.normal)
+		return false, nil // refuse AXFR for zones we don't hold
+	}
+	data.walkZoneRecords(cr.Client.PdnsVersion, &result)
+	cr.Client.Logf(1, "pdns")("list: result")("zone", zonename.normal, "#", len(result))
+	return result, nil
+}
+
 func makeResultItem(qname Name, qtype string, data *dataNode, record *recordType, pdnsVersion uint) objectType[any] {
 	zoneNode := data.findZone()
 	result := objectType[any]{
@@ -113,6 +136,45 @@ func makeResultItem(qname Name, qtype string, data *dataNode, record *recordType
 		}
 	}
 	return result
+}
+
+// walkZoneRecords appends every record of the zone rooted at dn — its own records plus
+// those of all descendant nodes that are NOT themselves zones (no SOA) — to result, as
+// PowerDNS result items. The receiver must be RLocked by the caller; each descendant is
+// RLocked/RUnlocked here (parent-before-child, matching getChild's lock order).
+// Records at and below a delegation point are marked non-authoritative — see
+// walkZoneRecordsAuth.
+func (dn *dataNode) walkZoneRecords(pdnsVersion uint, result *[]objectType[any]) {
+	dn.walkZoneRecordsAuth(pdnsVersion, false, result)
+}
+
+// walkZoneRecordsAuth is walkZoneRecords with delegation tracking: records at and below
+// a delegation point (a non-apex node with NS but no SOA) are non-authoritative (auth=false)
+// — i.e. the delegation's NS and any glue A/AAAA, and everything beneath it.
+func (dn *dataNode) walkZoneRecordsAuth(pdnsVersion uint, belowDelegation bool, result *[]objectType[any]) {
+	// NS records are stored keyed by non-empty id (NS#1, NS#first, ...), so detect a
+	// delegation by the presence of any NS record at this node, excluding the apex
+	// (apex has NS+SOA and stays authoritative).
+	isDelegation := len(dn.records["NS"]) > 0 && !dn.hasSOA()
+	qname := dn.getName()
+	for qtype, byID := range dn.records {
+		for _, record := range byID {
+			record := record
+			item := makeResultItem(qname, qtype, dn, &record, pdnsVersion)
+			if belowDelegation || (isDelegation && (qtype == "NS" || qtype == "A" || qtype == "AAAA")) {
+				item["auth"] = false
+			}
+			*result = append(*result, item)
+		}
+	}
+	childBelow := belowDelegation || isDelegation
+	for _, child := range dn.children {
+		child.RLock(false)
+		if !child.hasSOA() { // stop at delegated sub-zones (own SOA)
+			child.walkZoneRecordsAuth(pdnsVersion, childBelow, result)
+		}
+		child.RUnlock(false)
+	}
 }
 
 type searchOrderElement struct {
