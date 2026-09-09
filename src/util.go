@@ -61,7 +61,7 @@ func seconds(dur time.Duration) int64 {
 	return int64(dur.Seconds())
 }
 
-func clearMap[K comparable, V any](m map[K]V) {
+func clearMap[M ~map[K]V, K comparable, V any](m M) {
 	for k := range m {
 		delete(m, k)
 	}
@@ -168,14 +168,21 @@ func val2strR(value reflect.Value, withType bool) string {
 		}
 		fallthrough
 	case reflect.Array:
-		elemType := value.Type().Elem()
-		isAny := elemType == reflect.TypeOf((*any)(nil)).Elem()
+		elemType, sep, mod := value.Type().Elem(), ", ", ""
+		isAny, isByte := elemType == reflect.TypeOf((*any)(nil)).Elem(), elemType.Kind() == reflect.Uint8
+		if isByte {
+			sep, mod = " ", ",0x"
+		}
 		var elements []string
 		for i, n := 0, value.Len(); i < n; i++ {
 			v := value.Index(i)
-			elements = append(elements, val2strR(v, isAny || elemType != v.Type()))
+			if isByte {
+				elements = append(elements, fmt.Sprintf("%02X", v.Interface()))
+			} else {
+				elements = append(elements, val2strR(v, isAny || elemType != v.Type()))
+			}
 		}
-		return fmt.Sprintf("❲%s❳[%s]", tn(value.Type().Elem()), strings.Join(elements, ", "))
+		return fmt.Sprintf("❲%s%s❳[%s]", tn(value.Type().Elem()), mod, strings.Join(elements, sep))
 	default:
 		str := fmt.Sprintf("%v", value)
 		if withType {
