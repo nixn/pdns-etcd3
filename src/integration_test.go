@@ -148,23 +148,23 @@ func TestPipeRequests(t *testing.T) {
 			false)
 	}
 	rev1 := txnT(t,
-		put("net.example/SOA", `{"primary": "ns1", "mail": "horst.master"}`),
+		put("net.example/SOA", `{"primary": "ns1", "mail": "horst.meister"}`),
 		put("-defaults-/SOA", "---\n#this is yaml\nrefresh: 1h\nretry: 30m\nexpire: 604800\nneg-ttl: 10m\n"),
 		put("-defaults-", `{"ttl": "1h"}`),
 	)
 	rev2 := txnT(t,
 		put("arpa.in-addr/192.0.2/-options-", `{"zone-append-domain": "example.net."}`),
-		put("arpa.in-addr/192.0.2/SOA", `{"primary": "ns1", "mail": "horst.master"}`),
+		put("arpa.in-addr/192.0.2/SOA", `{"primary": "ns1", "mail": "horst.meister"}`),
 	)
 	rev3 := txnT(t,
 		put("arpa.ip6/2.0.0.1.0.d.b.8/-options-", `{"zone-append-domain": "example.net."}`),
-		put("arpa.ip6/2.0.0.1.0.d.b.8/SOA", `{"primary": "ns1", "mail": "horst.master"}`),
+		put("arpa.ip6/2.0.0.1.0.d.b.8/SOA", `{"primary": "ns1", "mail": "horst.meister"}`),
 	)
 	waitForRevision(t, rev3, "data loaded (SOAs)")
 	t.Run("SOAs", func(t *testing.T) {
 		for qname, rev := range map[string]int64{"example.net": rev1, "2.0.192.in-addr.arpa": rev2, "8.b.d.0.1.0.0.2.ip6.arpa": rev3} {
 			lookupTest(t, qname, "SOA",
-				map[string]any{"qname": qname + ".", "qtype": "SOA", "content": fmt.Sprintf(`ns1.example.net. horst\.master.example.net. %d 3600 1800 604800 600`, rev), "ttl": float64(3600), "auth": true},
+				map[string]any{"qname": qname + ".", "qtype": "SOA", "content": fmt.Sprintf(`ns1.example.net. horst\.meister.example.net. %d 3600 1800 604800 600`, rev), "ttl": float64(3600), "auth": true},
 			)
 		}
 	})
@@ -395,7 +395,7 @@ func basicDataTxn(t *testing.T, prefix string) (int64, []clientv3.Op) {
 	putSOA3 := put("arpa.ip6/2.0.0.1.0.d.b.8/SOA", `{}`)
 	return txnT(t,
 		put("-defaults-", `{ttl: "1h"}`),
-		put("-defaults-/SOA", "---\n#this is yaml\nrefresh: 1h\nretry: 30m\nexpire: 604800\nneg-ttl: 10m\nprimary: ns1\nmail: horst.master\n"),
+		put("-defaults-/SOA", "---\n#this is yaml\nrefresh: 1h\nretry: 30m\nexpire: 604800\nneg-ttl: 10m\nprimary: ns1\nmail: horst.meister\n"),
 		put("-defaults-/SRV", `{priority: 10, weight: 1}`),
 		put("arpa.in-addr/192.0.2/-options-", `{"zone-append-domain": "example.net."}`),
 		put("arpa.ip6/2.0.0.1.0.d.b.8/-options-", `{"zone-append-domain": "example.net."}`),
@@ -545,7 +545,7 @@ func TestWithPDNS(t *testing.T) {
 	soa := func(name string, rev *int64) func(ttl uint32) *dns.SOA {
 		return func(ttl uint32) *dns.SOA {
 			return &dns.SOA{Hdr: dns.RR_Header{Name: name, Rrtype: dns.TypeSOA, Ttl: ttl},
-				Ns: "ns1.example.net.", Mbox: "horst\\.master.example.net.", Serial: uint32(*rev), Refresh: 3600, Retry: 1800, Expire: 604800, Minttl: 600}
+				Ns: "ns1.example.net.", Mbox: `horst\.meister.example.net.`, Serial: uint32(*rev), Refresh: 3600, Retry: 1800, Expire: 604800, Minttl: 600}
 		}
 	}
 	exampleNet := "example.net"
@@ -898,7 +898,7 @@ func TestParallelRequests(t *testing.T) {
 				for j, qs := range []querySpecT{
 					querySpec("example.net.", dns.TypeSOA, dns.Msg{Answer: []dns.RR{
 						&dns.SOA{Hdr: dns.RR_Header{Name: "example.net.", Rrtype: dns.TypeSOA, Ttl: 3600},
-							Ns: "ns1.example.net.", Mbox: "horst\\.master.example.net.", Serial: uint32(rev), Refresh: 3600, Retry: 1800, Expire: 604800, Minttl: 600},
+							Ns: "ns1.example.net.", Mbox: `horst\.meister.example.net.`, Serial: uint32(rev), Refresh: 3600, Retry: 1800, Expire: 604800, Minttl: 600},
 					}}),
 					querySpec("example.net.", dns.TypeNS, dns.Msg{Answer: []dns.RR{
 						&dns.NS{Ns: "ns1.example.net."},
