@@ -153,10 +153,10 @@ func (dn *dataNode) findZone() *dataNode {
 }
 
 func (dn *dataNode) Logf(level int, component ...string) func(string, ...any) func(...any) {
-	component = PrependT(component, "data")
+	component = slices.Insert(component, 0, "data")
 	return func(format string, args ...any) func(...any) {
 		return func(fields ...any) {
-			fields = Prepend(fields, "dn", dn.getQname)
+			fields = slices.Insert[[]any, any](fields, 0, "dn", dn.getQname)
 			RootLog.Logf(level, component...)(nil, format, args...)(fields...)
 		}
 	}
@@ -398,7 +398,7 @@ func parseEntryContent(value []byte, entryType entryType) (any, error) {
 			return nil, fmt.Errorf("a non-normal entry must be an object")
 		}
 		return stringValueType{s: string(value[1:])}, nil
-	case l >= 2 && slicePrefixed(value, '!', '`'):
+	case l >= 2 && isSlicePrefixed(value, '!', '`'):
 		if entryType != normalEntry {
 			return nil, fmt.Errorf("a non-normal entry must be an object")
 		}
@@ -418,7 +418,7 @@ func parseEntryContent(value []byte, entryType entryType) (any, error) {
 			return nil, fmt.Errorf("failed to parse as JSON object: %s", err)
 		}
 		return values, nil
-	case l >= 4 && slicePrefixed(value, '-', '-', '-') && (value[3] == '\n' || value[3] == '\r'):
+	case l >= 4 && isSlicePrefixed(value, '-', '-', '-') && (value[3] == '\n' || value[3] == '\r'):
 		var values objectValueType
 		if err := yaml.Unmarshal(value, &values); err != nil {
 			return nil, fmt.Errorf("failed to parse as YAML object: %s", err)

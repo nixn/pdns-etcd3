@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 )
 
 type pdnsRequest struct {
@@ -95,7 +96,7 @@ type pdnsClientRequest struct {
 func (cr *pdnsClientRequest) Logf(level int, component ...string) func(string, ...any) func(...any) {
 	return func(format string, args ...any) func(...any) {
 		return func(fields ...any) {
-			fields = Prepend(fields, "reqID", any(cr.RequestID))
+			fields = slices.Insert[[]any, any](fields, 0, "reqID", cr.RequestID)
 			cr.Client.Logf(level, component...)(format, args...)(fields...)
 		}
 	}

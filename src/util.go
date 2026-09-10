@@ -32,29 +32,21 @@ import (
 type objectType[T any] map[string]T
 
 // Reverse reverses the slice in place and returns it.
-func Reverse[T any](slice []T) []T {
+func Reverse[S ~[]T, T any](slice S) S {
 	slices.Reverse(slice)
 	return slice
 }
 
-func Concat[T any](slices ...[]T) []T {
+func Concat[S ~[]T, T any](slices ...S) S {
 	totalLength := 0
 	for _, slice := range slices {
 		totalLength += len(slice)
 	}
-	result := make([]T, 0, totalLength)
+	result := make(S, 0, totalLength)
 	for _, slice := range slices {
 		result = append(result, slice...)
 	}
 	return result
-}
-
-func PrependT[T any](slice []T, elements ...T) []T {
-	return Concat(elements, slice)
-}
-
-func Prepend(slice []any, elements ...any) []any {
-	return Concat(elements, slice)
 }
 
 func seconds(dur time.Duration) int64 {
@@ -67,7 +59,7 @@ func clearMap[M ~map[K]V, K comparable, V any](m M) {
 	}
 }
 
-func Keys[K comparable, V any](m map[K]V) (ks []K) {
+func Keys[M ~map[K]V, K comparable, V any](m M) (ks []K) {
 	for k := range m {
 		ks = append(ks, k)
 	}
@@ -83,7 +75,7 @@ func splitDomainName(name string, separator string) []string {
 }
 
 // Map takes a slice of type T, maps every element of it to type R through the mapper function and returns the mapped elements in a new slice of type R
-func Map[T any, R any](slice []T, mapper func(T, int) R) []R {
+func Map[S ~[]T, T any, R any](slice S, mapper func(T, int) R) []R {
 	l := len(slice)
 	r := make([]R, l)
 	for i := 0; i < l; i++ {
@@ -325,7 +317,7 @@ func closeNoError(c io.Closer) {
 	_ = c.Close()
 }
 
-func slicePrefixed[T comparable](slice []T, prefix ...T) bool {
+func isSlicePrefixed[S ~[]T, T comparable](slice S, prefix ...T) bool {
 	l := len(slice)
 	for i, t := range prefix {
 		if i >= l || slice[i] != t {
@@ -333,6 +325,13 @@ func slicePrefixed[T comparable](slice []T, prefix ...T) bool {
 		}
 	}
 	return true
+}
+
+func EnsureSlice[S ~[]T, T any](slice S) S {
+	if slice == nil {
+		return make(S, 0)
+	}
+	return slice
 }
 
 func Supplier1[T1, R any](fn func(T1) R, t1 T1) func() R {

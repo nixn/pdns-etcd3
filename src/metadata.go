@@ -54,11 +54,7 @@ func (cr *pdnsClientRequest) getDomainInfo() (any, error) {
 func (cr *pdnsClientRequest) getDomainMetadata() ([]string, error) {
 	name := ParseDomainName(strings.ToLower(cr.Request.Parameters["name"].(string)))
 	return withRLock("getDomainMetadata", cr.Client, name, []string{}, func(data *dataNode) ([]string, error) {
-		metadata := data.metadata[strings.ToUpper(cr.Request.Parameters["kind"].(string))]
-		if metadata == nil {
-			metadata = []string{}
-		}
-		return metadata, nil
+		return EnsureSlice(data.metadata[strings.ToUpper(cr.Request.Parameters["kind"].(string))]), nil // TODO remove ToUpper?
 	})
 }
 

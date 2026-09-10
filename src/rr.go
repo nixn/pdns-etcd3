@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -48,10 +49,10 @@ func (p *rrParams) SetContent(content string, priority *uint16) {
 }
 
 func (p *rrParams) Logf(level int, component ...string) func(string, ...any) func(...any) {
-	component = PrependT(component, "values", "records")
+	component = slices.Insert(component, 0, "values", "records")
 	return func(format string, args ...any) func(...any) {
 		return func(fields ...any) {
-			fields = Prepend(fields, "target", p.Target, "lfv", p.lastFieldValue, "ttl", p.ttl)
+			fields = slices.Insert[[]any, any](fields, 0, "target", p.Target, "lfv", p.lastFieldValue, "ttl", p.ttl)
 			p.data.Logf(level, component...)(format, args...)(fields...)
 		}
 	}

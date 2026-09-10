@@ -22,6 +22,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,7 +44,7 @@ type testFunc[Input any, Value any] func(*testing.T, Input) (Value, error)
 func Logf(t *testing.T, format string, args ...any) {
 	t.Helper()
 	now := time.Now()
-	t.Logf("[%s] "+format, Prepend(args, now.Format("2006-01-02 15:04:05.000000"))...)
+	t.Logf("[%s] "+format, slices.Insert[[]any, any](args, 0, now.Format("2006-01-02 15:04:05.000000"))...)
 }
 
 func Errorf(t *testing.T, format string, args ...any) {
