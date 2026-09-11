@@ -239,7 +239,7 @@ func startContainer(t *testing.T, cr testcontainers.ContainerRequest, endpoint n
 
 func startETCD(t *testing.T) (*ctInfo, error) {
 	t.Helper()
-	image := fmt.Sprintf("quay.io/coreos/etcd:v%s", getenvT("ETCD_VERSION", "3.6.12"))
+	image := fmt.Sprintf("quay.io/coreos/etcd:v%s", getenvT("ETCD_VERSION", "3.7.1"))
 	Logf(t, "Using ETCD image %s", image)
 	return startContainer(t, testcontainers.ContainerRequest{
 		Image:          image,
@@ -328,7 +328,7 @@ func startPDNS(t *testing.T, dynamicSettings map[string]string) (pdnsInfo, error
 	var image string
 	var fromDockerfile testcontainers.FromDockerfile
 	repo := "localhost/pdns-etcd3/pdns"
-	v := getenvT("PDNS_VERSION", "50")
+	v := getenvT("PDNS_VERSION", "51")
 	switch v {
 	case "34", "40", "41":
 		Logf(t, "Using PDNS image %s:%s (from testdata/pdns-%s/Dockerfile)", repo, v, v)
@@ -339,7 +339,7 @@ func startPDNS(t *testing.T, dynamicSettings map[string]string) (pdnsInfo, error
 			KeepImage: true,
 			//PrintBuildLog: true,
 		}
-	case "44", "45", "46", "47", "48", "49", "50", "51":
+	case "44", "45", "46", "47", "48", "49", "50", "51", "52":
 		image = fmt.Sprintf("powerdns/pdns-auth-%s", v)
 		Logf(t, "Using PDNS image %s", image)
 	default:

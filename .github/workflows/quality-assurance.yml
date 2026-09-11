@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: [ '1.21', '1.22', '1.23', '1.24', '1.25', '1.26' ]
+        go-version: [ '1.21', '1.22', '1.23', '1.24', '1.25', '1.26', '1.27' ]
     steps:
       - name: 'Checkout'
         uses: actions/checkout@v6
@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        etcd-version: ['3.2.32', '3.3.27', '3.4.45', '3.5.31', '3.6.12']
+        etcd-version: ['3.2.32', '3.3.27', '3.4.45', '3.5.33', '3.6.14', '3.7.1']
     env:
       ETCD_VERSION: ${{ matrix.etcd-version }}
     steps:
@@ -66,7 +66,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        pdns-version: ['34', '40', '41', '44', '45', '46', '47', '48', '49', '50', '51']
+        pdns-version: ['34', '40', '41', '44', '45', '46', '47', '48', '49', '50', '51', '52']
     env:
       PDNS_VERSION: ${{ matrix.pdns-version }}
     steps:
@@ -86,5 +86,5 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
+          go-version: '1.27'
       - run: go test -tags integration -count=1 -v -run ParallelRequests ./src

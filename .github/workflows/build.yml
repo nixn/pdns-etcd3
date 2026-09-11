@@ -8,9 +8,9 @@ on:
         required: true
         default: 'release'
       go_version:
-        description: 'Go version to use (e.g. 1.26)'
+        description: 'Go version to use (e.g. 1.27)'
         required: true
-        default: '1.26'
+        default: '1.27'
 
 permissions:
   contents: read
