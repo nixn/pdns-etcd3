@@ -240,6 +240,10 @@ func startContainer(t *testing.T, cr testcontainers.ContainerRequest, endpoint n
 func startETCD(t *testing.T) (*ctInfo, error) {
 	t.Helper()
 	image := fmt.Sprintf("quay.io/coreos/etcd:v%s", getenvT("ETCD_VERSION", "3.7.1"))
+	timeout, err := time.ParseDuration(getenvT("STARTUP_TIMEOUT", "1m"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse STARTUP_TIMEOUT: %s", err)
+	}
 	Logf(t, "Using ETCD image %s", image)
 	return startContainer(t, testcontainers.ContainerRequest{
 		Image:          image,
@@ -256,7 +260,7 @@ func startETCD(t *testing.T) (*ctInfo, error) {
 			"--listen-client-urls=http://0.0.0.0:2379",
 			"--initial-cluster=etcd=http://etcd:2380",
 		},
-		WaitingFor: wait.ForLog("ready to serve client requests"),
+		WaitingFor: wait.ForLog("ready to serve client requests").WithStartupTimeout(timeout),
 	}, "2379")
 }
 
@@ -337,13 +341,19 @@ func startPDNS(t *testing.T, dynamicSettings map[string]string) (pdnsInfo, error
 			Repo:      repo,
 			Tag:       v,
 			KeepImage: true,
-			//PrintBuildLog: true,
+		}
+		if pbl, err := parseBoolean(getenvT("PDNS_PRINT_BUILD_LOG", "no")); err == nil {
+			fromDockerfile.PrintBuildLog = pbl
 		}
 	case "44", "45", "46", "47", "48", "49", "50", "51", "52":
 		image = fmt.Sprintf("powerdns/pdns-auth-%s", v)
 		Logf(t, "Using PDNS image %s", image)
 	default:
 		Fatalf(t, "invalid PDNS version: %q", v)
+	}
+	timeout, err := time.ParseDuration(getenvT("STARTUP_TIMEOUT", "1m"))
+	if err != nil {
+		Fatalf(t, "failed to parse STARTUP_TIMEOUT: %s", err)
 	}
 	settings := []string{
 		fmt.Sprintf("remote-connection-string=http:url=http://host.docker.internal:8053/client-id=%013s/pdns-version=%s/,post=yes,post_json=yes,timeout=10000", strconv.FormatUint(rand.Uint64(), 32), v[:1]),
@@ -382,7 +392,7 @@ func startPDNS(t *testing.T, dynamicSettings map[string]string) (pdnsInfo, error
 			{HostFilePath: "../testdata/pdns.conf", ContainerFilePath: "/etc/powerdns/pdns.conf", FileMode: 0o555},
 			{Reader: linesReader(settings), ContainerFilePath: "/etc/powerdns/pdns.d/settings.conf", FileMode: 0o555},
 		},
-		WaitingFor: wait.ForLog("ready to distribute questions|operating unthreaded").AsRegexp(),
+		WaitingFor: wait.ForLog("ready to distribute questions|operating unthreaded").AsRegexp().WithStartupTimeout(timeout),
 	}, "53/tcp")
 	return pdnsInfo{ctInfo, v}, err
 }

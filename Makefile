@@ -46,18 +46,18 @@ unit-tests+coverage:
 	go tool cover -html=coverage.unit.txt -o coverage.unit.html
 
 integration-tests:
-	@export ETCD_VERSION PDNS_VERSION
+	@export ETCD_VERSION PDNS_VERSION STARTUP_TIMEOUT
 	go test -tags integration -count=1 $(TEST_EXTRA_ARGS) ./src
 
 integration-tests+coverage:
-	@export ETCD_VERSION PDNS_VERSION
+	@export ETCD_VERSION PDNS_VERSION STARTUP_TIMEOUT
 	-go test -tags integration -count=1 -coverprofile=coverage.integration.txt $(TEST_EXTRA_ARGS) ./src
 	go tool cover -html=coverage.integration.txt -o coverage.integration.html
 
 tests: unit-tests integration-tests
 
 tests+coverage:
-	@export ETCD_VERSION PDNS_VERSION
+	@export ETCD_VERSION PDNS_VERSION STARTUP_TIMEOUT
 	-go test -tags unit,integration -count=1 -coverprofile=coverage.txt $(TEST_EXTRA_ARGS) ./src
 	go tool cover -html=coverage.txt -o coverage.html
 
