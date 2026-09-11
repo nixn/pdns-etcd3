@@ -87,7 +87,7 @@ the fourth development release, considered alpha quality. Any testing is appreci
 
 ### Overview over the support of optional [PDNS features in a remote backend][pdns-remote]:
 * Primary and (Auto)Secondary: no
-  * AXFR support: not yet
+  * AXFR support: partially (currently only 'list' call)
 * DNSSEC: pre-signed yes, live-signing not yet (planned feature)
   * Metadata: yes
 * Search (web API): not yet (planned feature)

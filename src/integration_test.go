@@ -25,6 +25,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"regexp"
 	"runtime"
 	"runtime/debug"
 	"strconv"
@@ -37,6 +38,7 @@ import (
 	"github.com/docker/go-connections/nat"
 	"github.com/miekg/dns"
 	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/exec"
 	"github.com/testcontainers/testcontainers-go/wait"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -966,19 +968,36 @@ func selectByVersion[T any](version string, options map[string]T) T {
 	return options[selectedVersion]
 }
 
-func execCommand(t *testing.T, ct testcontainers.Container, cmd []string) int {
+func execCommand(t *testing.T, ct testcontainers.Container, cmd []string) (int, string) {
 	Logf(t, "executing command: %v", cmd)
-	code, reader, err := ct.Exec(context.Background(), cmd)
+	code, reader, err := ct.Exec(context.Background(), cmd, exec.Multiplexed())
 	fatalOnErr(t, "exec failed", err)
 	buf := new(strings.Builder)
 	_, err = io.Copy(buf, reader)
 	fatalOnErr(t, "copy command output", err)
 	if buf.Len() == 0 {
 		Logf(t, "command %v exited with code %d, no output", cmd, code)
-	} else {
-		Logf(t, "command %v exited with code %d, output:\n%s", cmd, code, buf.String())
+		return code, ""
 	}
-	return code
+	output := buf.String()
+	Logf(t, "command %v exited with code %d, output:\n%s", cmd, code, output)
+	return code, output
+}
+
+func checkOutput(t *testing.T, logf func(*testing.T, string, ...any), output string, patterns map[string]bool) {
+	t.Helper()
+	for pattern, asRegex := range patterns {
+		if asRegex {
+			regex := regexp.MustCompile(pattern)
+			if !regex.MatchString(output) {
+				logf(t, "output does not match regex %q", pattern)
+			}
+		} else {
+			if !strings.Contains(output, pattern) {
+				logf(t, "output does not contain pattern %q", pattern)
+			}
+		}
+	}
 }
 
 func TestMetadata(t *testing.T) {
@@ -1004,7 +1023,7 @@ func TestMetadata(t *testing.T) {
 	if !checkRun(t, "set", func(t *testing.T, _ struct{}) (any, error) {
 		domain, tld, key := "example", "net", "X-PE3-TEST"
 		fqdn := fmt.Sprintf("%s.%s", domain, tld)
-		if code := execCommand(t, pdns.Container, selectByVersion(pdns.Version, map[string][]string{
+		if code, _ := execCommand(t, pdns.Container, selectByVersion(pdns.Version, map[string][]string{
 			"34": {"pdnssec", "set-meta", fqdn, key, "a", "b"},
 			"40": {"pdnsutil", "set-meta", fqdn, key, "a", "b"},
 			"50": {"pdnsutil", "metadata", "set", fqdn, key, "a", "b"},
@@ -1021,7 +1040,7 @@ func TestMetadata(t *testing.T) {
 		}
 		domain, tld, key := "example", "net", "X-PE3-TEST"
 		fqdn := fmt.Sprintf("%s.%s", domain, tld)
-		if code := execCommand(t, pdns.Container, selectByVersion(pdns.Version, map[string][]string{
+		if code, _ := execCommand(t, pdns.Container, selectByVersion(pdns.Version, map[string][]string{
 			"34": {"pdnssec", "add-meta", fqdn, key, "c", "d"},
 			"40": {"pdnsutil", "add-meta", fqdn, key, "c", "d"},
 			"50": {"pdnsutil", "metadata", "add", fqdn, key, "c", "d"},
@@ -1033,7 +1052,7 @@ func TestMetadata(t *testing.T) {
 	if !checkRun(t, "replace", func(t *testing.T, _ struct{}) (any, error) {
 		domain, tld, key := "example", "net", "X-PE3-TEST"
 		fqdn := fmt.Sprintf("%s.%s", domain, tld)
-		if code := execCommand(t, pdns.Container, selectByVersion(pdns.Version, map[string][]string{
+		if code, _ := execCommand(t, pdns.Container, selectByVersion(pdns.Version, map[string][]string{
 			"34": {"pdnssec", "set-meta", fqdn, key, "x", "y"},
 			"40": {"pdnsutil", "set-meta", fqdn, key, "x", "y"},
 			"50": {"pdnsutil", "metadata", "set", fqdn, key, "x", "y"},
@@ -1047,7 +1066,7 @@ func TestMetadata(t *testing.T) {
 	checkRun(t, "get", func(t *testing.T, _ struct{}) (any, error) {
 		domain, tld, key := "example", "net", "X-PE3-TEST"
 		fqdn := fmt.Sprintf("%s.%s", domain, tld)
-		if code := execCommand(t, pdns.Container, selectByVersion(pdns.Version, map[string][]string{
+		if code, _ := execCommand(t, pdns.Container, selectByVersion(pdns.Version, map[string][]string{
 			"34": {"pdnssec", "get-meta", fqdn, key},
 			"40": {"pdnsutil", "get-meta", fqdn, key},
 			"50": {"pdnsutil", "metadata", "get", fqdn, key},
@@ -1056,4 +1075,43 @@ func TestMetadata(t *testing.T) {
 		}
 		return dataRoot.children[tld].children[domain].metadata[key], nil
 	}, struct{}{}, ve[any]{v: SliceContains{Ordered: false, All: true, Only: true, Elements: []any{"x", "y"}}}, true)
+}
+
+func TestListZone(t *testing.T) {
+	defer recoverPanicsT(t)
+	pdnsVersion := getenvT("PDNS_VERSION", fmt.Sprintf("%d", defaultPdnsVersion))[:1]
+	if pdnsVersion == "3" {
+		t.Skip("skipping ListZone test, zone content listing is not available in PDNSv3")
+	}
+	// ETCD
+	etcd, err := startETCD(t)
+	fatalOnErr(t, "start ETCD container", err)
+	defer etcd.Terminate()
+	Logf(t, "ETCD endpoint (2379): %s", etcd.Endpoint)
+	// PDNS-ETCD3
+	pe3 := startPE3(t, etcd.Endpoint, "DNS/", "-pdns-version="+pdnsVersion, "-log-level=10;data.values=2")
+	defer pe3.Terminate()
+	Logf(t, "PDNS-ETCD3 endpoint: %s", pe3.HttpAddress)
+	err = waitFor(t, "PE3 ready", func() bool { return status.serving }, 10*time.Millisecond, 30*time.Second)
+	fatalOnErr(t, "wait for PE3 ready", err)
+	rev, _ := basicDataTxn(t, pe3.Prefix)
+	waitForRevision(t, rev, "basic data loaded")
+	// PDNS
+	pdns, err := startPDNS(t, nil)
+	fatalOnErr(t, "start PDNS container", err)
+	defer pdns.Terminate()
+	Logf(t, "PDNS endpoint: %s", pdns.Endpoint)
+	if code, output := execCommand(t, pdns.Container, selectByVersion(pdns.Version, map[string][]string{
+		"40": {"pdnsutil", "list-zone", "example.net"},
+		"50": {"pdnsutil", "zone", "list", "example.net"},
+	})); code != 0 {
+		Fatalf(t, "failed to execute command, exit code: %d", code)
+	} else {
+		checkOutput(t, Errorf, output, map[string]bool{
+			`example\.net\.\s+3600\s+IN\s+SOA\s+ns1\.example\.net\.\s+horst\\\.meister\.example\.net\.\s+2\s+3600\s+1800\s+604800\s+600`: true,
+			`example\.net\.\s+3600\s+IN\s+NS\s+ns1\.example\.net\.`:                                                                      true,
+			`example\.net\.\s+3600\s+IN\s+A\s+192\.0\.2\.2`:                                                                              true,
+			`example\.net\.\s+3600\s+IN\s+AAAA\s+2001:db8::2`:                                                                            true,
+		})
+	}
 }

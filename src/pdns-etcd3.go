@@ -229,6 +229,8 @@ func (cr *pdnsClientRequest) handleRequest(ctx context.Context) {
 	switch strings.ToLower(cr.Request.Method) {
 	case "lookup":
 		result, err = cr.lookup()
+	case "list":
+		result, err = cr.list()
 	case "getalldomainmetadata":
 		result, err = cr.getAllDomainMetadata()
 	case "getdomainmetadata":

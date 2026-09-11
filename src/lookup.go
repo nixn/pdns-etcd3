@@ -184,3 +184,42 @@ func findValueOrDefault[V any](key string, values objectType[any], qtype, id str
 	}
 	return findValue[V](key, qtype, id, data, defaultsEntry, false)
 }
+
+func (cr *pdnsClientRequest) list() (any, error) {
+	name := ParseDomainName(strings.ToLower(cr.Request.Parameters["zonename"].(string)))
+	lockDebug := cr.Logf(4, "data", "locking")
+	lockDebug("list: RLocking up to %q", Supplier1(name.asKey, true))()
+	data, found := dataRoot.getChild(name, true)
+	lockDebug("list: RLocked %q", data.getQname)(data.LockCounts)
+	defer func() {
+		lockDebug("list: RUnlocking %q", data.getQname)(data.LockCounts)
+		data.rUnlockUpwards(nil, true)
+	}()
+	cr.Client.Logf(2, "data")("list: search returned %q", data.getQname)(name.normal)
+	if !found {
+		cr.Client.Logf(1, "data")("list: no such domain")(name.normal)
+		return []any{}, nil
+	}
+	return cr.listZone(data, []objectType[any]{}, lockDebug), nil
+}
+
+func (cr *pdnsClientRequest) listZone(data *dataNode, result []objectType[any], lockDebug func(string, ...any) func(...any)) []objectType[any] {
+	name := data.getName()
+	cr.Logf(2, "main")("listZone: adding records")(name.normal)
+	for qtype, records := range data.records {
+		for _, record := range records {
+			result = append(result, makeResultItem(name, qtype, data, &record, cr.Client.PdnsVersion))
+		}
+	}
+	for _, child := range data.children {
+		func() {
+			lockDebug("listZone: RLocking child %q", child.lname)()
+			child.RLock(true)
+			lockDebug("listZone: RLocked child %q", child.lname)(child.LockCounts)
+			defer child.RUnlock(true)
+			defer lockDebug("listZone: RUnlocking child %q", child.lname)(child.LockCounts)
+			result = cr.listZone(child, result, lockDebug)
+		}()
+	}
+	return result
+}
